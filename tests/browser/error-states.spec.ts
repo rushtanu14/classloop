@@ -34,7 +34,7 @@ function privateLogPattern() {
 }
 
 test.describe("user-visible error states and recovery", () => {
-  test("startup loader outlines workspace data while shared state is pending", async ({ page }, testInfo) => {
+  test("startup loader stays compact while shared state is pending", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "chromium", "Runs once because it intentionally delays shared-state startup.");
     await page.route("**/api/state", async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 1_200));
@@ -47,11 +47,9 @@ test.describe("user-visible error states and recovery", () => {
 
     await page.goto("/#/dashboard");
     await expect(page.getByRole("heading", { name: /loading classloop/i })).toBeVisible();
-    await expect(page.getByLabel(/workspace data outline/i)).toContainText(/Accounts/);
-    await expect(page.getByLabel(/workspace data outline/i)).toContainText(/Sessions/);
-    await expect(page.getByLabel(/workspace data outline/i)).toContainText(/Rosters/);
-    await expect(page.getByLabel(/workspace data outline/i)).toContainText(/Follow-ups/);
-    await expect(page.getByLabel(/startup status/i)).toContainText(/Workspace sync/);
+    await expect(page.getByRole("status", { name: /classloop loading/i })).toContainText(/Workspace sync/);
+    await expect(page.getByLabel(/workspace data outline/i)).toHaveCount(0);
+    await expect(page.getByLabel(/startup status/i)).toHaveCount(0);
     await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
   });
 

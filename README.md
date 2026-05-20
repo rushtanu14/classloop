@@ -175,7 +175,7 @@ npm run package:win
 npm run package:linux
 ```
 
-These scripts build both x64 and arm64 desktop artifacts where Electron Builder supports it. For macOS, the Apple silicon arm64 DMG is the default public recommendation for M-series Macs; keep the Intel x64 DMG as the fallback for older Intel Macs. The default Linux package is AppImage because macOS cross-built `.deb` output is not trustworthy enough to publish; build Debian packages separately on a Linux host with `npm run package:linux:deb` before offering `.deb` downloads. Generated installers are written to `release/` and are not committed. After packaging on a clean machine, run the first-run smoke for that host OS:
+These scripts build desktop artifacts with Electron Builder. macOS is Apple silicon arm64 only; do not publish Intel Mac builds. Windows and Linux may keep x64 and arm64 artifacts where Electron Builder supports them. The default Linux package is AppImage because macOS cross-built `.deb` output is not trustworthy enough to publish; build Debian packages separately on a Linux host with `npm run package:linux:deb` before offering `.deb` downloads. Generated installers are written to `release/` and are not committed. After packaging on a clean machine, run the first-run smoke for that host OS:
 
 ```bash
 npm run test:desktop:first-run
@@ -204,16 +204,14 @@ npm run package:mac
 
 ClassLoop's macOS build config enables hardened runtime entitlements and runs the notarization hook after signing. In free mode, missing Apple credentials are allowed. In Developer ID mode, missing credentials fail packaging instead of silently producing an ad-hoc app.
 
-For public distribution, upload signed/notarized release files to GitHub Releases, Cloudflare R2, S3, or another trusted large-file download host, then set `public/classloop-downloads.json`. When both macOS architectures exist, set `macos.url` and `macos.arm64Url` to the Apple silicon DMG so browser-detected macOS visitors get the M-series installer first; keep Intel under `macos.x64Url`.
+For public distribution, upload signed/notarized release files to GitHub Releases, Cloudflare R2, S3, or another trusted large-file download host, then set `public/classloop-downloads.json`. For macOS, set only the Apple silicon DMG/ZIP fields; leave Intel Mac fields absent so the public site does not advertise unsupported Mac installers.
 
 ```json
 {
   "checksumsUrl": "https://example.com/SHA256SUMS.txt",
   "macos": {
     "url": "https://example.com/ClassLoop-0.1.0-arm64.dmg",
-    "x64Url": "https://example.com/ClassLoop-0.1.0.dmg",
     "arm64Url": "https://example.com/ClassLoop-0.1.0-arm64.dmg",
-    "x64ZipUrl": "https://example.com/ClassLoop-0.1.0-mac.zip",
     "arm64ZipUrl": "https://example.com/ClassLoop-0.1.0-arm64-mac.zip"
   },
   "windows": {

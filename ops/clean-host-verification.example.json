@@ -2,15 +2,6 @@
   "version": "0.1.0",
   "checks": [
     {
-      "target": "macos-x64",
-      "status": "pass",
-      "verifiedAt": "2026-05-15T00:00:00.000Z",
-      "host": "Fresh macOS x64 user or VM description",
-      "artifact": "release/ClassLoop-0.1.0.dmg",
-      "command": "npm run test:desktop:first-run -- release/mac/ClassLoop.app/Contents/MacOS/ClassLoop",
-      "notes": "Record Gatekeeper result, notarization/stapling result, and any first-run prompts here."
-    },
-    {
       "target": "macos-arm64",
       "status": "pass",
       "verifiedAt": "2026-05-15T00:00:00.000Z",

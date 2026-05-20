@@ -8,7 +8,7 @@ ClassLoop desktop releases are manual download/install releases. The app does no
 npm run drill:rollback
 ```
 
-The drill is non-destructive. It verifies the local `release/` artifacts and update metadata for macOS, Windows, and Linux across x64 and arm64 where packaged, inspects each unpacked `app.asar`, and writes a simulated bad-release quarantine manifest in a temporary directory.
+The drill is non-destructive. It verifies the local `release/` artifacts and update metadata for macOS arm64 plus Windows and Linux across x64 and arm64 where packaged, inspects each unpacked `app.asar`, and writes a simulated bad-release quarantine manifest in a temporary directory.
 
 Pass criteria:
 

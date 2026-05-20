@@ -33,7 +33,7 @@
     "drill:incidents": "node scripts/drill-incident-response.cjs",
     "drill:ops": "npm run drill:rollback && npm run drill:incidents",
     "package": "npm run build && electron-builder",
-    "package:mac": "npm run build && electron-builder --mac dmg zip --x64 --arm64",
+    "package:mac": "npm run build && electron-builder --mac dmg zip --arm64",
     "package:win": "npm run build && electron-builder --win nsis zip --x64 --arm64",
     "package:linux": "npm run build && electron-builder --linux AppImage --x64 --arm64",
     "package:linux:deb": "npm run build && electron-builder --linux deb --x64 --arm64",

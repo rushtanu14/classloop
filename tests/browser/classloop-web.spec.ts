@@ -118,6 +118,7 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
     await expect(appleSiliconDmg).toBeVisible();
     await expect(appleSiliconDmg).toContainText(/Recommended default/i);
     await expect(appleSiliconDmg).toContainText(/M-series Macs arm64 installer/i);
+    await expect(platformDownloads.getByRole("button", { name: /macOS \(Intel/i })).toHaveCount(0);
   }
 
   const manifest = await page.request.get("/manifest.webmanifest");

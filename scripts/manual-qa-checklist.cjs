@@ -40,7 +40,7 @@ const sections = [
       "Open `/?demoOnly=1` and capture screenshots of the demo chooser + teacher dashboard (demo banner visible).",
       "On a clean phone (Safari/Chrome), open the hosted URL and capture screenshots of the Add to phone flow and standalone mode if installed.",
       "Run one redacted real-class solo simulation (or single-teacher pilot) through import -> review -> publish and capture notes/screenshots of any confusing steps.",
-      "On matching clean hosts (macOS x64/arm64, Windows x64/arm64, Linux x64/arm64), capture screenshots of the OS trust prompt and the first-run dashboard after launching the installer.",
+      "On matching clean hosts (macOS arm64, Windows x64/arm64, Linux x64/arm64), capture screenshots of the OS trust prompt and the first-run dashboard after launching the installer.",
       "Download `SHA256SUMS.txt` from the external release host, not Vercel Blob, and record checksum verification output for at least one installer per OS family (macOS/Windows/Linux).",
     ],
   ],
@@ -100,7 +100,7 @@ const sections = [
     "Desktop Installers And Clean Hosts",
     "Computer Use on clean macOS/Windows/Linux hosts",
     [
-      "Build or install macOS x64/arm64, Windows x64/arm64 where supported, and Linux x64/arm64 artifacts on matching clean machines.",
+      "Build or install macOS arm64, Windows x64/arm64 where supported, and Linux x64/arm64 artifacts on matching clean machines.",
       "Launch first-run, create account, confirm `.classloop-data.json` and `.classloop-storage-key` live in user data, relaunch, and sign back in.",
       "Inspect signing/notarization/Gatekeeper/SmartScreen/AppImage warnings and whether they block a normal teacher; only inspect `.deb` installers if they were built on a Linux host.",
       "Do not publish desktop installers until signed/notarized macOS first-run passes and Windows/Linux first-run is verified on matching clean machines.",

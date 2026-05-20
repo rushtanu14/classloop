@@ -2875,10 +2875,8 @@ function LandingPage({
   };
 
   const macArm64Url = cleanExternalReleaseUrl(releaseDownloads.macos?.arm64Url);
-  const macX64Url = cleanExternalReleaseUrl(releaseDownloads.macos?.x64Url);
   const macUrl = cleanExternalReleaseUrl(releaseDownloads.macos?.url);
   const macArm64ZipUrl = cleanExternalReleaseUrl(releaseDownloads.macos?.arm64ZipUrl);
-  const macX64ZipUrl = cleanExternalReleaseUrl(releaseDownloads.macos?.x64ZipUrl);
   const macZipUrl = cleanExternalReleaseUrl(releaseDownloads.macos?.zipUrl);
   const macOptions: DesktopDownloadOption[] = [];
   if (macArm64Url) {
@@ -2890,14 +2888,6 @@ function LandingPage({
       url: macArm64Url,
     });
   }
-  if (macX64Url) {
-    macOptions.push({
-      id: "macos",
-      label: "macOS (Intel DMG)",
-      helper: "Intel Macs x64 fallback",
-      url: macX64Url,
-    });
-  }
   if (macArm64ZipUrl) {
     macOptions.push({
       id: "macos",
@@ -2906,19 +2896,11 @@ function LandingPage({
       url: macArm64ZipUrl,
     });
   }
-  if (macX64ZipUrl) {
-    macOptions.push({
-      id: "macos",
-      label: "macOS (Intel ZIP)",
-      helper: "Intel Macs archive",
-      url: macX64ZipUrl,
-    });
-  }
-  if (!macArm64ZipUrl && !macX64ZipUrl && macZipUrl) {
+  if (!macArm64ZipUrl && macZipUrl) {
     macOptions.push({
       id: "macos",
       label: "macOS ZIP",
-      helper: "Universal archive when available",
+      helper: "Apple silicon archive when available",
       url: macZipUrl,
     });
   }
@@ -2926,7 +2908,7 @@ function LandingPage({
     macOptions.push({
       id: "macos",
       label: "macOS",
-      helper: "Apple silicon and Intel Macs",
+      helper: "Apple silicon Macs",
       url: macUrl,
     });
   }
@@ -3032,7 +3014,7 @@ function LandingPage({
           : null;
   const detectedInstallerCopy = detectedDownload
     ? detectedDownload.id === "macos" && macArm64Url
-      ? "ClassLoop detected macOS. The Apple silicon arm64 DMG is the default installer for M-series Macs; Intel builds stay available in the full desktop list."
+      ? "ClassLoop detected macOS. The Apple silicon arm64 DMG is the available Mac installer for M-series Macs."
       : `ClassLoop detected ${detectedDownload.label} from browser hints. Use the detected installer or reveal the full desktop list.`
     : "This device looks best for the web/PWA path. You can still open desktop installers when downloading ClassLoop for another computer.";
   const publicNav: Array<{ page: LandingPageKey; label: string }> = [
@@ -4469,17 +4451,6 @@ function WorkspaceRecoveryNotice({ notice }: { notice: WorkspaceNotice }) {
   );
 }
 
-function bootStatusText(status: BootStepStatus) {
-  const labels: Record<BootStepStatus, string> = {
-    pending: "Pending",
-    active: "Loading",
-    complete: "Ready",
-    warning: "Fallback",
-    error: "Needs attention",
-  };
-  return labels[status];
-}
-
 function AppLoader({
   message,
   steps,
@@ -4490,49 +4461,28 @@ function AppLoader({
   notice?: WorkspaceNotice | null;
 }) {
   const tip = loadingTips[Math.floor(Date.now() / 1000) % loadingTips.length];
-  const outline = [
-    ["Accounts", "Teacher and student profiles"],
-    ["Sessions", "Drafts, published recaps, attendance"],
-    ["Rosters", "Saved classes and reusable templates"],
-    ["Follow-ups", "Student tasks, resources, completion"],
-    ["Settings", "Privacy, theme, sync and plan state"],
-  ];
+  const currentStep =
+    steps.find((step) => ["error", "warning", "active"].includes(step.status)) ??
+    steps.find((step) => step.status === "pending") ??
+    steps[steps.length - 1];
   return (
-    <main className="app-loader" aria-live="polite">
-      <div className="loader-card">
-        <span className="loader-ring">
+    <main className="app-loader" aria-busy="true" aria-live="polite">
+      <section className="loader-card" role="status" aria-label="ClassLoop loading">
+        <span className="loader-ring" aria-hidden="true">
           <BrainCircuit size={30} />
         </span>
         <span className="eyebrow">ClassLoop</span>
         <h1>{message}</h1>
-        <p>{tip}</p>
+        <p className="loader-status">
+          <strong>{currentStep?.label ?? "Preparing workspace"}</strong>
+          <span>{currentStep?.detail ?? "Getting the app ready."}</span>
+        </p>
         {notice && <WorkspaceRecoveryNotice notice={notice} />}
-        <div className="loader-data-outline" aria-label="Workspace data outline">
-          {outline.map(([label, detail]) => (
-            <div className="loader-outline-row" key={label}>
-              <span>
-                <strong>{label}</strong>
-                <small>{detail}</small>
-              </span>
-              <i aria-hidden="true" />
-            </div>
-          ))}
-        </div>
-        <ol className="loader-steps" aria-label="Startup status">
-          {steps.map((step) => (
-            <li className={`loader-step ${step.status}`} key={step.label}>
-              <span>{bootStatusText(step.status)}</span>
-              <div>
-                <strong>{step.label}</strong>
-                <small>{step.detail}</small>
-              </div>
-            </li>
-          ))}
-        </ol>
         <div className="loader-track" aria-hidden="true">
           <i />
         </div>
-      </div>
+        <p className="loader-tip">{tip}</p>
+      </section>
     </main>
   );
 }

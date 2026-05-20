@@ -29,42 +29,36 @@ function candidateProductNames() {
 function buildTargets(productName) {
   const linuxPackageName = productName.toLowerCase();
   return [
-  {
-    id: "macos-x64",
-    label: "macOS x64",
-    appPath: `release/mac/${productName}.app`,
-    artifacts: [`release/${productName}-${version}.dmg`, `release/${productName}-${version}-mac.zip`],
-  },
-  {
-    id: "macos-arm64",
-    label: "macOS arm64",
-    appPath: `release/mac-arm64/${productName}.app`,
-    artifacts: [`release/${productName}-${version}-arm64.dmg`, `release/${productName}-${version}-arm64-mac.zip`],
-  },
-  {
-    id: "windows-x64",
-    label: "Windows x64",
-    executable: `release/win-unpacked/${productName}.exe`,
-    artifacts: [`release/${productName} Setup ${version}.exe`, `release/${productName}-${version}-win.zip`],
-  },
-  {
-    id: "windows-arm64",
-    label: "Windows arm64",
-    executable: `release/win-arm64-unpacked/${productName}.exe`,
-    artifacts: [`release/${productName}-${version}-arm64-win.zip`],
-  },
-  {
-    id: "linux-x64",
-    label: "Linux x64",
-    executable: `release/linux-unpacked/${linuxPackageName}`,
-    artifacts: [`release/${productName}-${version}.AppImage`],
-  },
-  {
-    id: "linux-arm64",
-    label: "Linux arm64",
-    executable: `release/linux-arm64-unpacked/${linuxPackageName}`,
-    artifacts: [`release/${productName}-${version}-arm64.AppImage`],
-  },
+    {
+      id: "macos-arm64",
+      label: "macOS arm64",
+      appPath: `release/mac-arm64/${productName}.app`,
+      artifacts: [`release/${productName}-${version}-arm64.dmg`, `release/${productName}-${version}-arm64-mac.zip`],
+    },
+    {
+      id: "windows-x64",
+      label: "Windows x64",
+      executable: `release/win-unpacked/${productName}.exe`,
+      artifacts: [`release/${productName} Setup ${version}.exe`, `release/${productName}-${version}-win.zip`],
+    },
+    {
+      id: "windows-arm64",
+      label: "Windows arm64",
+      executable: `release/win-arm64-unpacked/${productName}.exe`,
+      artifacts: [`release/${productName}-${version}-arm64-win.zip`],
+    },
+    {
+      id: "linux-x64",
+      label: "Linux x64",
+      executable: `release/linux-unpacked/${linuxPackageName}`,
+      artifacts: [`release/${productName}-${version}.AppImage`],
+    },
+    {
+      id: "linux-arm64",
+      label: "Linux arm64",
+      executable: `release/linux-arm64-unpacked/${linuxPackageName}`,
+      artifacts: [`release/${productName}-${version}-arm64.AppImage`],
+    },
   ];
 }
 

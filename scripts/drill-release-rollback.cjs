@@ -11,8 +11,6 @@ const productName = packageJson.build?.productName || "ClassLoop";
 const rollbackTarget = process.argv[2] || process.env.CLASSLOOP_ROLLBACK_TARGET_VERSION || "last-known-good";
 
 const requiredArtifacts = [
-  { rel: `${productName}-${version}.dmg`, label: "macOS x64 DMG", minBytes: 10 * 1024 * 1024 },
-  { rel: `${productName}-${version}-mac.zip`, label: "macOS x64 ZIP", minBytes: 10 * 1024 * 1024 },
   { rel: `${productName}-${version}-arm64.dmg`, label: "macOS arm64 DMG", minBytes: 10 * 1024 * 1024 },
   { rel: `${productName}-${version}-arm64-mac.zip`, label: "macOS arm64 ZIP", minBytes: 10 * 1024 * 1024 },
   { rel: `${productName} Setup ${version}.exe`, label: "Windows x64 NSIS installer", minBytes: 10 * 1024 * 1024 },
@@ -32,11 +30,6 @@ const optionalArtifacts = [
 ];
 
 const platformTargets = [
-  {
-    id: "macOS x64",
-    executable: path.join("release", "mac", `${productName}.app`, "Contents", "MacOS", productName),
-    appAsar: path.join("release", "mac", `${productName}.app`, "Contents", "Resources", "app.asar"),
-  },
   {
     id: "macOS arm64",
     executable: path.join("release", "mac-arm64", `${productName}.app`, "Contents", "MacOS", productName),

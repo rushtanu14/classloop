@@ -23,7 +23,10 @@ const buildSha =
   process.env.CF_PAGES_COMMIT_SHA ||
   safeExec("git rev-parse HEAD");
 const buildEnv = process.env.VERCEL_ENV || process.env.NODE_ENV || "";
-const buildTime = process.env.CLASSLOOP_BUILD_TIME || new Date().toISOString();
+const buildTime =
+  process.env.CLASSLOOP_BUILD_TIME ||
+  process.env.VERCEL_GIT_COMMIT_TIMESTAMP ||
+  safeExec("git log -1 --format=%cI");
 
 export default defineConfig({
   plugins: [react()],

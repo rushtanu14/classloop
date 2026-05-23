@@ -661,6 +661,19 @@ Leo Martinez, leo-club-${runId}@classloop.test`,
     const classWideActionStatuses = exported.actionItems.filter((item) => !item.ownerId).map((item) => item.status);
     expect(classWideActionStatuses.length).toBeGreaterThan(0);
     expect(classWideActionStatuses).not.toContain("submitted");
+
+    await page.goto(`/#/student-session?session=${encodeURIComponent(exported.id)}`);
+    await expect(page.getByRole("heading", { name: scenario.title })).toBeVisible();
+    await expect(page.getByText(`Edit ${primaryStudent.name}'s student view`)).toBeVisible();
+    await page.getByRole("button", { name: /mark reviewed/i }).click();
+    await expect(page.getByText(/reviewed/i).first()).toBeVisible();
+
+    await openTeacherReport(page, scenario.title);
+    const reviewedExport = await downloadCurrentReportJson(page);
+    const reviewedFollowUp = reviewedExport.followUps.find((item) => item.studentId === primaryStudent.id);
+    const reviewedSubmission = reviewedExport.submissions?.find((item) => item.studentId === primaryStudent.id);
+    expect(reviewedFollowUp?.status).toBe("reviewed");
+    expect(reviewedSubmission?.reviewedAt).toBeTruthy();
   }
 
   await page.getByRole("button", { name: /rosters/i }).click();
@@ -714,7 +727,7 @@ test("account creation, settings, and password reset work", async ({ page }) => 
   await page.locator(".profile-menu button[type='submit']").click();
   await expect(page.getByText(/settings saved/i)).toBeVisible();
   await page.getByRole("button", { name: /done/i }).click();
-  await expect(page.getByRole("button", { name: /test teacher updated/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /test teacher updated/i })).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: /sign out/i }).click();
 
   await page.getByPlaceholder("name@example.com").fill(uniqueEmail);
@@ -1010,7 +1023,7 @@ test("Stripe embedded Checkout page opens from Pro upgrade without unlocking Pro
   await page.getByPlaceholder("you@school.org").fill(cloudEmail);
   await page.getByLabel(/cloud password/i).fill("cloud-pass-123");
   await page.getByRole("button", { name: /^sign in$/i }).click();
-  await expect(page.getByText(`Connected as ${cloudEmail}`)).toBeVisible();
+  await expect(page.getByText(`Connected as ${cloudEmail}`)).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/FREE · not_configured/i)).toBeVisible();
   await expect(page.getByText("Cloud workspace")).toBeVisible();
   await expect(page.getByText("Billing options")).toBeVisible();

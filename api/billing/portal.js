@@ -1,11 +1,14 @@
-import { json, originUrl, requireUser } from "../_shared.js";
+import { assertIpRateLimit, json, methodNotAllowed, originUrl, requireUser, sendApiError } from "../_shared.js";
 import { createStripeClient } from "./stripe-client.js";
 
-export default async function handler(request, response) {
-  if (request.method !== "POST") return json(response, 405, { error: "Method not allowed." });
+const PORTAL_RATE_LIMIT = { endpoint: "billing-portal", limit: 30, windowMs: 10 * 60 * 1000 };
+const PORTAL_USER_RATE_LIMIT = { endpoint: "billing-portal", limit: 20, windowMs: 10 * 60 * 1000 };
 
+export default async function handler(request, response) {
   try {
-    const { supabase, user } = await requireUser(request);
+    assertIpRateLimit(request, response, PORTAL_RATE_LIMIT);
+    if (request.method !== "POST") return methodNotAllowed(response, ["POST"]);
+    const { supabase, user } = await requireUser(request, response, { rateLimit: PORTAL_USER_RATE_LIMIT });
     const stripe = createStripeClient();
     const { data: profile, error } = await supabase
       .from("classloop_profiles")
@@ -25,6 +28,6 @@ export default async function handler(request, response) {
 
     return json(response, 200, { url: portal.url });
   } catch (error) {
-    return json(response, error.statusCode || 500, { error: error.message || "Unable to open billing portal." });
+    return sendApiError(response, error, "Unable to open billing portal.");
   }
 }

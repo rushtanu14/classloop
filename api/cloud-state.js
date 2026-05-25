@@ -1,8 +1,14 @@
-import { json, requireUser } from "./_shared.js";
+import { assertIpRateLimit, json, methodNotAllowed, readJsonBody, requireUser, sendApiError } from "./_shared.js";
+import { validateCloudWorkspaceStatePayload } from "./validators.js";
+
+const CLOUD_STATE_RATE_LIMIT = { endpoint: "cloud-state", limit: 120, windowMs: 60 * 1000 };
+const CLOUD_STATE_BODY_MAX_BYTES = 3_500_000;
 
 export default async function handler(request, response) {
   try {
-    const { supabase, user } = await requireUser(request);
+    assertIpRateLimit(request, response, CLOUD_STATE_RATE_LIMIT);
+    if (!["GET", "PUT"].includes(request.method)) return methodNotAllowed(response, ["GET", "PUT"]);
+    const { supabase, user } = await requireUser(request, response, { rateLimit: CLOUD_STATE_RATE_LIMIT });
 
     if (request.method === "GET") {
       const { data, error } = await supabase
@@ -15,7 +21,12 @@ export default async function handler(request, response) {
     }
 
     if (request.method === "PUT") {
-      const payload = request.body && typeof request.body === "object" ? request.body : {};
+      const payload = validateCloudWorkspaceStatePayload(
+        await readJsonBody(request, {
+          maxBytes: CLOUD_STATE_BODY_MAX_BYTES,
+          name: "Cloud workspace state",
+        }),
+      );
       const { error } = await supabase.from("classloop_workspace_state").upsert({
         owner_id: user.id,
         state: payload,
@@ -25,8 +36,8 @@ export default async function handler(request, response) {
       return json(response, 200, { ok: true, updatedAt: new Date().toISOString() });
     }
 
-    return json(response, 405, { error: "Method not allowed." });
+    return methodNotAllowed(response, ["GET", "PUT"]);
   } catch (error) {
-    return json(response, error.statusCode || 500, { error: error.message || "Cloud sync failed." });
+    return sendApiError(response, error, "Cloud sync failed.");
   }
 }

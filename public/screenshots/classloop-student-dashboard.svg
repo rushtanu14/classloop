@@ -4,23 +4,23 @@
   <defs><linearGradient id="bg" x1="0" x2="1"><stop offset="0" stop-color="#f0fdfa"/><stop offset="1" stop-color="#f8fafc"/></linearGradient><filter id="shadow"><feDropShadow dx="0" dy="20" stdDeviation="24" flood-color="#0f172a" flood-opacity=".16"/></filter></defs>
   <rect width="1440" height="960" rx="42" fill="url(#bg)"/>
   <rect x="92" y="80" width="1256" height="800" rx="34" fill="#fff" filter="url(#shadow)"/>
-  <text x="152" y="150" font-family="Inter,Arial" font-size="30" font-weight="850" fill="#0f172a">Maya’s ClassLoop</text>
-  <rect x="1132" y="116" width="156" height="44" rx="22" fill="#dcfce7"/><text x="1162" y="144" font-family="Inter,Arial" font-size="15" font-weight="800" fill="#166534">2 tasks due</text>
+  <text x="152" y="150" font-family="Plus Jakarta Sans,Avenir Next" font-size="30" font-weight="850" fill="#0f172a">Maya’s ClassLoop</text>
+  <rect x="1132" y="116" width="156" height="44" rx="22" fill="#dcfce7"/><text x="1162" y="144" font-family="Plus Jakarta Sans,Avenir Next" font-size="15" font-weight="800" fill="#166534">2 tasks due</text>
   <rect x="152" y="206" width="700" height="220" rx="26" fill="#ecfdf5" stroke="#bbf7d0"/>
-  <text x="190" y="264" font-family="Inter,Arial" font-size="24" font-weight="850" fill="#064e3b">Today’s class recap</text>
-  <text x="190" y="306" font-family="Inter,Arial" font-size="17" fill="#335d56">We explored algorithms, precise instructions, and decomposition using the PB&amp;J robot activity.</text>
-  <text x="190" y="350" font-family="Inter,Arial" font-size="17" fill="#335d56">Next: complete the worksheet and review the short decomposition video before Thursday.</text>
-  <rect x="190" y="374" width="176" height="34" rx="17" fill="#0f766e"/><text x="220" y="397" font-family="Inter,Arial" font-size="14" font-weight="800" fill="#fff">Mark reviewed</text>
+  <text x="190" y="264" font-family="Plus Jakarta Sans,Avenir Next" font-size="24" font-weight="850" fill="#064e3b">Today’s class recap</text>
+  <text x="190" y="306" font-family="Plus Jakarta Sans,Avenir Next" font-size="17" fill="#335d56">We explored algorithms, precise instructions, and decomposition using the PB&amp;J robot activity.</text>
+  <text x="190" y="350" font-family="Plus Jakarta Sans,Avenir Next" font-size="17" fill="#335d56">Next: complete the worksheet and review the short decomposition video before Thursday.</text>
+  <rect x="190" y="374" width="176" height="34" rx="17" fill="#0f766e"/><text x="220" y="397" font-family="Plus Jakarta Sans,Avenir Next" font-size="14" font-weight="800" fill="#fff">Mark reviewed</text>
   <rect x="892" y="206" width="396" height="220" rx="26" fill="#f8fafc" stroke="#dbe7e4"/>
-  <text x="930" y="264" font-family="Inter,Arial" font-size="23" font-weight="850" fill="#0f172a">Your check-in</text>
+  <text x="930" y="264" font-family="Plus Jakarta Sans,Avenir Next" font-size="23" font-weight="850" fill="#0f172a">Your check-in</text>
   <rect x="930" y="302" width="318" height="20" rx="10" fill="#dbeafe"/><rect x="930" y="302" width="220" height="20" rx="10" fill="#10b981"/>
-  <text x="930" y="356" font-family="Inter,Arial" font-size="16" fill="#64748b">2 of 3 follow-up items complete</text>
+  <text x="930" y="356" font-family="Plus Jakarta Sans,Avenir Next" font-size="16" fill="#64748b">2 of 3 follow-up items complete</text>
   <rect x="152" y="474" width="1136" height="292" rx="26" fill="#f8fafc" stroke="#dbe7e4"/>
-  <text x="190" y="528" font-family="Inter,Arial" font-size="24" font-weight="850" fill="#0f172a">Assigned next steps</text>
-  <g font-family="Inter,Arial">
+  <text x="190" y="528" font-family="Plus Jakarta Sans,Avenir Next" font-size="24" font-weight="850" fill="#0f172a">Assigned next steps</text>
+  <g font-family="Plus Jakarta Sans,Avenir Next">
     <rect x="190" y="566" width="324" height="142" rx="20" fill="#fff" stroke="#dbe7e4"/><circle cx="226" cy="604" r="16" fill="#10b981"/><text x="258" y="610" font-size="17" font-weight="850" fill="#0f172a">Algorithm worksheet</text><text x="218" y="648" font-size="15" fill="#64748b">Due Thursday</text><text x="218" y="676" font-size="15" fill="#64748b">Pick 2 of 3 flowchart prompts</text>
     <rect x="558" y="566" width="324" height="142" rx="20" fill="#fff" stroke="#dbe7e4"/><circle cx="594" cy="604" r="16" fill="#38bdf8"/><text x="626" y="610" font-size="17" font-weight="850" fill="#0f172a">Decomposition video</text><text x="586" y="648" font-size="15" fill="#64748b">5-minute resource</text><text x="586" y="676" font-size="15" fill="#64748b">Review before next Python lesson</text>
     <rect x="926" y="566" width="324" height="142" rx="20" fill="#fff" stroke="#dbe7e4"/><circle cx="962" cy="604" r="16" fill="#f59e0b"/><text x="994" y="610" font-size="17" font-weight="850" fill="#0f172a">Exit ticket</text><text x="954" y="648" font-size="15" fill="#64748b">Ask teacher if stuck</text><text x="954" y="676" font-size="15" fill="#64748b">No public ranking or comparison</text>
   </g>
-  <text x="152" y="828" font-family="Inter,Arial" font-size="16" font-weight="800" fill="#0f766e">Student view only shows the tasks, resources, and recap the teacher approved.</text>
+  <text x="152" y="828" font-family="Plus Jakarta Sans,Avenir Next" font-size="16" font-weight="800" fill="#0f766e">Student view only shows the tasks, resources, and recap the teacher approved.</text>
 </svg>

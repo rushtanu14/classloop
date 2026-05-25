@@ -1,5 +1,19 @@
-import { json, originUrl, requireUser, requiredEnv } from "../_shared.js";
+import {
+  assertIpRateLimit,
+  json,
+  methodNotAllowed,
+  originUrl,
+  readJsonBody,
+  requireUser,
+  requiredEnv,
+  sendApiError,
+} from "../_shared.js";
+import { validateCheckoutPayload } from "../validators.js";
 import { createStripeClient } from "./stripe-client.js";
+
+const CHECKOUT_RATE_LIMIT = { endpoint: "billing-checkout", limit: 30, windowMs: 10 * 60 * 1000 };
+const CHECKOUT_USER_RATE_LIMIT = { endpoint: "billing-checkout", limit: 10, windowMs: 10 * 60 * 1000 };
+const CHECKOUT_BODY_MAX_BYTES = 1_000;
 
 export function checkoutReturnUrls(baseUrl) {
   return {
@@ -12,27 +26,19 @@ export function embeddedCheckoutReturnUrl(baseUrl) {
   return `${baseUrl}/#/checkout?billing=success`;
 }
 
-async function readCheckoutBody(request) {
-  const chunks = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  if (!chunks.length) return {};
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    return {};
-  }
-}
-
 export default async function handler(request, response) {
-  if (request.method !== "POST") return json(response, 405, { error: "Method not allowed." });
-
   try {
-    const body = await readCheckoutBody(request);
-    const { supabase, user } = await requireUser(request);
+    assertIpRateLimit(request, response, CHECKOUT_RATE_LIMIT);
+    if (request.method !== "POST") return methodNotAllowed(response, ["POST"]);
+    const { supabase, user } = await requireUser(request, response, { rateLimit: CHECKOUT_USER_RATE_LIMIT });
+    const body = validateCheckoutPayload(
+      await readJsonBody(request, {
+        maxBytes: CHECKOUT_BODY_MAX_BYTES,
+        name: "Checkout request",
+      }),
+    );
     const stripe = createStripeClient();
-    const tier = "pro";
+    const tier = body.tier;
     const price = requiredEnv("STRIPE_PRO_PRICE_ID");
     const baseUrl = process.env.CLASSLOOP_PUBLIC_URL || originUrl(request);
     const embedded = body?.uiMode === "embedded";
@@ -88,6 +94,6 @@ export default async function handler(request, response) {
 
     return json(response, 200, embedded ? { clientSecret: checkout.client_secret } : { url: checkout.url });
   } catch (error) {
-    return json(response, error.statusCode || 500, { error: error.message || "Unable to create checkout session." });
+    return sendApiError(response, error, "Unable to create checkout session.");
   }
 }

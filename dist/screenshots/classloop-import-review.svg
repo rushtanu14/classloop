@@ -8,29 +8,29 @@
   <rect width="1440" height="960" rx="42" fill="url(#bg)"/>
   <rect x="70" y="72" width="1300" height="816" rx="34" fill="#fff" filter="url(#shadow)"/>
   <rect x="70" y="72" width="250" height="816" rx="34" fill="#073b3a"/>
-  <circle cx="120" cy="126" r="22" fill="#10b981"/><text x="154" y="136" font-family="Inter,Arial" font-size="30" font-weight="800" fill="#fff">ClassLoop</text>
-  <text x="106" y="210" font-family="Inter,Arial" font-size="16" font-weight="700" fill="#9ce7d4">TEACHER WORKSPACE</text>
-  <rect x="98" y="242" width="194" height="48" rx="14" fill="#10b981"/><text x="128" y="273" font-family="Inter,Arial" font-size="17" font-weight="800" fill="#fff">Import class</text>
-  <text x="126" y="338" font-family="Inter,Arial" font-size="18" fill="#d1fae5">Sessions</text>
-  <text x="126" y="392" font-family="Inter,Arial" font-size="18" fill="#d1fae5">Students</text>
-  <text x="126" y="446" font-family="Inter,Arial" font-size="18" fill="#d1fae5">Analytics</text>
-  <text x="126" y="500" font-family="Inter,Arial" font-size="18" fill="#d1fae5">Settings</text>
-  <text x="370" y="146" font-family="Inter,Arial" font-size="38" font-weight="850" fill="#0f172a">CS4All Intro — Review before publish</text>
-  <text x="370" y="184" font-family="Inter,Arial" font-size="18" fill="#64748b">Transcript, roster, notes, and links are normalized into teacher-approved follow-ups.</text>
+  <circle cx="120" cy="126" r="22" fill="#10b981"/><text x="154" y="136" font-family="Plus Jakarta Sans,Avenir Next" font-size="30" font-weight="800" fill="#fff">ClassLoop</text>
+  <text x="106" y="210" font-family="Plus Jakarta Sans,Avenir Next" font-size="16" font-weight="700" fill="#9ce7d4">TEACHER WORKSPACE</text>
+  <rect x="98" y="242" width="194" height="48" rx="14" fill="#10b981"/><text x="128" y="273" font-family="Plus Jakarta Sans,Avenir Next" font-size="17" font-weight="800" fill="#fff">Import class</text>
+  <text x="126" y="338" font-family="Plus Jakarta Sans,Avenir Next" font-size="18" fill="#d1fae5">Sessions</text>
+  <text x="126" y="392" font-family="Plus Jakarta Sans,Avenir Next" font-size="18" fill="#d1fae5">Students</text>
+  <text x="126" y="446" font-family="Plus Jakarta Sans,Avenir Next" font-size="18" fill="#d1fae5">Analytics</text>
+  <text x="126" y="500" font-family="Plus Jakarta Sans,Avenir Next" font-size="18" fill="#d1fae5">Settings</text>
+  <text x="370" y="146" font-family="Plus Jakarta Sans,Avenir Next" font-size="38" font-weight="850" fill="#0f172a">CS4All Intro — Review before publish</text>
+  <text x="370" y="184" font-family="Plus Jakarta Sans,Avenir Next" font-size="18" fill="#64748b">Transcript, roster, notes, and links are normalized into teacher-approved follow-ups.</text>
   <rect x="370" y="230" width="410" height="280" rx="24" fill="#f8fafc" stroke="#dbe7e4"/>
-  <text x="400" y="275" font-family="Inter,Arial" font-size="20" font-weight="800" fill="#0f172a">1. Class records</text>
-  <rect x="400" y="302" width="346" height="38" rx="11" fill="#fff" stroke="#dbe7e4"/><text x="420" y="327" font-family="Inter,Arial" font-size="14" fill="#475569">Zoom transcript pasted</text>
-  <rect x="400" y="352" width="346" height="38" rx="11" fill="#fff" stroke="#dbe7e4"/><text x="420" y="377" font-family="Inter,Arial" font-size="14" fill="#475569">18-student roster matched</text>
-  <rect x="400" y="402" width="346" height="38" rx="11" fill="#fff" stroke="#dbe7e4"/><text x="420" y="427" font-family="Inter,Arial" font-size="14" fill="#475569">2 resource links detected</text>
-  <rect x="400" y="452" width="166" height="34" rx="17" fill="#dcfce7"/><text x="421" y="475" font-family="Inter,Arial" font-size="14" font-weight="800" fill="#166534">Ready to review</text>
+  <text x="400" y="275" font-family="Plus Jakarta Sans,Avenir Next" font-size="20" font-weight="800" fill="#0f172a">1. Class records</text>
+  <rect x="400" y="302" width="346" height="38" rx="11" fill="#fff" stroke="#dbe7e4"/><text x="420" y="327" font-family="Plus Jakarta Sans,Avenir Next" font-size="14" fill="#475569">Zoom transcript pasted</text>
+  <rect x="400" y="352" width="346" height="38" rx="11" fill="#fff" stroke="#dbe7e4"/><text x="420" y="377" font-family="Plus Jakarta Sans,Avenir Next" font-size="14" fill="#475569">18-student roster matched</text>
+  <rect x="400" y="402" width="346" height="38" rx="11" fill="#fff" stroke="#dbe7e4"/><text x="420" y="427" font-family="Plus Jakarta Sans,Avenir Next" font-size="14" fill="#475569">2 resource links detected</text>
+  <rect x="400" y="452" width="166" height="34" rx="17" fill="#dcfce7"/><text x="421" y="475" font-family="Plus Jakarta Sans,Avenir Next" font-size="14" font-weight="800" fill="#166534">Ready to review</text>
   <rect x="814" y="230" width="486" height="280" rx="24" fill="#f8fafc" stroke="#dbe7e4"/>
-  <text x="844" y="275" font-family="Inter,Arial" font-size="20" font-weight="800" fill="#0f172a">2. Teacher review</text>
-  <rect x="844" y="302" width="420" height="50" rx="14" fill="#fff" stroke="#dbe7e4"/><text x="866" y="333" font-family="Inter,Arial" font-size="15" fill="#334155">Essential question: What makes instructions precise?</text>
-  <rect x="844" y="366" width="420" height="50" rx="14" fill="#fff" stroke="#dbe7e4"/><text x="866" y="397" font-family="Inter,Arial" font-size="15" fill="#334155">Homework: Algorithm design worksheet due Thursday</text>
-  <rect x="844" y="430" width="194" height="42" rx="21" fill="#0f172a"/><text x="874" y="457" font-family="Inter,Arial" font-size="15" font-weight="800" fill="#fff">Publish follow-ups</text>
+  <text x="844" y="275" font-family="Plus Jakarta Sans,Avenir Next" font-size="20" font-weight="800" fill="#0f172a">2. Teacher review</text>
+  <rect x="844" y="302" width="420" height="50" rx="14" fill="#fff" stroke="#dbe7e4"/><text x="866" y="333" font-family="Plus Jakarta Sans,Avenir Next" font-size="15" fill="#334155">Essential question: What makes instructions precise?</text>
+  <rect x="844" y="366" width="420" height="50" rx="14" fill="#fff" stroke="#dbe7e4"/><text x="866" y="397" font-family="Plus Jakarta Sans,Avenir Next" font-size="15" fill="#334155">Homework: Algorithm design worksheet due Thursday</text>
+  <rect x="844" y="430" width="194" height="42" rx="21" fill="#0f172a"/><text x="874" y="457" font-family="Plus Jakarta Sans,Avenir Next" font-size="15" font-weight="800" fill="#fff">Publish follow-ups</text>
   <rect x="370" y="550" width="930" height="260" rx="24" fill="#f8fafc" stroke="#dbe7e4"/>
-  <text x="400" y="596" font-family="Inter,Arial" font-size="20" font-weight="800" fill="#0f172a">3. Personalized student follow-ups</text>
-  <g font-family="Inter,Arial">
+  <text x="400" y="596" font-family="Plus Jakarta Sans,Avenir Next" font-size="20" font-weight="800" fill="#0f172a">3. Personalized student follow-ups</text>
+  <g font-family="Plus Jakarta Sans,Avenir Next">
     <rect x="400" y="626" width="264" height="132" rx="18" fill="#fff" stroke="#dbe7e4"/><circle cx="434" cy="662" r="18" fill="#bfdbfe"/><text x="466" y="666" font-size="16" font-weight="800" fill="#0f172a">Maya Chen</text><text x="424" y="704" font-size="14" fill="#64748b">Watch algorithm video</text><text x="424" y="730" font-size="14" fill="#64748b">Complete worksheet</text>
     <rect x="690" y="626" width="264" height="132" rx="18" fill="#fff" stroke="#dbe7e4"/><circle cx="724" cy="662" r="18" fill="#fde68a"/><text x="756" y="666" font-size="16" font-weight="800" fill="#0f172a">Marcus Williams</text><text x="714" y="704" font-size="14" fill="#64748b">Missing exit ticket</text><text x="714" y="730" font-size="14" fill="#64748b">Teacher check-in needed</text>
     <rect x="980" y="626" width="264" height="132" rx="18" fill="#fff" stroke="#dbe7e4"/><circle cx="1014" cy="662" r="18" fill="#bbf7d0"/><text x="1046" y="666" font-size="16" font-weight="800" fill="#0f172a">Priya Mehta</text><text x="1004" y="704" font-size="14" fill="#64748b">Answered key question</text><text x="1004" y="730" font-size="14" fill="#64748b">Review decomposition</text>

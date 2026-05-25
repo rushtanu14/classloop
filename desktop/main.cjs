@@ -26,6 +26,11 @@ if (requestedUserDataDir) {
   app.setPath("userData", path.resolve(requestedUserDataDir));
 }
 let dataFileReadError = null;
+const localApiRateBuckets = new Map();
+const LOCAL_API_RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const LOCAL_API_RATE_LIMIT_MAX = 240;
+const LOCAL_STATE_BODY_MAX_BYTES = 8_000_000;
+const LOCAL_EMAIL_BODY_MAX_BYTES = 20_000;
 
 const securityHeaders = {
   "Cache-Control": "no-store",
@@ -204,6 +209,11 @@ function sendJson(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
+function sendMethodNotAllowed(response, allowedMethods) {
+  response.writeHead(405, withSecurityHeaders({ "Content-Type": "application/json", Allow: allowedMethods.join(", ") }));
+  response.end(JSON.stringify({ error: "Method not allowed." }));
+}
+
 function isTrustedLocalOrigin(origin, host) {
   if (!origin) return false;
   try {
@@ -219,6 +229,71 @@ function isTrustedApiRequest(request) {
     return true;
   }
   return isTrustedLocalOrigin(request.headers.origin, request.headers.host);
+}
+
+function localApiClientKey(request) {
+  const address = request.socket?.remoteAddress || "unknown";
+  return `${request.method || "GET"}:${address}`;
+}
+
+function consumeLocalApiRateLimit(request, response, routeName) {
+  const now = Date.now();
+  for (const [key, bucket] of localApiRateBuckets) {
+    if (bucket.resetAt <= now) localApiRateBuckets.delete(key);
+  }
+
+  const key = `${routeName}:${localApiClientKey(request)}`;
+  const current = localApiRateBuckets.get(key);
+  const bucket =
+    current && current.resetAt > now
+      ? current
+      : {
+          count: 0,
+          resetAt: now + LOCAL_API_RATE_LIMIT_WINDOW_MS,
+        };
+
+  bucket.count += 1;
+  localApiRateBuckets.set(key, bucket);
+
+  const resetSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+  response.setHeader("RateLimit-Limit", String(LOCAL_API_RATE_LIMIT_MAX));
+  response.setHeader("RateLimit-Remaining", String(Math.max(0, LOCAL_API_RATE_LIMIT_MAX - bucket.count)));
+  response.setHeader("RateLimit-Reset", String(resetSeconds));
+
+  if (bucket.count <= LOCAL_API_RATE_LIMIT_MAX) return true;
+  response.setHeader("Retry-After", String(resetSeconds));
+  sendJson(response, 429, { error: "Too many requests. Please wait a moment and try again." });
+  return false;
+}
+
+// The local API is loopback-only, but renderer-controlled JSON is still treated
+// as untrusted before it can save state or trigger email delivery.
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function rejectUnexpectedFields(payload, allowedFields, label) {
+  if (!isPlainObject(payload)) {
+    const error = new Error(`${label} must be an object.`);
+    error.statusCode = 400;
+    throw error;
+  }
+  const allowed = new Set(allowedFields);
+  const unexpected = Object.keys(payload).filter((key) => !allowed.has(key));
+  if (unexpected.length) {
+    const error = new Error(`${label} contains unsupported field${unexpected.length === 1 ? "" : "s"}: ${unexpected.join(", ")}.`);
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
+function requireJsonContentType(request) {
+  const contentType = String(request.headers["content-type"] || "").toLowerCase();
+  if (!contentType.includes("application/json")) {
+    const error = new Error("Use application/json for this request.");
+    error.statusCode = 415;
+    throw error;
+  }
 }
 
 function writeDataFile(payload) {
@@ -418,19 +493,90 @@ async function sendRecapEmails(session, options = {}) {
   };
 }
 
-function readRequestBody(request) {
+function readRequestBody(request, maxBytes = LOCAL_STATE_BODY_MAX_BYTES) {
   return new Promise((resolve, reject) => {
     let body = "";
+    const contentLength = Number(request.headers["content-length"] || 0);
+    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+      const error = new Error("Request body is too large.");
+      error.statusCode = 413;
+      reject(error);
+      return;
+    }
     request.on("data", (chunk) => {
       body += chunk;
-      if (body.length > 8_000_000) {
-        reject(new Error("Request body is too large."));
+      if (Buffer.byteLength(body) > maxBytes) {
+        const error = new Error("Request body is too large.");
+        error.statusCode = 413;
+        reject(error);
         request.destroy();
       }
     });
     request.on("end", () => resolve(body));
     request.on("error", reject);
   });
+}
+
+async function readJsonRequest(request, maxBytes) {
+  requireJsonContentType(request);
+  const body = await readRequestBody(request, maxBytes);
+  try {
+    return JSON.parse(body || "{}");
+  } catch {
+    const error = new Error("Request body must be valid JSON.");
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
+function validateStatePayload(payload) {
+  rejectUnexpectedFields(
+    payload,
+    ["accounts", "sessions", "draft", "demoLoaded", "classGroups", "rosterTemplates", "privacySettings", "auditLog", "billingProfile"],
+    "ClassLoop state",
+  );
+  ["accounts", "sessions", "classGroups", "rosterTemplates", "auditLog"].forEach((key) => {
+    if (payload[key] !== undefined && !Array.isArray(payload[key])) {
+      const error = new Error(`ClassLoop state.${key} must be an array.`);
+      error.statusCode = 400;
+      throw error;
+    }
+  });
+  if (payload.privacySettings !== undefined && !isPlainObject(payload.privacySettings)) {
+    const error = new Error("ClassLoop state.privacySettings must be an object.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (payload.billingProfile !== undefined && !isPlainObject(payload.billingProfile)) {
+    const error = new Error("ClassLoop state.billingProfile must be an object.");
+    error.statusCode = 400;
+    throw error;
+  }
+  return payload;
+}
+
+function validateEmailRequestPayload(payload) {
+  rejectUnexpectedFields(payload, ["sessionId", "ownerEmail", "recipients"], "Email request");
+  const sessionId = String(payload.sessionId || "").trim();
+  const ownerEmail = normalizeEmail(payload.ownerEmail);
+  const recipients = Array.isArray(payload.recipients) ? payload.recipients.map((email) => normalizeEmail(email)).filter(Boolean) : undefined;
+
+  if (!sessionId || sessionId.length > 160 || !ownerEmail || ownerEmail.length > 320) {
+    const error = new Error("Session id and owner email are required before sending recap emails.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (recipients && recipients.length > 500) {
+    const error = new Error("Email request may include at most 500 recipients.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (recipients?.some((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+    const error = new Error("Email request contains an invalid recipient.");
+    error.statusCode = 400;
+    throw error;
+  }
+  return { sessionId, ownerEmail, recipients };
 }
 
 async function handleStateApi(request, response) {
@@ -443,8 +589,8 @@ async function handleStateApi(request, response) {
 
   if (request.method === "PUT") {
     try {
-      const body = await readRequestBody(request);
-      const state = writeDataFile(JSON.parse(body || "{}"));
+      const body = await readJsonRequest(request, LOCAL_STATE_BODY_MAX_BYTES);
+      const state = writeDataFile(validateStatePayload(body));
       response.writeHead(200, withSecurityHeaders({ "Content-Type": "application/json", "Cache-Control": "no-store" }));
       response.end(JSON.stringify(state));
     } catch (error) {
@@ -454,12 +600,15 @@ async function handleStateApi(request, response) {
     return true;
   }
 
-  response.writeHead(405, withSecurityHeaders({ "Content-Type": "application/json", "Cache-Control": "no-store" }));
-  response.end(JSON.stringify({ error: "Method not allowed." }));
+  sendMethodNotAllowed(response, ["GET", "PUT"]);
   return true;
 }
 
 async function handleIntegrationStatusApi(request, response) {
+  if (request.method !== "GET") {
+    sendMethodNotAllowed(response, ["GET"]);
+    return true;
+  }
   const config = emailConfig();
   sendJson(response, 200, {
     email: {
@@ -479,13 +628,9 @@ async function handleEmailApi(request, response) {
   }
 
   try {
-    const body = JSON.parse((await readRequestBody(request)) || "{}");
-    const sessionId = String(body.sessionId || "").trim();
-    const ownerEmail = normalizeEmail(body.ownerEmail);
-    if (!sessionId || !ownerEmail) {
-      sendJson(response, 400, { error: "Session id and owner email are required before sending recap emails." });
-      return true;
-    }
+    const body = validateEmailRequestPayload(await readJsonRequest(request, LOCAL_EMAIL_BODY_MAX_BYTES));
+    const sessionId = body.sessionId;
+    const ownerEmail = body.ownerEmail;
 
     const state = readDataFile({ throwOnError: true });
     const session = (Array.isArray(state.sessions) ? state.sessions : []).find((item) => item.id === sessionId);
@@ -513,6 +658,9 @@ async function handleEmailApi(request, response) {
 function createStaticServer() {
   const server = http.createServer(async (request, response) => {
     const parsed = new URL(request.url || "/", "http://127.0.0.1");
+    if (parsed.pathname.startsWith("/api/") && !consumeLocalApiRateLimit(request, response, parsed.pathname)) {
+      return;
+    }
     if (parsed.pathname.startsWith("/api/") && !isTrustedApiRequest(request)) {
       sendJson(response, 403, { error: "Blocked untrusted local API origin." });
       return;

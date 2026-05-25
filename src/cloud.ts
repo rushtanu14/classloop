@@ -56,7 +56,7 @@ export const planCatalog = [
   {
     tier: "pro" as const,
     name: "Pro",
-    price: "$9/mo",
+    price: "$3.99/mo",
     detail: "Unlimited sessions, live capture modes, multi-device cloud sync, email delivery logs, privacy exports, and advanced reports.",
     sessionLimit: Number.POSITIVE_INFINITY,
   },

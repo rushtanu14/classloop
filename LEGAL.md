@@ -1,6 +1,6 @@
 # ClassLoop Legal, Privacy, EULA, And School-Safety Terms
 
-Last updated: 2026-05-19
+Last updated: 2026-05-24
 
 This is founder-authored launch language for ClassLoop. It is not legal advice and does not create an attorney-client relationship. Public Terms of Use, Privacy Policy, Desktop EULA, and Support pages exist in the web app at `#/terms`, `#/privacy`, `#/eula`, and `#/support`. Have qualified counsel review final production language, school data-processing agreements, and hosted retention/deletion SLAs before enabling durable hosted public signups with real student data.
 
@@ -82,7 +82,9 @@ Alpha trackers and support notes should store anonymized examples and counts, no
 
 ### Security
 
-ClassLoop uses local encryption, trusted-origin local desktop APIs, sample-only hosted demo boundaries, server-side entitlement handling, and privacy-safe logging checks. No software can guarantee perfect security. Report suspected security or privacy issues to the support contact below.
+ClassLoop uses local encryption, trusted-origin local desktop APIs, sample-only hosted demo boundaries, server-side entitlement handling, privacy-safe logging checks, IP and authenticated-user API rate limits, strict JSON content-type checks, request-size caps, schema validation, and safe API error responses. Server-only credentials must stay in server environment variables, and exposed or misplaced keys should be rotated before further use.
+
+No software or policy text can guarantee perfect security or prevent legal claims. Treat these controls as a launch baseline for engineering review, not a substitute for qualified legal/security review. Report suspected security or privacy issues to the support contact below.
 
 ## Desktop EULA
 

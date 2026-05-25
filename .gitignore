@@ -12,3 +12,4 @@ playwright-report
 release
 .vercel
 .env*.local
+owner-assets

@@ -1,7 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const testPort = 5177;
-const baseURL = `http://127.0.0.1:${testPort}`;
+const testHost = process.env.CLASSLOOP_PLAYWRIGHT_HOST || "127.0.0.1";
+const testPort = Number(process.env.CLASSLOOP_PLAYWRIGHT_PORT || 5177);
+const baseURL = `http://${testHost}:${testPort}`;
+const reuseExistingServer = process.env.CLASSLOOP_REUSE_PLAYWRIGHT_SERVER === "1";
 const browserTestEnv =
   "VITE_SUPABASE_URL=https://classloop-playwright.supabase.co " +
   "VITE_SUPABASE_ANON_KEY=classloop-playwright-anon-key " +
@@ -19,12 +21,13 @@ export default defineConfig({
     baseURL,
     trace: "on-first-retry",
   },
-  webServer: {
-    command: `env -u FORCE_COLOR -u NO_COLOR ${browserTestEnv} npm run dev -- --port ${testPort} --strictPort`,
-    url: baseURL,
-    reuseExistingServer: false,
-    timeout: 60_000,
-  },
+  webServer: reuseExistingServer
+    ? undefined
+    : {
+        command: `env -u FORCE_COLOR -u NO_COLOR ${browserTestEnv} npm run dev -- --host ${testHost} --port ${testPort} --strictPort`,
+        url: baseURL,
+        timeout: 60_000,
+      },
   projects: [
     {
       name: "chromium",

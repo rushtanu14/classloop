@@ -426,7 +426,7 @@ When using the ClassLoop testing script, also verify:
   - Vercel browser deployment config in `vercel.json`.
 - Freemium MVP:
   - Free: `$0`, 1 generated session per day, transcript import, CSV import/export, student portal preview, local desktop storage.
-  - Pro: `$9/month`, unlimited sessions, live in-person/online capture modes, multi-device cloud login/sync, delivery logs, privacy exports, advanced reports.
+  - Pro: `$3.99/month`, unlimited sessions, live in-person/online capture modes, multi-device cloud login/sync, delivery logs, privacy exports, advanced reports.
 - Added teacher-only Plan options and Privacy controls.
 - Added `AGENT.md` operational memory at repo root.
 - Consolidated `main` keeps the richer features: live audio notes, browser meeting capture, Gmail/SMTP delivery, class manager, publish audit, and submitted/reviewed student workflow.
@@ -468,7 +468,7 @@ All three validate with `quick_validate.py`.
 - Demo-account state is ephemeral: sample teacher/student changes are not written to the normal persistence path, demo-owned state is stripped before storage, and a top demo banner reminds users to download the app to save data.
 - `public/classloop-downloads.json` points the landing-page download controls at external desktop installer hosts when packaging is ready. Keep installer binaries out of Vercel Blob so Vercel only handles the web/PWA shell and APIs. Until external installer links are ready, the page tells visitors to use the web demo.
 - `/api/config` now returns a safe config version plus hosted backend booleans. If live Vercel still returns `stripeSchoolConfigured`, the deployed app is stale and must redeploy latest `main`.
-- Current active freemium model: Free is 1 generated session per day; Pro is `$9/month` with unlimited sessions, live capture modes, multi-device cloud sync, delivery logs, privacy exports, and advanced reports. School pilot UI/env keys remain removed/deferred.
+- Current active freemium model: Free is 1 generated session per day; Pro is `$3.99/month` with unlimited sessions, live capture modes, multi-device cloud sync, delivery logs, privacy exports, and advanced reports. School pilot UI/env keys remain removed/deferred.
 - Verification passed after landing update: `npm run build`, `npm run test:import`, `npm run test:browser` (14/14), `node -c desktop/main.cjs`, `node --check api/*.js api/billing/*.js`, and `git diff --check -- ':!dist/**'`.
 
 ## 2026-05-12 Prompt-Free Storage / Routed Landing Update

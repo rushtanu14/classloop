@@ -108,8 +108,13 @@ function verifyLocalStorageSecurity() {
 function verifyDesktopAndHostedSecurity() {
   const desktop = readText("desktop/main.cjs");
   const shared = readText("api/_shared.js");
+  const validators = readText("api/validators.js");
+  const config = readText("api/config.js");
   const profile = readText("api/profile.js");
+  const cloudState = readText("api/cloud-state.js");
   const feedback = readText("api/feedback.js");
+  const checkout = readText("api/billing/checkout.js");
+  const portal = readText("api/billing/portal.js");
   const webhook = readText("api/billing/webhook.js");
   const schema = readText("supabase/schema.sql");
 
@@ -119,20 +124,51 @@ function verifyDesktopAndHostedSecurity() {
     ["desktop encrypts state with AES-GCM", desktop, /crypto\.createCipheriv\("aes-256-gcm"/],
     ["desktop writes restrictive data-file permissions", desktop, /mode: 0o600/],
     ["desktop blocks untrusted mutating local API origins", desktop, /Blocked untrusted local API origin/],
+    ["desktop local APIs have rate limiting", desktop, /consumeLocalApiRateLimit/],
+    ["desktop local APIs require JSON for write bodies", desktop, /Use application\/json for this request/],
+    ["desktop state API rejects unexpected root fields", desktop, /validateStatePayload/],
+    ["desktop email API validates request schema", desktop, /validateEmailRequestPayload/],
     ["desktop blocks writes after unreadable encrypted state", desktop, /if \(dataFileReadError\)/],
     ["email send reloads state server-side by session id", desktop, /const state = readDataFile\(\{ throwOnError: true \}\)/],
     ["hosted APIs require bearer Supabase auth", shared, /Sign in with Supabase before using hosted sync/],
     ["server-only Supabase key stays server-side", shared, /SUPABASE_SERVICE_ROLE_KEY/],
+    ["hosted APIs share graceful JSON error handling", shared, /sendApiError/],
+    ["hosted APIs emit rate-limit headers", shared, /RateLimit-Remaining/],
+    ["hosted APIs support IP rate limiting", shared, /assertIpRateLimit/],
+    ["hosted APIs support user rate limiting", shared, /assertUserRateLimit/],
+    ["hosted APIs require JSON content types for JSON bodies", shared, /Use application\/json for this request/],
+    ["hosted APIs use schema validation", shared, /validateSchema/],
+    ["API validators reject unexpected fields", shared, /contains unsupported field/],
+    ["cloud workspace state has strict schema", validators, /validateCloudWorkspaceStatePayload/],
+    ["feedback has strict schema", validators, /validateFeedbackPayload/],
+    ["billing checkout has strict schema", validators, /validateCheckoutPayload/],
+    ["profile patch has strict schema", validators, /validateProfilePatchPayload/],
+    ["public config has rate limiting", config, /assertIpRateLimit\(request, response/],
+    ["profile has IP rate limiting", profile, /assertIpRateLimit\(request, response/],
+    ["profile has user rate limiting", profile, /requireUser\(request, response, \{ rateLimit: PROFILE_RATE_LIMIT \}/],
+    ["profile patch validates payload before updating", profile, /validateProfilePatchPayload/],
     ["profile patch ignores paid entitlement fields", profile, /profilePatchColumns/],
+    ["cloud state has IP rate limiting", cloudState, /assertIpRateLimit\(request, response/],
+    ["cloud state has user rate limiting", cloudState, /requireUser\(request, response, \{ rateLimit: CLOUD_STATE_RATE_LIMIT \}/],
+    ["cloud state validates payload before storage", cloudState, /validateCloudWorkspaceStatePayload/],
     ["Stripe client pins current SDK API version", readText("api/billing/stripe-client.js"), /apiVersion: stripeApiVersion/],
-    ["anonymous feedback has rate limiting", feedback, /assertFeedbackRateLimit\(request\)/],
-    ["anonymous feedback has body limits", feedback, /assertFeedbackBodyLimit\(request\.body\)/],
-    ["feedback fails closed without hosted credentials", feedback, /Missing Supabase hosted feedback configuration/],
-    ["feedback stores transcript context", feedback, /transcript: sanitizeFeedbackTranscript|const transcript = sanitizeFeedbackTranscript/],
-    ["feedback metadata is sanitized", feedback, /sanitizeFeedbackMetadata\(request\.body\?\.metadata\)/],
+    ["anonymous feedback has IP rate limiting", feedback, /assertIpRateLimit\(request, response/],
+    ["authenticated feedback has user rate limiting", feedback, /assertUserRateLimit\(request, response, user/],
+    ["anonymous feedback has body limits", feedback, /MAX_FEEDBACK_BODY_CHARS/],
+    ["feedback fails closed without hosted credentials", feedback, /Hosted feedback storage is not configured/],
+    ["feedback stores transcript context", feedback, /transcript: payload\.transcript/],
+    ["feedback validates payload schema", feedback, /validateFeedbackPayload/],
+    ["feedback reads bounded JSON body", feedback, /readJsonBody\(request/],
+    ["billing checkout has IP rate limiting", checkout, /assertIpRateLimit\(request, response/],
+    ["billing checkout has user rate limiting", checkout, /CHECKOUT_USER_RATE_LIMIT/],
+    ["billing checkout validates schema", checkout, /validateCheckoutPayload/],
+    ["billing portal has IP rate limiting", portal, /assertIpRateLimit\(request, response/],
+    ["billing portal has user rate limiting", portal, /PORTAL_USER_RATE_LIMIT/],
+    ["feedback metadata is sanitized", validators, /metadataValue/],
     ["Stripe webhook verifies raw signed body", webhook, /constructEvent\(rawBody, signature, requiredEnv\("STRIPE_WEBHOOK_SECRET"\)\)/],
     ["Stripe webhook caps raw body size", webhook, /maxWebhookBodyBytes/],
-    ["Stripe webhook preserves explicit error statuses", webhook, /json\(response, error\.statusCode \|\| 400/],
+    ["Stripe webhook has IP rate limiting", webhook, /assertIpRateLimit\(request, response/],
+    ["Stripe webhook preserves explicit error statuses", webhook, /const statusCode = error\.statusCode \|\| 400/],
     ["Stripe webhook handles invoice renewals", webhook, /event\.type === "invoice\.paid"/],
     ["Stripe webhook handles invoice payment failures", webhook, /event\.type === "invoice\.payment_failed"/],
     ["workspace RLS enabled", schema, /alter table public\.classloop_workspace_state enable row level security/i],

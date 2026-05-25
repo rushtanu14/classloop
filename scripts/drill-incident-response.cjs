@@ -14,6 +14,7 @@ const protectedHandlers = [
 
 const syntaxFiles = [
   "api/_shared.js",
+  "api/validators.js",
   "api/config.js",
   "api/cloud-state.js",
   "api/feedback.js",
@@ -126,13 +127,14 @@ async function verifyApiFailClosed() {
 
   const feedbackResponse = await callHandler("api/feedback.js", {
     method: "POST",
+    headers: { "content-type": "application/json" },
     body: { rating: 5, note: "drill", role: "student", source: "incident_drill", transcript: "Drill transcript" },
   });
   const feedbackPayload = feedbackResponse.json();
   if (feedbackResponse.statusCode !== 503) {
     fail(`product feedback write should fail closed with 503 when hosted credentials are unavailable; got ${feedbackResponse.statusCode}.`);
   }
-  if (!/missing supabase/i.test(feedbackPayload.error || "")) {
+  if (!/feedback storage is not configured/i.test(feedbackPayload.error || "")) {
     fail(`product feedback outage copy should explain missing hosted credentials: ${JSON.stringify(feedbackPayload)}`);
   }
   console.log("PASS product feedback write fails closed when hosted credentials are missing");
@@ -155,7 +157,7 @@ async function verifyApiFailClosed() {
     body: Buffer.from("{}"),
   });
   const webhookPayload = webhookPost.json();
-  if (webhookPost.statusCode !== 400 || !/missing stripe_secret_key/i.test(webhookPayload.error || "")) {
+  if (webhookPost.statusCode !== 503 || !/hosted service is not configured/i.test(webhookPayload.error || "")) {
     fail(`Stripe webhook should explain missing credentials during billing outage drill: ${JSON.stringify(webhookPayload)}`);
   }
   console.log("PASS Stripe webhook surfaces missing billing credentials clearly");

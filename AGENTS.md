@@ -154,7 +154,7 @@ Keep external services free-first and narrow:
 - Paid access is scaffolded with Stripe Checkout plus `api/billing/webhook.js`; the webhook updates `classloop_profiles` so entitlements are server-owned.
 - The local desktop app must remain useful without Supabase or Stripe credentials.
 - Free tier target: 1 generated session per day, transcript import, CSV import/export, student portal preview, and local desktop storage.
-- Pro target: `$9/month` for unlimited sessions, live in-person/online capture modes, multi-device cloud login/sync, delivery logs, privacy exports, and advanced reports.
+- Pro target: `$3.99/month` for unlimited sessions, live in-person/online capture modes, multi-device cloud login/sync, delivery logs, privacy exports, and advanced reports.
 - Never commit `.env.local`; use `.env.example` as the setup checklist.
 
 ## Real Session Example
@@ -276,7 +276,7 @@ Essential Questions:
 - Paid access is scaffolded with Stripe Checkout plus `api/billing/webhook.js`; the webhook updates `classloop_profiles` so entitlements are server-owned.
 - The local desktop app must remain useful without Supabase or Stripe credentials.
 - Free tier target: 1 generated session per day, transcript import, CSV import/export, student portal preview, and local desktop storage.
-- Pro target: `$9/month` for unlimited sessions, live in-person/online capture modes, multi-device cloud login/sync, delivery logs, privacy exports, and advanced reports.
+- Pro target: `$3.99/month` for unlimited sessions, live in-person/online capture modes, multi-device cloud login/sync, delivery logs, privacy exports, and advanced reports.
 - Never commit `.env.local`; use `.env.example` as the setup checklist.
 
 ## Testing

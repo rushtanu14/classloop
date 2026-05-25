@@ -36,8 +36,14 @@ function privateLogPattern() {
 test.describe("user-visible error states and recovery", () => {
   test("startup loader stays compact while shared state is pending", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "chromium", "Runs once because it intentionally delays shared-state startup.");
+    let releaseSharedState: () => void = () => undefined;
+    const sharedStateHold = new Promise<void>((resolve) => {
+      releaseSharedState = resolve;
+    });
+    const sharedStateRequested = page.waitForRequest("**/api/state");
+
     await page.route("**/api/state", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      await sharedStateHold;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -45,11 +51,13 @@ test.describe("user-visible error states and recovery", () => {
       });
     });
 
-    await page.goto("/#/dashboard");
+    await page.goto("/#/dashboard", { waitUntil: "domcontentloaded" });
+    await sharedStateRequested;
     await expect(page.getByRole("heading", { name: /loading classloop/i })).toBeVisible();
     await expect(page.getByRole("status", { name: /classloop loading/i })).toContainText(/Workspace sync/);
     await expect(page.getByLabel(/workspace data outline/i)).toHaveCount(0);
     await expect(page.getByLabel(/startup status/i)).toHaveCount(0);
+    releaseSharedState();
     await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
   });
 

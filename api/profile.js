@@ -1,4 +1,8 @@
-import { json, requireUser } from "./_shared.js";
+import { assertIpRateLimit, json, methodNotAllowed, readJsonBody, requireUser, sendApiError } from "./_shared.js";
+import { validateProfilePatchPayload } from "./validators.js";
+
+const PROFILE_RATE_LIMIT = { endpoint: "profile", limit: 120, windowMs: 60 * 1000 };
+const PROFILE_BODY_MAX_BYTES = 2_000;
 
 export function billingProfileFromRow(row) {
   return {
@@ -47,7 +51,9 @@ async function ensureProfile(supabase, user) {
 
 export default async function handler(request, response) {
   try {
-    const { supabase, user } = await requireUser(request);
+    assertIpRateLimit(request, response, PROFILE_RATE_LIMIT);
+    if (!["GET", "PATCH"].includes(request.method)) return methodNotAllowed(response, ["GET", "PATCH"]);
+    const { supabase, user } = await requireUser(request, response, { rateLimit: PROFILE_RATE_LIMIT });
 
     if (request.method === "GET") {
       const profile = await ensureProfile(supabase, user);
@@ -60,9 +66,13 @@ export default async function handler(request, response) {
     }
 
     if (request.method === "PATCH") {
-      const payload = request.body && typeof request.body === "object" ? request.body : {};
+      const payload = validateProfilePatchPayload(
+        await readJsonBody(request, {
+          maxBytes: PROFILE_BODY_MAX_BYTES,
+          name: "Profile update",
+        }),
+      );
       const allowed = profilePatchColumns(payload);
-      if (!Object.keys(allowed).length) return json(response, 400, { error: "No supported profile updates were provided." });
 
       const { data, error } = await supabase
         .from("classloop_profiles")
@@ -79,8 +89,8 @@ export default async function handler(request, response) {
       });
     }
 
-    return json(response, 405, { error: "Method not allowed." });
+    return methodNotAllowed(response, ["GET", "PATCH"]);
   } catch (error) {
-    return json(response, error.statusCode || 500, { error: error.message || "Unable to load account profile." });
+    return sendApiError(response, error, "Unable to load account profile.");
   }
 }

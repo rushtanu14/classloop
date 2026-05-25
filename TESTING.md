@@ -67,7 +67,8 @@
 - **Local Data Tracking**: `npm run test:security` verifies `.env.local`, `.classloop-data.json`, `.classloop-storage-key`, and legacy local data files are ignored and not tracked.
 - **Secret Scanning**: The same script scans tracked text files for high-confidence Stripe, OpenAI, GitHub, private-key, and non-empty server-secret env assignments.
 - **Storage Hardening**: The script verifies browser data uses `classloop:secure:*` AES-GCM storage keys, demo data is filtered before persistence, and the cloud offline queue is ClassLoop-namespaced.
-- **Desktop / Hosted Boundaries**: The script verifies prompt-free desktop AES-GCM state encryption, restrictive desktop data permissions, trusted-origin local APIs, server-side email session lookup, Supabase auth requirements, Stripe webhook signature verification, and workspace RLS markers.
+- **Desktop / Hosted Boundaries**: The script verifies prompt-free desktop AES-GCM state encryption, restrictive desktop data permissions, trusted-origin local APIs, local API rate limiting, server-side email session lookup, Supabase auth requirements, Stripe webhook signature verification, and workspace RLS markers.
+- **Public API Hardening**: `tests/api-security.test.mjs`, run through `npm run test:security`, verifies IP rate limiting, `Retry-After`/`RateLimit-*` headers, strict schema rejection for feedback/profile/cloud-state/checkout payloads, JSON content-type enforcement, safe 500 error copy, and rejection of client-submitted entitlement fields.
 - **Logging / Legal Baseline**: The script blocks runtime debug/info logs and requires [LEGAL.md](LEGAL.md) plus public privacy, Terms, EULA, and Support copy to cover Terms, Privacy, EULA, support, retention, local encryption, no-training posture, public signup boundaries, school-safety expectations, and child-appropriate safety. It also asserts durable public hosted signups stay sample-only until final legal review and hosted retention/deletion SLAs are complete.
 
 ### Browser Access Tests
@@ -180,6 +181,8 @@ Playwright is installed in the repo through `@playwright/test`.
 
 Playwright starts the Vite dev server on `127.0.0.1:5177` and runs Chromium checks across desktop and mobile-sized projects, including WCAG-targeted keyboard, focus, labels, contrast, status-announcement, and mobile PWA readability checks.
 Hosted web tests use `playwright.web.config.ts` and default to `https://classloop-followup.vercel.app/`; they include the same landing/PWA accessibility smoke on desktop and phone-sized viewports. `npm run test:web:local` runs the same web/PWA smoke against a temporary local Vite server so `npm run test:all` verifies the current code without mutating the public deployment. Override the hosted target with:
+
+Network-restricted or loopback-restricted sandboxes may block `npm ci` or prevent Playwright's Vite web server from binding `127.0.0.1:5177`. Use `npm run bootstrap` to reuse a valid existing dependency tree when installation cannot reach Electron/Playwright download hosts. For browser tests, start the dev server in an unrestricted shell with `npm run dev -- --host 127.0.0.1 --port 5177 --strictPort`, then run `CLASSLOOP_REUSE_PLAYWRIGHT_SERVER=1 npm run test:browser` so Playwright reuses the existing server instead of binding a new port.
 
 ```bash
 CLASSLOOP_WEB_TEST_URL=https://your-domain.com npm run test:web

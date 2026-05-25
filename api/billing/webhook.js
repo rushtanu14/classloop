@@ -1,47 +1,15 @@
-import { getSupabaseAdmin, json, requiredEnv } from "../_shared.js";
+import { assertIpRateLimit, getSupabaseAdmin, httpError, json, methodNotAllowed, readRawBody, requiredEnv } from "../_shared.js";
 import { applySubscriptionProfileUpdate, currentPeriodEnd } from "./entitlements.js";
 import { createStripeClient } from "./stripe-client.js";
 
 const maxWebhookBodyBytes = 1_048_576;
+const WEBHOOK_RATE_LIMIT = { endpoint: "stripe-webhook", limit: 300, windowMs: 60 * 1000 };
 
 export const config = {
   api: {
     bodyParser: false,
   },
 };
-
-async function readRawBody(request) {
-  if (Buffer.isBuffer(request.body)) {
-    if (request.body.length > maxWebhookBodyBytes) {
-      const error = new Error("Stripe webhook payload is too large.");
-      error.statusCode = 413;
-      throw error;
-    }
-    return request.body;
-  }
-  if (typeof request.body === "string") {
-    const body = Buffer.from(request.body);
-    if (body.length > maxWebhookBodyBytes) {
-      const error = new Error("Stripe webhook payload is too large.");
-      error.statusCode = 413;
-      throw error;
-    }
-    return body;
-  }
-  const chunks = [];
-  let totalBytes = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    totalBytes += buffer.length;
-    if (totalBytes > maxWebhookBodyBytes) {
-      const error = new Error("Stripe webhook payload is too large.");
-      error.statusCode = 413;
-      throw error;
-    }
-    chunks.push(buffer);
-  }
-  return Buffer.concat(chunks);
-}
 
 export function subscriptionIdFromInvoice(invoice) {
   const legacySubscription = invoice?.subscription;
@@ -76,12 +44,16 @@ export function checkoutSessionPaymentAccepted(session) {
 }
 
 export default async function handler(request, response) {
-  if (request.method !== "POST") return json(response, 405, { error: "Method not allowed." });
-
   try {
+    assertIpRateLimit(request, response, WEBHOOK_RATE_LIMIT);
+    if (request.method !== "POST") return methodNotAllowed(response, ["POST"]);
     const stripe = createStripeClient();
     const signature = request.headers["stripe-signature"];
-    const rawBody = await readRawBody(request);
+    if (!signature) throw httpError(400, "Invalid Stripe webhook.");
+    const rawBody = await readRawBody(request, {
+      maxBytes: maxWebhookBodyBytes,
+      name: "Stripe webhook payload",
+    });
     const event = stripe.webhooks.constructEvent(rawBody, signature, requiredEnv("STRIPE_WEBHOOK_SECRET"));
     const supabase = getSupabaseAdmin();
 
@@ -123,6 +95,8 @@ export default async function handler(request, response) {
 
     return json(response, 200, { received: true });
   } catch (error) {
-    return json(response, error.statusCode || 400, { error: error.message || "Invalid Stripe webhook." });
+    const statusCode = error.statusCode || 400;
+    const message = error.statusCode ? error.message : "Invalid Stripe webhook.";
+    return json(response, statusCode, { error: message });
   }
 }

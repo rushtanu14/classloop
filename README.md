@@ -26,13 +26,25 @@ Useful launcher environment variables:
 HOST=127.0.0.1 FRONTEND_PORT=5177 OPEN_BROWSER=0 ./run.sh --dev
 ```
 
+Other launcher modes:
+
+```bash
+./run.sh --check-env
+./run.sh --packaged
+./run.sh --package-mac
+./run.sh --help
+```
+
+`./run.sh --check-env` validates launcher env loading without opening Electron. `./run.sh --packaged` opens the current platform's packaged build when one exists. On macOS, ClassLoop now expects the Apple silicon build at `release/mac-arm64/ClassLoop.app`; Intel Mac release builds are intentionally not part of the public/package path. `./run.sh --package-mac` wraps the Apple silicon-only macOS package command. The launcher reads `.env.local` as plain `KEY=VALUE` entries instead of sourcing it as shell code, runs the dependency bootstrap path when runtime packages are missing, and then opens ClassLoop in the requested desktop/dev mode.
+
 You can also install dependencies directly:
 
 ```bash
+npm run bootstrap
 npm install
 ```
 
-`npm install` also downloads the Playwright Chromium browser through the project `postinstall` script.
+`npm run bootstrap` tries the locked install path, repairs the cached Electron runtime when possible, and continues with the existing dependency tree when a network-restricted sandbox blocks `npm ci` but the local packages are already usable. `npm install` also downloads the Playwright Chromium browser through the project `postinstall` script.
 
 ## Tech Stack
 
@@ -118,9 +130,17 @@ Hosted route behavior:
 Suggested pricing:
 
 - Free: `$0`, 1 generated session per day, transcript import, draft review, student portal preview, CSV roster tools, and local desktop storage.
-- Pro: `$9/month`, unlimited sessions, live in-person/online capture modes, multi-device cloud login, email delivery logs, privacy exports, and advanced reports.
+- Pro: `$3.99/month`, unlimited sessions, live in-person/online capture modes, multi-device cloud login, email delivery logs, privacy exports, and advanced reports.
 
 Configure hosted mode from `.env.example`. Public Vite variables are safe for the browser build; `SUPABASE_SERVICE_ROLE_KEY`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET` must only live in Vercel/server environment variables.
+
+### Hosted API Security Baseline
+
+- Public serverless endpoints use centralized JSON security headers, `Cache-Control: no-store`, safe error messages, and graceful `429` responses with `Retry-After` plus `RateLimit-*` headers.
+- `/api/config`, `/api/feedback`, `/api/profile`, `/api/cloud-state`, `/api/billing/checkout`, `/api/billing/portal`, and `/api/billing/webhook` all have IP-based rate limits. Authenticated hosted endpoints also apply Supabase user-id rate limits after token validation.
+- JSON write endpoints require `application/json`, enforce request-size caps, validate against strict schemas, type-check fields, cap string/array/object sizes, sanitize control characters, and reject unexpected fields instead of silently storing them.
+- Server-only keys must stay in Vercel/server env vars. `VITE_*` values are intentionally public browser configuration only; do not put service-role keys, Stripe secret keys, webhook secrets, Gmail app passwords, SMTP passwords, or private tokens in `VITE_*`.
+- Rotate any key that may have been pasted into chat, committed, exposed in a public deployment log, or used on the wrong environment. After rotating, redeploy and rerun `npm run test:security`.
 
 ### Mobile Web App
 
@@ -139,7 +159,7 @@ ClassLoop creates Stripe Checkout sessions on the server. Plan options link to a
 
 1. In Stripe, stay in **Test mode** while setting this up.
 2. Go to **Product catalog** and create `ClassLoop Pro`.
-3. Add a recurring monthly price, recommended `$9/month`.
+3. Add a recurring monthly price, recommended `$3.99/month`.
 4. Copy the recurring price ID that starts with `price_`.
 5. Put that same price ID in both `VITE_STRIPE_PRO_PRICE_ID` and `STRIPE_PRO_PRICE_ID`.
 6. Copy your Stripe publishable key into `VITE_STRIPE_PUBLISHABLE_KEY`; it starts with `pk_` and is safe for browser code.
@@ -154,7 +174,7 @@ Use Stripe live mode only when you are ready to accept real payments from real t
 1. Finish end-to-end sandbox checkout and webhook testing.
 2. Activate the Stripe account and complete business/banking/tax details.
 3. Toggle Stripe to live mode.
-4. Recreate or copy the `ClassLoop Pro` product and `$9/month` recurring price in live mode.
+4. Recreate or copy the `ClassLoop Pro` product and `$3.99/month` recurring price in live mode.
 5. Replace Vercel production env vars with live `STRIPE_SECRET_KEY`, live `STRIPE_PRO_PRICE_ID`, live `VITE_STRIPE_PRO_PRICE_ID`, live `VITE_STRIPE_PUBLISHABLE_KEY`, and live `STRIPE_WEBHOOK_SECRET`.
 6. Add a live webhook endpoint at `https://your-domain.com/api/billing/webhook` with `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, and `invoice.payment_failed`.
 7. Redeploy and run one low-risk live checkout with your own account, then cancel/refund it from Stripe if needed.
@@ -347,5 +367,5 @@ Core MVP promise:
 ## Monetization Direction
 
 - Free: 1 generated session per day, transcript import, draft review, student portal preview, CSV roster tools, and local desktop storage.
-- Pro: `$9/month` for unlimited sessions, live capture modes, multi-device cloud login/sync, delivery logs, privacy exports, and advanced reports.
+- Pro: `$3.99/month` for unlimited sessions, live capture modes, multi-device cloud login/sync, delivery logs, privacy exports, and advanced reports.
 - School/team features stay future-only until the product has real pilot demand and a privacy/legal review path.

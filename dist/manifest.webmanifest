@@ -1,7 +1,7 @@
 {
   "name": "ClassLoop",
   "short_name": "ClassLoop",
-  "description": "Teacher-reviewed class recaps, student follow-ups, and completion check-ins.",
+  "description": "Teacher-reviewed class recaps, shared resources, and class tasks from Zoom transcripts.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
@@ -36,10 +36,10 @@
       "description": "Open the teacher-side ClassLoop demo."
     },
     {
-      "name": "Student demo",
-      "short_name": "Student",
-      "url": "/?demoOnly=1#/dashboard",
-      "description": "Open the student-side ClassLoop demo."
+      "name": "Download ClassLoop",
+      "short_name": "Download",
+      "url": "/#/download",
+      "description": "Open PWA and desktop install options."
     }
   ]
 }

@@ -11,6 +11,8 @@ const landingContrastSelectors = [
   ".landing-card-kicker",
   ".landing-feature-band h2",
   ".landing-feature-band p",
+  ".landing-pwa-checklist h2",
+  ".landing-pwa-checklist p",
 ];
 
 test("hosted web landing and sample-only demo are usable", async ({ page }) => {
@@ -43,8 +45,8 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   }
   await expect(page.getByRole("button", { name: /open web demo/i })).toBeVisible();
   await expect(page.getByText("Teacher-approved drafts")).toBeVisible();
-  await expect(page.getByText("Student-specific next steps")).toBeVisible();
-  await expect(page.getByText("Private support signals")).toBeVisible();
+  await expect(page.getByText("Zoom transcript first")).toBeVisible();
+  await expect(page.getByText("Classwide Classroom posts")).toBeVisible();
   await expectNoUnnamedInteractive(page, ".landing-page");
   await expectContrast(page, landingContrastSelectors);
   if ((page.viewportSize()?.width ?? 0) <= 500 && (await page.locator(".landing-route-frame").count())) {
@@ -82,7 +84,12 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   if (await downloadRouteHeading.isVisible().catch(() => false)) {
     await expect(downloadRouteHeading).toBeVisible();
   }
-  await expect(page.getByRole("heading", { name: /use classloop from a browser or add it to your home screen/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /use the pwa for fast after-class cleanup/i })).toBeVisible();
+  await expect(page.getByRole("region", { name: /hosted pwa launch checklist/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /zoom transcript first/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /teacher review stays central/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /classroom posts stay classwide/i })).toBeVisible();
+  await expect(page.getByText(/recap, resources, and class tasks only/i)).toBeVisible();
   const addToPhoneButton = page.locator(".landing-mobile-band").getByRole("button", { name: /^add to phone$/i });
   await expect(addToPhoneButton).toBeVisible();
   await addToPhoneButton.click();
@@ -103,6 +110,8 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
     ".landing-mobile-card h2",
     ".landing-mobile-card p",
     ".mobile-step span",
+    ".landing-pwa-checklist h2",
+    ".landing-pwa-checklist p",
     ".landing-download-band h2",
     ".landing-download-band p",
   ]);
@@ -125,12 +134,16 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   expect(manifest.ok()).toBeTruthy();
   const manifestJson = await manifest.json();
   expect(manifestJson.display).toBe("standalone");
+  expect(manifestJson.description).toContain("shared resources");
   expect(manifestJson.start_url).toContain("source=pwa");
   expect(manifestJson.icons?.map((icon: { src: string }) => icon.src)).toContain("/classloop-app-icon-512.png");
+  expect(manifestJson.shortcuts?.map((shortcut: { name: string }) => shortcut.name)).toContain("Download ClassLoop");
 
   const serviceWorker = await page.request.get("/sw.js");
   expect(serviceWorker.ok()).toBeTruthy();
-  await expect(serviceWorker.text()).resolves.toContain("classloop-mobile-shell");
+  const serviceWorkerText = await serviceWorker.text();
+  expect(serviceWorkerText).toContain("classloop-mobile-shell");
+  expect(serviceWorkerText).toContain("/classloop-downloads.json");
 
   if (readyDownloads) {
     const firstReadyDownload = platformDownloads.getByRole("button").filter({ hasText: /download ready/i }).first();

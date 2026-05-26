@@ -19,6 +19,8 @@ const landingContrastSelectors = [
   ".landing-message",
   ".landing-feature-band h2",
   ".landing-feature-band p",
+  ".landing-pwa-checklist h2",
+  ".landing-pwa-checklist p",
 ];
 
 const loginContrastSelectors = [
@@ -112,7 +114,7 @@ test.describe("WCAG-targeted accessibility checks", () => {
     await expect(page.locator(".landing-hero").getByRole("button", { name: /^add to phone$/i })).toBeVisible();
 
     await page.goto("/#/download");
-    await expect(page.getByRole("heading", { name: /use classloop from a browser or add it to your home screen/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /use the pwa for fast after-class cleanup/i })).toBeVisible();
     await page.locator(".landing-mobile-band").getByRole("button", { name: /^add to phone$/i }).click();
     await expect(
       page.getByRole("status").filter({ hasText: /home screen|install app|install menu|already running|added/i }),
@@ -138,13 +140,15 @@ test.describe("WCAG-targeted accessibility checks", () => {
   test("PWA and add-to-home-screen layout stays readable on a phone viewport", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 850 });
     await page.goto("/#/download");
-    await expect(page.getByRole("heading", { name: /use classloop from a browser or add it to your home screen/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /use the pwa for fast after-class cleanup/i })).toBeVisible();
 
     await expectReadableMobileLayout(page, ".landing-page");
     await expectContrast(page, [
       ".landing-mobile-card h2",
       ".landing-mobile-card p",
       ".mobile-step span",
+      ".landing-pwa-checklist h2",
+      ".landing-pwa-checklist p",
       ".landing-download-band h2",
       ".landing-download-band p",
       ".landing-primary",

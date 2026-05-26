@@ -1,7 +1,8 @@
-const CACHE_NAME = "classloop-mobile-shell-v4";
+const CACHE_NAME = "classloop-mobile-shell-v5";
 const SHELL_ASSETS = [
   "/",
   "/manifest.webmanifest",
+  "/classloop-downloads.json",
   "/classloop-app-icon.svg",
   "/classloop-app-icon-192.png",
   "/classloop-app-icon-512.png",

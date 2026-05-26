@@ -397,7 +397,8 @@ test("public root shows landing page and can enter the app demo", async ({ page 
     await expect(platformDownloads.getByRole("button", { name: /macOS \(Intel/i })).toHaveCount(0);
   }
   await expect(page.locator(".landing-mobile-band").getByRole("button", { name: /add .*to phone/i })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /use classloop from a browser or add it to your home screen/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /use the pwa for fast after-class cleanup/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /classroom posts stay classwide/i })).toBeVisible();
   const manifest = await page.request.get("/manifest.webmanifest");
   expect(manifest.ok()).toBeTruthy();
   const manifestJson = await manifest.json();

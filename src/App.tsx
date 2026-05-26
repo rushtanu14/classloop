@@ -3181,13 +3181,13 @@ function LandingPage({
                 </div>
                 <h1>ClassLoop</h1>
                 <p>
-                  Turn transcripts, rosters, notes, and links into reviewed student follow-ups without making teachers
-                  rebuild the same classroom context by hand.
+                  Save time after class by turning a pasted Zoom transcript into teacher-reviewed recaps, shared
+                  resources, and class tasks without rebuilding the classroom context by hand.
                 </p>
                 <div className="landing-proof-row" aria-label="ClassLoop product highlights">
+                  <span>Zoom transcript first</span>
                   <span>Teacher-approved drafts</span>
-                  <span>Student-specific next steps</span>
-                  <span>Private support signals</span>
+                  <span>Classwide Classroom posts</span>
                 </div>
                 <div className="landing-actions landing-actions-hero">
                   <button className="landing-primary" type="button" onClick={onOpenApp}>
@@ -3249,7 +3249,7 @@ function LandingPage({
                 ["Draft review", "Editable recaps, essential questions, student-specific tasks, resources, and publish audit details.", ClipboardCheck],
                 ["Student portal", "Personalized recap, assignments, resources, due dates, and completion check-ins.", GraduationCap],
                 ["Analytics", "Quiet students, overdue work, attendance status, and class-level follow-through trends.", LineChart],
-                ["Live capture path", "Free browser microphone or tab capture can create reviewable unknown-speaker segments.", Mic2],
+                ["Classroom posting scope", "When Google Classroom is connected, post the reviewed class recap, resources, and class-wide tasks only.", Send],
               ] as Array<[string, string, typeof MessageSquare]>).map(([title, body, Icon]) => (
                 <article key={title}>
                   <Icon size={24} />
@@ -3649,17 +3649,17 @@ function LandingPage({
             <header className="landing-page-header">
               <h1>Download ClassLoop.</h1>
               <p>
-                Start with the sample web demo, add the mobile shell to a phone, then move real daily classroom work
-                to the desktop app when installers are connected.
+                Start with the hosted PWA for the sample workflow, add it to a phone, then move real daily classroom
+                work to the desktop app or a reviewed cloud pilot.
               </p>
             </header>
             <section className="landing-mobile-band" aria-label="ClassLoop on mobile">
               <div className="landing-mobile-card">
                 <Smartphone size={26} />
-                <h2>Use ClassLoop from a browser or add it to your home screen.</h2>
+                <h2>Use the PWA for fast after-class cleanup.</h2>
                 <p>
-                  The hosted web version is installable on modern mobile browsers, so teachers can check follow-ups
-                  from a phone and students can open their dashboard without a desktop.
+                  The hosted web shell is installable on modern mobile browsers, so teachers can check the sample
+                  recap flow from a phone without downloading the desktop app first.
                 </p>
                 <button className="landing-primary" type="button" onClick={handleMobileInstall}>
                   <Smartphone size={18} />
@@ -3669,17 +3669,33 @@ function LandingPage({
               <div className="mobile-step-grid">
                 <article className="mobile-step">
                   <strong>1</strong>
-                  <span>Open the hosted ClassLoop link on your phone.</span>
+                  <span>Open the hosted ClassLoop link after class.</span>
                 </article>
                 <article className="mobile-step">
                   <strong>2</strong>
-                  <span>Choose Add to Home Screen or Install app from your browser.</span>
+                  <span>Choose Add to Home Screen or Install app from the browser menu.</span>
                 </article>
                 <article className="mobile-step">
                   <strong>3</strong>
-                  <span>Use the sample demo now, then sign in with Pro cloud sync when live.</span>
+                  <span>Use sample data in the PWA; keep real rosters in desktop or an approved cloud pilot.</span>
                 </article>
               </div>
+            </section>
+
+            <section className="landing-pwa-checklist" aria-label="Hosted PWA launch checklist">
+              {([
+                ["Zoom transcript first", "The launch flow starts from pasted or uploaded Zoom transcripts so teachers always have a reliable fallback.", FileText],
+                ["Teacher review stays central", "ClassLoop drafts the recap, resources, and class-wide tasks; the teacher approves before anything is shared.", ClipboardCheck],
+                ["Classroom posts stay classwide", "Google Classroom posting should send the recap, resources, and class tasks only. Personalized student follow-ups stay inside ClassLoop.", Send],
+              ] as Array<[string, string, typeof FileText]>).map(([title, body, Icon]) => (
+                <article key={title}>
+                  <Icon size={22} />
+                  <div>
+                    <h2>{title}</h2>
+                    <p>{body}</p>
+                  </div>
+                </article>
+              ))}
             </section>
 
             <section className="landing-download-band">

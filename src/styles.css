@@ -599,6 +599,7 @@ select:focus-visible,
 .landing-feature-band article,
 .landing-feature-matrix article,
 .landing-callout-grid article,
+.landing-pwa-checklist article,
 .landing-doc-section,
 .landing-docs-index,
 .landing-mobile-card,
@@ -678,6 +679,7 @@ select:focus-visible,
 .landing-feature-band svg,
 .landing-feature-matrix svg,
 .landing-callout-grid svg,
+.landing-pwa-checklist svg,
 .landing-mobile-card svg,
 .landing-policy-panel svg,
 .landing-feedback-panel svg {
@@ -745,6 +747,7 @@ select:focus-visible,
 .landing-feature-band,
 .landing-feature-matrix,
 .landing-callout-grid,
+.landing-pwa-checklist,
 .landing-donation-panel {
   display: grid;
   gap: 16px;
@@ -756,6 +759,7 @@ select:focus-visible,
 }
 
 .landing-feature-matrix,
+.landing-pwa-checklist,
 .landing-donation-panel {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -774,6 +778,7 @@ select:focus-visible,
 .landing-feature-band article,
 .landing-feature-matrix article,
 .landing-callout-grid article,
+.landing-pwa-checklist article,
 .landing-donation-panel article,
 .landing-legal-grid article {
   display: grid;
@@ -789,6 +794,8 @@ select:focus-visible,
 .landing-feature-matrix p,
 .landing-callout-grid h2,
 .landing-callout-grid p,
+.landing-pwa-checklist h2,
+.landing-pwa-checklist p,
 .landing-download-band h2,
 .landing-download-band p,
 .landing-mobile-card h2,
@@ -809,6 +816,7 @@ select:focus-visible,
 .landing-feature-band h2,
 .landing-feature-matrix h2,
 .landing-callout-grid h2,
+.landing-pwa-checklist h2,
 .landing-download-band h2,
 .landing-mobile-card h2,
 .landing-policy-panel h2,
@@ -832,6 +840,7 @@ select:focus-visible,
 .landing-feature-band p,
 .landing-feature-matrix p,
 .landing-callout-grid p,
+.landing-pwa-checklist p,
 .landing-download-band p,
 .landing-mobile-card p,
 .landing-policy-panel p,
@@ -846,6 +855,22 @@ select:focus-visible,
   display: grid;
   gap: 12px;
   margin-top: 18px;
+}
+
+.landing-pwa-checklist article {
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+  padding: 20px;
+}
+
+.landing-pwa-checklist article > svg {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #dff8f2;
 }
 
 .landing-workflow-list article {
@@ -6098,6 +6123,7 @@ th {
   .landing-feature-band,
   .landing-feature-matrix,
   .landing-callout-grid,
+  .landing-pwa-checklist,
   .landing-mobile-band,
   .landing-docs-layout,
   .landing-legal-grid,
@@ -6291,6 +6317,7 @@ th {
   .landing-feature-band article,
   .landing-feature-matrix article,
   .landing-callout-grid article,
+  .landing-pwa-checklist article,
   .landing-doc-section,
   .landing-docs-index,
   .landing-mobile-card {

@@ -178,13 +178,42 @@ async function signInWithSeededBillingProfile(
 }
 
 async function signInWithVerifiedProEntitlement(page: Page, email: string, password: string) {
-  await signInWithSeededBillingProfile(page, "teacher", email, password, {
+  const cloudEmail = `verified-${Date.now().toString(36)}@classloop.test`;
+  await mockCloudAuthForStripeCheckout(page, cloudEmail);
+  await page.route("**/api/profile", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        email: cloudEmail,
+        role: "teacher",
+        billingProfile: {
+          tier: "pro",
+          status: "active",
+          customerId: "cus_playwright_verified",
+          currentPeriodEnd: "2026-06-30T00:00:00.000Z",
+        },
+        noTrainingOnStudentData: true,
+      }),
+    });
+  });
+  await waitForPersistedAccounts(page);
+  await signOut(page);
+  await seedBillingProfile(page, {
     tier: "pro",
     status: "active",
-    customerId: "cus_playwright_verified",
+    customerId: "cus_local_tamper_should_not_unlock",
     currentPeriodEnd: "2026-06-30T00:00:00.000Z",
   });
+  await page.reload();
+  await page.goto("/#/dashboard");
+  await signInAccount(page, "teacher", email, password);
   await page.getByRole("button", { name: /^plan options$/i }).click();
+  await expect(page.getByText(/FREE · not_configured/i)).toBeVisible();
+  await page.getByPlaceholder("you@school.org").fill(cloudEmail);
+  await page.getByLabel(/cloud password/i).fill("cloud-pass-123");
+  await page.getByRole("button", { name: /^sign in$/i }).click();
+  await expect(page.getByText(`Connected as ${cloudEmail}`)).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/PRO · active/i)).toBeVisible();
   await page.getByLabel(/go to dashboard/i).click();
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
@@ -940,7 +969,11 @@ test("live capture modes are visible but Pro-gated for Free accounts", async ({ 
   const password = `teacher-pass-${runId}`;
   await resetBrowser(page);
   await createAccount(page, "teacher", `Capture Teacher ${runId}`, email, password);
-  await signInWithSeededBillingProfile(page, "teacher", email, password, { tier: "pro", status: "active" });
+  await signInWithSeededBillingProfile(page, "teacher", email, password, {
+    tier: "pro",
+    status: "active",
+    customerId: "cus_local_tamper_should_not_unlock",
+  });
   await page.getByRole("button", { name: /new session/i }).first().click();
 
   await expect(page.getByText(/Use a transcript, in-person capture, or meeting audio/i)).toBeVisible();

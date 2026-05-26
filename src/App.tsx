@@ -605,12 +605,17 @@ const defaultBillingProfile: BillingProfile = {
   status: "not_configured",
 };
 
-function normalizeBillingProfile(profile?: Partial<BillingProfile> | null): BillingProfile {
+function normalizeBillingProfile(profile?: Partial<BillingProfile> | null, options: { trusted?: boolean } = {}): BillingProfile {
   const candidate: BillingProfile = { ...defaultBillingProfile, ...(profile ?? {}) };
   if (candidate.tier !== "pro") return candidate;
+  if (!options.trusted) return defaultBillingProfile;
   if (isPaidPlan(candidate)) return candidate;
   if (!candidate.customerId) return defaultBillingProfile;
   return { ...candidate, tier: "free" };
+}
+
+function normalizeTrustedBillingProfile(profile?: Partial<BillingProfile> | null): BillingProfile {
+  return normalizeBillingProfile(profile, { trusted: true });
 }
 
 const secureLocalKeys = {
@@ -1796,7 +1801,7 @@ function App() {
         setRosterTemplates(state.rosterTemplates);
         setPrivacySettings(state.privacySettings);
         setAuditLog(state.auditLog);
-        setBillingProfile(state.billingProfile);
+        setBillingProfile(defaultBillingProfile);
         lastSharedJsonRef.current = sharedStateJson(state);
         lastServerUpdatedAtRef.current = state.updatedAt;
         serverSyncRef.current = true;
@@ -1817,7 +1822,7 @@ function App() {
         setRosterTemplates(localState.rosterTemplates);
         setPrivacySettings(localState.privacySettings);
         setAuditLog(localState.auditLog);
-        setBillingProfile(localState.billingProfile);
+        setBillingProfile(defaultBillingProfile);
         lastSharedJsonRef.current = sharedStateJson(localState);
         serverSyncRef.current = false;
         setSyncStatus("local");
@@ -1913,7 +1918,6 @@ function App() {
             setRosterTemplates(state.rosterTemplates);
             setPrivacySettings(state.privacySettings);
             setAuditLog(state.auditLog);
-            setBillingProfile(state.billingProfile);
           }
           lastSharedJsonRef.current = nextJson;
           lastServerUpdatedAtRef.current = state.updatedAt;
@@ -1944,6 +1948,39 @@ function App() {
       navigate("student");
     }
   }, [auth, route]);
+
+  useEffect(() => {
+    if (!sharedReady || !auth || auth.demo) {
+      if (!auth || auth?.demo) setBillingProfile(defaultBillingProfile);
+      return;
+    }
+    if (auth.role !== "teacher") {
+      setBillingProfile(defaultBillingProfile);
+      return;
+    }
+
+    let active = true;
+    getCloudSession()
+      .then((session) => {
+        if (!session) {
+          if (active) setBillingProfile(defaultBillingProfile);
+          return null;
+        }
+        return getCloudProfile();
+      })
+      .then((profile) => {
+        if (active && profile) {
+          setBillingProfile(normalizeTrustedBillingProfile(profile.billingProfile));
+        }
+      })
+      .catch(() => {
+        if (active) setBillingProfile(defaultBillingProfile);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [auth?.accountId, auth?.demo, auth?.role, sharedReady]);
 
   useEffect(() => {
     if (!auth || route !== "tutorial") return;
@@ -2017,7 +2054,7 @@ function App() {
     rosterTemplates,
     privacySettings,
     auditLog,
-    billingProfile,
+    billingProfile: defaultBillingProfile,
   });
 
   const applyCloudState = (state: Partial<SharedState>) => {
@@ -2030,7 +2067,7 @@ function App() {
     setRosterTemplates(normalized.rosterTemplates);
     setPrivacySettings(normalized.privacySettings);
     setAuditLog(normalized.auditLog);
-    setBillingProfile(normalized.billingProfile);
+    setBillingProfile(defaultBillingProfile);
     lastSharedJsonRef.current = sharedStateJson(normalized);
   };
 
@@ -5480,7 +5517,7 @@ function EmbeddedCheckoutPage({
       setMessage("Stripe returned to ClassLoop. Verifying the paid subscription before Pro unlocks...");
       try {
         const profile = await getCloudProfile();
-        const verifiedProfile = normalizeBillingProfile(profile.billingProfile);
+        const verifiedProfile = normalizeTrustedBillingProfile(profile.billingProfile);
         if (!active) return;
         setBillingProfile(verifiedProfile);
         if (isPaidPlan(verifiedProfile)) {
@@ -5724,7 +5761,7 @@ function SyncBillingPage({
       setMessage("Stripe sent you back to ClassLoop. Verifying the paid subscription before Pro unlocks...");
       try {
         const profile = await getCloudProfile();
-        const verifiedProfile = normalizeBillingProfile(profile.billingProfile);
+        const verifiedProfile = normalizeTrustedBillingProfile(profile.billingProfile);
         if (!active) return;
         setBillingProfile(verifiedProfile);
         if (isPaidPlan(verifiedProfile)) {
@@ -5759,7 +5796,7 @@ function SyncBillingPage({
   const refreshProfile = async () => {
     try {
       const profile = await getCloudProfile();
-      setBillingProfile(normalizeBillingProfile(profile.billingProfile));
+      setBillingProfile(normalizeTrustedBillingProfile(profile.billingProfile));
       setMessage("Account plan refreshed from hosted sync.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to refresh account plan.");

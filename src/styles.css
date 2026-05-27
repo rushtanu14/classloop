@@ -2020,10 +2020,22 @@ button.account-pill {
 
 .checkin-celebration {
   position: relative;
-  display: inline-flex;
-  align-items: center;
+  display: grid;
+  align-items: stretch;
   justify-content: center;
-  flex: 0 0 auto;
+  gap: 10px;
+  flex: 0 1 360px;
+  min-width: min(360px, 100%);
+}
+
+.checkin-fields {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
+.checkin-fields textarea {
+  min-height: 78px;
 }
 
 .checkin-button.completed {
@@ -2770,6 +2782,11 @@ button:disabled:hover {
   text-align: left;
 }
 
+.session-row.active {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
 .session-row small,
 .task-row small,
 .resource-row small,
@@ -3330,6 +3347,18 @@ button:disabled:hover {
   margin: 6px 0 0;
 }
 
+.integration-checkbox-list {
+  display: grid;
+  gap: 10px;
+}
+
+.integration-checkbox-list .switch-row {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
 .integration-grid {
   display: grid;
   gap: 10px;
@@ -3675,6 +3704,143 @@ button:disabled:hover {
   border-radius: 14px;
   color: var(--green);
   background: #dff8f4;
+}
+
+.template-link-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-strong) 88%, var(--primary-soft));
+}
+
+.template-link-card strong,
+.template-link-card small {
+  display: block;
+}
+
+.template-link-card small {
+  margin-top: 4px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.personal-page {
+  --personal-accent: #0ea5e9;
+}
+
+.personal-hero {
+  background:
+    linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(16, 185, 129, 0.08)),
+    var(--surface-strong);
+}
+
+.personal-hero-panel {
+  align-self: stretch;
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  min-width: min(340px, 100%);
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-strong);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+}
+
+.personal-hero-panel strong,
+.personal-hero-panel p {
+  margin: 0;
+}
+
+.personal-hero-panel p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.personal-import-layout .import-main .paste-field textarea {
+  min-height: 430px;
+}
+
+.personal-review-banner {
+  background:
+    linear-gradient(135deg, rgba(14, 165, 233, 0.1), rgba(16, 185, 129, 0.08)),
+    var(--surface-strong);
+}
+
+.personal-recap {
+  display: grid;
+  gap: 14px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.personal-recap p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.personal-recap div {
+  display: grid;
+  gap: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.personal-recap strong {
+  color: var(--ink);
+}
+
+.personal-task-list {
+  display: grid;
+  gap: 12px;
+}
+
+.personal-task-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(130px, 0.45fr) minmax(150px, 0.55fr) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+}
+
+.personal-task-row > div {
+  align-self: center;
+}
+
+.personal-task-row strong,
+.personal-task-row small {
+  display: block;
+}
+
+.personal-task-row small {
+  margin-top: 4px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.bullet-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.bullet-stack span,
+.bullet-stack a {
+  display: block;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  background: var(--surface);
+  text-decoration: none;
+  line-height: 1.35;
 }
 
 .processing-page {
@@ -6048,6 +6214,14 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .personal-task-row {
+    grid-template-columns: minmax(0, 1fr) minmax(130px, 0.45fr) minmax(150px, 0.55fr);
+  }
+
+  .personal-task-row .status-pill {
+    justify-self: start;
+  }
+
   .appearance-hero {
     grid-template-columns: 1fr;
   }
@@ -6393,6 +6567,8 @@ th {
   .capture-controls,
   .saved-roster-row,
   .resource-edit-row,
+  .personal-task-row,
+  .template-link-card,
   .usage-grid,
   .session-prep-grid {
     grid-template-columns: 1fr;

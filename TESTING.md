@@ -56,7 +56,7 @@
 - **Stripe Embedded Checkout Smoke**: `npm run test:stripe` clicks the real Pro upgrade button with mocked cloud auth and checkout APIs, verifies ClassLoop routes to the hidden `#/checkout` page instead of the left nav, verifies `/api/billing/checkout` requests embedded mode and mounts the Stripe embedded frame, verifies the hosted Checkout fallback still opens `checkout.stripe.com`, and verifies returning to ClassLoop still keeps Pro locked while webhook/profile confirmation is pending.
 - **Webhook-Owned Updates**: Entitlement tests verify Stripe checkout/subscription/invoice webhook payload mapping updates `classloop_profiles` with `plan_tier`, `subscription_status`, customer id, subscription id, and current period end.
 - **Client Tampering Guard**: Entitlement tests verify `/api/profile` PATCH helpers ignore client-submitted paid fields like `plan_tier`, camelCase paid entitlement fields, `subscription_status`, Stripe customer ids, nested billing profiles, invalid roles, and snake-case privacy tampering.
-- **Locked UI Behavior**: Browser tests verify unpaid users see Pro-only live capture cards, Free one-session-per-day copy, disabled second draft generation, verified Stripe-owned Pro unlocks paid controls, and unpaid/local entitlement attempts keep the locks.
+- **Locked UI Behavior**: Browser tests verify live capture stays available in the Free workflow, Free one-session-per-day copy appears, second draft generation is disabled for Free accounts, verified Stripe-owned Pro unlocks paid controls, and unpaid/local entitlement attempts keep paid analytics/export locks.
 
 ### Package Init / Startup Failure Tests
 - **Missing Packaged Executable**: `npm run test:package:init` runs the packaged first-run smoke against a missing executable and verifies the failure explains what artifact is absent without logging classroom/account data.
@@ -76,18 +76,19 @@
 - **Import Flow**: Teacher can load the geometry sample and generate a draft.
 - **Import Error Recovery**: Bad transcript format and malformed resource URLs show visible, non-blocking warnings; teachers can still generate a reviewable draft and corrected URLs are preserved while malformed lines are ignored.
 - **Startup / Storage Recovery**: Browser tests verify shared-state outages, non-JSON API responses, corrupt encrypted browser state, and browser storage write failures all produce visible recovery copy while keeping the app usable where possible.
-- **Publish Preview**: Teacher can open the preview and publish student follow-ups.
+- **Publish Preview**: Teacher can open the preview, toggle recap email recipients, edit the class-wide Google Classroom post composer, and publish student follow-ups.
+- **Google Classroom / Zoom Scaffold**: Teacher can import one scaffolded Classroom course roster/resources, import a transcript-ready Zoom cloud transcript file, and verify raw Zoom transcript text is removed from the saved session while structured outputs remain.
 - **Per-Student Preview Diffs**: Publish preview explains why each student receives different follow-up content.
 - **Roster Manager**: Publishing prompts the teacher to save the roster; saved rosters appear in the Rosters tab and auto-load for matching session templates.
 - **CSV Roster Import/Export**: Saved rosters and class groups accept CSV files and expose CSV export controls.
 - **Class Manager**: Saved classes show reusable rosters, default templates, and linked session history.
 - **Student View**: Published sessions appear in the student-facing portal.
-- **Student Completion**: Students can mark work complete, which moves the follow-up into a submitted state for teacher review.
+- **Student Completion**: Students can mark work complete with an optional note/file link, which moves the follow-up into a submitted state for teacher review.
 - **Student Feedback Popup**: After marking a follow-up complete, students can rate ClassLoop usefulness from the bottom-right popup; low ratings request improvement notes, post transcript-attached product feedback to the creator feedback endpoint, disclose that the teacher will not see it, and do not appear in teacher analytics or action queues.
 - **Multi-Session E2E**: Fresh teacher/student accounts run Math review, CS workshop, and Club meeting imports through review, publish, student dashboard, completion, and teacher report export.
 - **Workspace Isolation**: Browser tests verify another teacher cannot see the first teacher's sessions, saved roster, or class group, and each student account sees only sessions rostered to that student's email.
 - **Teacher Review Loop**: Teacher preview can mark submitted student check-ins as reviewed.
-- **Capture Modes**: New session flow exposes transcript, in-person class, and online meeting capture choices without biometric voice identification claims.
+- **Capture Modes**: New session flow exposes transcript, in-person class, online meeting capture, and Zoom cloud transcript import choices without biometric voice identification claims.
 - **Analytics Hiding And Direct Route Blocking**: Student navigation does not expose teacher analytics, and direct hashes for analytics, classes, rosters, report, billing, privacy, new-session, and review routes return to the student dashboard.
 - **Publish Audit**: Preview/report pages show publish audit evidence for class-wide and per-student follow-ups.
 - **Report Exports**: Session report exposes JSON, CSV, and print actions.
@@ -202,12 +203,12 @@ When the user says "use the testing script," run the saved ClassLoop QA sequence
 - pass/fail by command
 - browser workflow result
 - anything not verifiable without the configured Gmail/SMTP sender
-- whether paid/API-key/external-platform features remain absent from the app, except Gmail/SMTP email through a user-owned sender
-- whether class manager, CSV roster import/export, publish audit, student submitted/reviewed states, and report exports are reachable
+- whether paid/API-key/external-platform features remain honest scaffolds or absent, with no fake live Classroom/Zoom/LMS/OpenAI posting/transcription and Gmail/SMTP email through the configured ClassLoop sender only
+- whether class manager, CSV roster import/export, Classroom roster/resource scaffold import, Zoom cloud transcript scaffold import, publish audit, recipient toggles, student submitted/reviewed states, note/file links, and report exports are reachable
 - whether student feedback popups stay hidden until completion, capture high and low usefulness ratings as transcript-attached creator product feedback, request improvement notes for low ratings, disclose creator/transcript routing, avoid separate roster/email/grade payloads, and stay out of teacher analytics/action queues
 - whether every supported noisy Zoom/CSV import variation still parses, including malformed rows, duplicate emails/names, mixed aliases, and transcript-only roster estimation
 - whether Supabase auth transitions, token expiry handling, conflict resolution, network-loss queueing, and missing-credential desktop fallback pass
-- whether Free/Pro entitlement boundaries, webhook-driven entitlement updates, upgrade/downgrade flows, and unpaid locked-feature UI pass
+- whether Free/Pro entitlement boundaries, webhook-driven entitlement updates, upgrade/downgrade flows, Free live capture access, and unpaid paid-feature locks pass
 - whether clicking Upgrade to Pro opens the hidden embedded Stripe Checkout page, keeps the hosted Checkout fallback working, and still keeps Pro locked until the paid webhook/profile state is verified
 - whether local data files and `.env.local` are ignored/untracked, no high-confidence tracked secrets are present, runtime debug/info logs are absent, startup/error logging is actionable without sensitive payloads, and the legal baseline is present
 - whether public hosted signups remain gated/sample-only until Terms of Use, Privacy Policy, desktop EULA, hosted retention/deletion SLAs, support contact, and child-safety expectations have final legal review

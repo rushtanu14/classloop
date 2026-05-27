@@ -72,14 +72,15 @@ npm install
 - Teacher-side session dashboard, import flow, AI review draft, session report, and analytics.
 - Student-side dashboard and session detail views.
 - Student and teacher appearance customization, saved only to the signed-in account.
-- Transcript paste/upload plus best-effort in-person microphone capture and browser online-meeting capture when available.
+- Transcript paste/upload, transcript-ready Zoom cloud import scaffolding, plus best-effort in-person microphone capture and browser online-meeting capture when available.
+- Manual roster entry or Google Classroom course import scaffolding for one selected course, including roster, course metadata, and teacher-confirmed recent assignments/resources.
 - Teacher-assisted speaker matching for live capture: ClassLoop creates unknown voice segments for review instead of using biometric voiceprints.
-- Publish preview with one-click recap email delivery through a user-owned Gmail/SMTP sender.
+- Publish preview with editable class-wide Google Classroom post copy, recap email recipient toggles, and one-click recap email delivery through a ClassLoop-owned Gmail/SMTP sender when configured.
 - Per-student preview differences that explain why each student receives different follow-ups.
 - Saved roster manager with CSV import/export and alias cleanup.
 - Class/course manager that stores reusable class rosters, default session templates, and linked session history.
 - Publish audit showing what will be shared with the class and why each student receives different follow-ups.
-- Student completion flow from to do to submitted to teacher reviewed.
+- Student dashboard prioritizing tasks due soon, with completion flow from to do to submitted to teacher reviewed plus optional student note/file link.
 - Print, JSON, and CSV-friendly session reports for sharing or local recordkeeping.
 - Privacy controls for retention settings, workspace export/delete, and audit history.
 - Explicit sample accounts and sample session data for demonstrations.
@@ -91,15 +92,17 @@ ClassLoop should work without paid services. Transcript paste/upload, local acco
 
 External service support is intentionally narrow:
 
-- Email: use a Gmail account you own, such as `classloop.noreply@gmail.com`, with an app password. ClassLoop cannot generate Gmail accounts or send from addresses you do not own.
+- Google Sign-In and Supabase/Auth email are the planned hosted account path. Student magic links/email codes should use hosted auth email when configured, not a made-up sender.
+- Google Classroom: launch surfaces should let a teacher pick one course, import roster/course metadata/recent assignments/resources, edit a class-wide post, and only then post through a real OAuth-backed Classroom API connection. Until OAuth is configured, the app must say the post is ready but not connected.
+- Zoom: launch surfaces should show transcript-ready cloud meetings, allow date/title search, and let the teacher choose a transcript file. Raw Zoom transcript text should be removed after recap generation; structured recap, tasks, resources, participation, and follow-ups remain.
+- Email: recap emails use a ClassLoop-owned Gmail/SMTP sender when configured, such as `classloop.noreply@gmail.com`. ClassLoop cannot generate Gmail accounts or send from unauthenticated domains.
 - Audio notes: use browser live speech recognition when available, with transcript paste/upload as the reliable fallback.
 
 Removed/deferred because they require paid API keys, school platform credentials, or external integration setup:
 
 - OpenAI/custom transcription.
-- Google Classroom OAuth posting.
 - Canvas/LMS posting.
-- External transcription-dependent online-call capture. ClassLoop uses free browser capture/speech APIs where available and still treats platform transcript paste/upload as the reliable path.
+- Live Zoom bot attendance/call capture. ClassLoop uses free browser capture/speech APIs where available and still treats platform transcript paste/upload or Zoom cloud transcripts as the reliable path.
 
 ## Hosted Backend And Freemium MVP
 
@@ -129,8 +132,8 @@ Hosted route behavior:
 
 Suggested pricing:
 
-- Free: `$0`, 1 generated session per day, transcript import, draft review, student portal preview, CSV roster tools, and local desktop storage.
-- Pro: `$3.99/month`, unlimited sessions, live in-person/online capture modes, multi-device cloud login, email delivery logs, privacy exports, and advanced reports.
+- Free: `$0`, 1 generated session per day, transcript import, Google/Zoom workflow scaffolding, student accounts, recap email delivery, CSV roster tools, and local desktop storage.
+- Pro: `$3.99/month`, unlimited generated sessions plus private analytics and JSON/CSV/print report exports.
 
 Configure hosted mode from `.env.example`. Public Vite variables are safe for the browser build; `SUPABASE_SERVICE_ROLE_KEY`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET` must only live in Vercel/server environment variables.
 
@@ -359,13 +362,13 @@ Core MVP promise:
 1. Add teacher notes templates for recurring lesson styles, such as exit tickets, lab workshops, club meetings, and tutoring sessions.
 2. Add local version history for publish changes so teachers can compare what changed between draft, published, and revised follow-ups.
 3. Add a lightweight student inbox showing unread class updates and teacher-reviewed submissions.
-4. Add accessibility settings for font size, reduced motion, and high-contrast classroom mode.
+4. Add explicit font-size and reduced-motion controls; high contrast should continue to follow device/browser settings.
 5. Add a local backup/restore workflow for moving ClassLoop data between devices without a hosted backend.
 6. Configure and verify live Supabase, Stripe, and Vercel credentials when the hosted version is ready for a pilot.
 7. Run a real teacher/student pilot and use the feedback endpoint to prioritize the next polish pass.
 
 ## Monetization Direction
 
-- Free: 1 generated session per day, transcript import, draft review, student portal preview, CSV roster tools, and local desktop storage.
-- Pro: `$3.99/month` for unlimited sessions, live capture modes, multi-device cloud login/sync, delivery logs, privacy exports, and advanced reports.
+- Free: 1 generated session per day, transcript import, Google/Zoom workflow scaffolding, student accounts, recap email delivery, CSV roster tools, and local desktop storage.
+- Pro: `$3.99/month` for unlimited generated sessions plus private analytics and JSON/CSV/print report exports.
 - School/team features stay future-only until the product has real pilot demand and a privacy/legal review path.

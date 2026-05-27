@@ -6,6 +6,7 @@ const looseIdPattern = /^[A-Za-z0-9._:@/-]{1,160}$/;
 
 const sessionTypes = ["Math review", "CS workshop", "General classroom", "Club meeting", "Study group"];
 const taskStatuses = ["todo", "in_progress", "submitted", "reviewed", "complete", "overdue"];
+const personalTaskStatuses = ["todo", "in_progress", "complete"];
 const participationTypes = ["asked_question", "answered_question", "chat", "quiet", "absent"];
 const attendanceStatuses = ["present", "absent", "late"];
 const studentSubmissionStatuses = ["todo", "working", "submitted", "reviewed"];
@@ -29,11 +30,12 @@ const optionalText = (max, defaultValue) => field.string({ max, optional: true, 
 const requiredTrimmed = (max, pattern) => field.string({ max, pattern });
 const optionalTrimmed = (max, defaultValue, pattern) => field.string({ max, optional: true, defaultValue, pattern });
 const optionalEmail = field.string({ max: 320, optional: true, pattern: emailPattern });
+const emailOrBlank = field.string({ max: 320, pattern: /^$|^[^\s@]+@[^\s@]+\.[^\s@]+$/ });
 
 const studentSchema = {
   id: requiredTrimmed(160, looseIdPattern),
   name: requiredTrimmed(160),
-  email: field.string({ max: 320, pattern: emailPattern }),
+  email: emailOrBlank,
   avatarColor: requiredTrimmed(40),
   guardian: optionalTrimmed(200),
   aliases: field.array(requiredTrimmed(160), { max: 20, optional: true, defaultValue: [] }),
@@ -100,7 +102,7 @@ const captureSchema = {
   sourceLabel: requiredTrimmed(220),
   capturedAt: requiredIsoDate,
   durationSeconds: field.number({ min: 0, max: 24 * 60 * 60, optional: true }),
-  transcriptSource: field.enum(["file", "paste", "live_transcription", "audio_recording"]),
+  transcriptSource: field.enum(["file", "paste", "zoom_cloud_transcript", "live_transcription", "audio_recording"]),
 };
 
 const emailDeliverySchema = {
@@ -136,6 +138,7 @@ const submissionSchema = {
   sessionId: requiredTrimmed(160, looseIdPattern),
   status: field.enum(studentSubmissionStatuses),
   note: optionalText(2_000, ""),
+  attachmentUrl: field.string({ max: 2_048, optional: true, defaultValue: "" }),
   submittedAt: optionalIsoDate,
   reviewedAt: optionalIsoDate,
 };
@@ -178,7 +181,7 @@ const themeSchema = {
 
 const accountSchema = {
   id: requiredTrimmed(160, looseIdPattern),
-  role: field.enum(["teacher", "student"]),
+  role: field.enum(["teacher", "student", "individual"]),
   email: field.string({ max: 320, pattern: emailPattern }),
   name: requiredTrimmed(160),
   passwordHash: field.string({ max: 512 }),
@@ -186,6 +189,29 @@ const accountSchema = {
   theme: field.object(themeSchema, { optional: true }),
   submittedProductFeedbackKeys: field.array(requiredTrimmed(320), { max: 500, optional: true, defaultValue: [] }),
   demo: field.boolean({ optional: true, defaultValue: false }),
+};
+
+const personalTaskSchema = {
+  id: requiredTrimmed(160, looseIdPattern),
+  title: requiredTrimmed(300),
+  status: field.enum(personalTaskStatuses),
+  dueDateText: optionalTrimmed(160, ""),
+  source: optionalText(1_000, ""),
+};
+
+const personalMeetingSchema = {
+  id: requiredTrimmed(160, looseIdPattern),
+  ownerEmail: field.string({ max: 320, pattern: emailPattern }),
+  title: requiredTrimmed(220),
+  date: field.string({ max: 80 }),
+  minutes: requiredText(300_000),
+  context: optionalText(10_000, ""),
+  recap: optionalText(60_000, ""),
+  resources: field.array(field.object(resourceSchema), { max: 100 }),
+  questions: field.array(requiredTrimmed(300), { max: 50 }),
+  tasks: field.array(field.object(personalTaskSchema), { max: 200 }),
+  createdAt: requiredIsoDate,
+  updatedAt: requiredIsoDate,
 };
 
 const classGroupSchema = {
@@ -219,7 +245,7 @@ const privacySettingsSchema = {
 const auditLogEntrySchema = {
   id: requiredTrimmed(160, looseIdPattern),
   actorEmail: field.string({ max: 320, pattern: emailPattern }),
-  actorRole: field.enum(["teacher", "student"]),
+  actorRole: field.enum(["teacher", "student", "individual"]),
   action: requiredTrimmed(120),
   detail: requiredText(1_000),
   createdAt: requiredIsoDate,
@@ -237,6 +263,7 @@ const billingProfileSchema = {
 const cloudWorkspaceStateSchema = {
   accounts: field.array(field.object(accountSchema), { max: 500 }),
   sessions: field.array(field.object(sessionSchema), { max: 250 }),
+  personalMeetings: field.array(field.object(personalMeetingSchema), { max: 500, optional: true, defaultValue: [] }),
   draft: field.nullableObject(sessionSchema),
   demoLoaded: field.boolean(),
   classGroups: field.array(field.object(classGroupSchema), { max: 100 }),
@@ -252,7 +279,7 @@ export function validateFeedbackPayload(payload) {
     {
       rating: field.number({ min: 1, max: 5, integer: true, optional: true, defaultValue: 3 }),
       note: optionalText(2_000, ""),
-      role: field.enum(["teacher", "student"], { optional: true, defaultValue: "teacher" }),
+      role: field.enum(["teacher", "student", "individual"], { optional: true, defaultValue: "teacher" }),
       source: field.enum(feedbackSources, { optional: true, defaultValue: "pilot_feedback" }),
       transcript: optionalText(60_000, ""),
       metadata: field.record(metadataValue, {
@@ -272,7 +299,7 @@ export function validateProfilePatchPayload(payload) {
     payload,
     {
       noTrainingOnStudentData: field.boolean({ optional: true }),
-      role: field.enum(["teacher", "student"], { optional: true }),
+      role: field.enum(["teacher", "student", "individual"], { optional: true }),
     },
     { name: "profile update" },
   );

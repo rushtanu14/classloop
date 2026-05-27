@@ -72,11 +72,16 @@ test.describe("WCAG-targeted accessibility checks", () => {
     await resetBrowser(page);
     await expectNoUnnamedInteractive(page, ".login-panel");
     await expect(
-      page.getByRole("tablist", { name: /choose account type/i }).getByRole("tab", { name: /teacher/i }),
+      page.getByRole("tablist", { name: /choose workspace type/i }).getByRole("tab", { name: /class/i }),
+    ).toHaveAttribute("aria-selected", "true");
+    await expect(
+      page.getByRole("tablist", { name: /choose class role/i }).getByRole("tab", { name: /teacher/i }),
     ).toHaveAttribute("aria-selected", "true");
     await expectKeyboardFocusOrder(page, [
       /^Sign in$/,
       /^Create account$/,
+      /^Individual$/,
+      /^Class$/,
       /^Teacher$/,
       /^Student$/,
       /Email name@example.com/,

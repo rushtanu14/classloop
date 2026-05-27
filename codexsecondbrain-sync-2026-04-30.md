@@ -307,10 +307,10 @@ Feature checks:
 10. Teacher appearance settings remain teacher-account scoped.
 11. Image backdrop URL updates the live preview and app background when a safe HTTPS image URL is used.
 12. Live capture modes require consent confirmation when privacy settings require it.
-13. Paid/API-key/external-platform features are absent from the working app: no OpenAI transcription, custom transcription endpoint, Google Classroom posting, or LMS posting. Browser-only in-person/online-meeting capture is allowed because it uses free local browser capabilities and still treats transcript paste/upload as the reliable path.
-14. Publish preview shows delivery logs after email send actions.
+13. Paid/API-key/external-platform features do not pretend to be live: no OpenAI transcription, custom transcription endpoint, LMS posting, or live Zoom bot. Google Classroom and Zoom cloud surfaces are allowed only as honest scaffolds until OAuth/API credentials are connected.
+14. Publish preview shows delivery logs after email send actions, supports teacher toggles for email recipients, and includes an editable class-wide Google Classroom post composer.
 15. Privacy page is accessible to teachers and exposes retention settings, export, delete class data, consent settings, and audit log.
-16. After students mark a follow-up complete, student follow-up pages show a bottom-right ClassLoop usefulness feedback popup; low ratings ask what would make ClassLoop better, post product feedback to the creator feedback endpoint without student names/emails, and do not appear in teacher Analytics or action queues.
+16. After students mark a follow-up complete, student follow-up pages can include a student note/file link and then show a bottom-right ClassLoop usefulness feedback popup; low ratings ask what would make ClassLoop better, post product feedback to the creator feedback endpoint without student names/emails, and do not appear in teacher Analytics or action queues.
 17. Account/session/browser roster fallback storage uses secure classloop:secure:* localStorage keys; legacy plain classloop:accounts/session keys should migrate away.
 18. Responsive layout has no horizontal overflow at a phone-sized viewport.
 19. WCAG-targeted checks pass for keyboard navigation, focus order, visible focus indicators, accessible control names, live status announcements, contrast on key text/buttons, and mobile PWA/add-to-home-screen readability.
@@ -365,7 +365,7 @@ Playwright is a required dev dependency for ClassLoop browser QA.
 - The user does not want to pay for integrations during the prototype stage.
 - ClassLoop cannot generate a Gmail account or send from an address the user does not own.
 - Free email path: the user creates/owns a Gmail account such as `classloop.noreply@gmail.com`, enables 2-Step Verification, creates an app password, and configures ClassLoop to send from that mailbox with `CLASSLOOP_REPLY_TO` set to the teacher/support inbox.
-- Remove or hide Google Classroom OAuth posting, LMS posting, OpenAI transcription, and custom transcription endpoints from the working app because they depend on external integration setup or paid API-key paths. Browser-only online meeting capture is allowed as a free best-effort feature.
+- Google Classroom and Zoom cloud import can be shown as launch scaffolds only when the UI is explicit that OAuth/API connection is not live yet. Keep LMS posting, OpenAI transcription, custom transcription endpoints, and live Zoom bots removed/deferred because they require external integration setup or paid API-key paths. Browser-only online meeting capture is allowed as a free best-effort feature.
 - If no external credentials are configured, ClassLoop must remain useful through transcript paste/upload, local review, publish preview, student portal, roster manager, and analytics.
 
 ## 2026-05-06 Roster Template Notes
@@ -389,7 +389,7 @@ Playwright is a required dev dependency for ClassLoop browser QA.
   - student portal “Since your last visit” evidence based on personalized follow-up differences
   - JSON, CSV, and print report actions on session reports
   - Electron state persistence for class groups
-- The working app still excludes paid/API-key/external-platform workflows: no OpenAI/custom transcription, Google Classroom posting, LMS posting, or external transcription-dependent online-call capture.
+- The working app still excludes paid/API-key/external-platform workflows that would imply live credentials: no OpenAI/custom transcription, LMS posting, or live Zoom bot. Classroom/Zoom UI must remain an honest scaffold until OAuth/API credentials are connected.
 - Verification on the improvement branch:
   - `npm run build` passed
   - `npm run test:import` passed
@@ -425,8 +425,8 @@ When using the ClassLoop testing script, also verify:
   - RLS-backed tables in `supabase/schema.sql`.
   - Vercel browser deployment config in `vercel.json`.
 - Freemium MVP:
-  - Free: `$0`, 1 generated session per day, transcript import, CSV import/export, student portal preview, local desktop storage.
-  - Pro: `$3.99/month`, unlimited sessions, live in-person/online capture modes, multi-device cloud login/sync, delivery logs, privacy exports, advanced reports.
+  - Free: `$0`, 1 generated session per day, transcript import, Google/Zoom workflow scaffolding, student accounts, recap email delivery, CSV import/export, student portal preview, local desktop storage.
+  - Pro: `$3.99/month`, unlimited generated sessions plus private analytics and JSON/CSV/print report exports.
 - Added teacher-only Plan options and Privacy controls.
 - Added `AGENT.md` operational memory at repo root.
 - Consolidated `main` keeps the richer features: live audio notes, browser meeting capture, Gmail/SMTP delivery, class manager, publish audit, and submitted/reviewed student workflow.
@@ -468,8 +468,35 @@ All three validate with `quick_validate.py`.
 - Demo-account state is ephemeral: sample teacher/student changes are not written to the normal persistence path, demo-owned state is stripped before storage, and a top demo banner reminds users to download the app to save data.
 - `public/classloop-downloads.json` points the landing-page download controls at external desktop installer hosts when packaging is ready. Keep installer binaries out of Vercel Blob so Vercel only handles the web/PWA shell and APIs. Until external installer links are ready, the page tells visitors to use the web demo.
 - `/api/config` now returns a safe config version plus hosted backend booleans. If live Vercel still returns `stripeSchoolConfigured`, the deployed app is stale and must redeploy latest `main`.
-- Current active freemium model: Free is 1 generated session per day; Pro is `$3.99/month` with unlimited sessions, live capture modes, multi-device cloud sync, delivery logs, privacy exports, and advanced reports. School pilot UI/env keys remain removed/deferred.
+- Current active freemium model: Free is 1 generated session per day with Google Classroom, Zoom transcript import, student accounts, and recap email delivery in the free workflow; Pro is `$3.99/month` for unlimited sessions plus private analytics and JSON/CSV/print report exports. School pilot UI/env keys remain removed/deferred.
 - Verification passed after landing update: `npm run build`, `npm run test:import`, `npm run test:browser` (14/14), `node -c desktop/main.cjs`, `node --check api/*.js api/billing/*.js`, and `git diff --check -- ':!dist/**'`.
+
+## 2026-05-26 Launch Integration And Completion Update
+
+- Launch framing remains teacher-first: save time after class by turning a transcript, roster, resources, and notes into a teacher-approved recap workflow.
+- Google Classroom launch scope:
+  - teachers can choose manual roster or one Google Classroom course;
+  - Classroom course import brings roster, course metadata, and recent same-course assignments/resources;
+  - relevance is keyword match plus recent same-course items, with teacher final approval;
+  - Classroom posting is class-wide only: recap, resources, and shared tasks, not personalized follow-ups;
+  - teachers edit the exact Classroom post and choose Announcement, Assignment, or Material, with assignment due date defaulting from detected ClassLoop due dates.
+- Zoom launch scope:
+  - teachers can search transcript-ready cloud meetings by title/date and choose one transcript file when Zoom has multiple files;
+  - raw Zoom cloud transcript text is auto-deleted after draft generation;
+  - structured recap, tasks, resources, participation, and follow-ups remain.
+- Email/sign-in scope:
+  - recap emails use a ClassLoop-owned Gmail/SMTP sender when configured;
+  - magic link/email-code sign-in should use Supabase/Auth email delivery when configured;
+  - teachers can toggle recap email recipients on/off before sending.
+- Student launch scope:
+  - student dashboard should lead with tasks due soon;
+  - student profile editing covers name, email, avatar, and accessibility settings;
+  - high contrast follows device/browser settings while background themes are already implemented;
+  - student completion supports submitted note/file link, then teacher review/approval.
+- Future/deferred:
+  - parent/guardian emails are out at launch;
+  - live Zoom bot is future work;
+  - personalized Classroom posts are out of scope for launch.
 
 ## 2026-05-12 Prompt-Free Storage / Routed Landing Update
 

@@ -1,4 +1,4 @@
-import { createGeneratedSession, readTranscriptFileText } from "../src/data.js";
+import { createGeneratedSession, createPersonalMeetingDraft, readTranscriptFileText } from "../src/data.js";
 
 function assert(condition: boolean, message: string) {
   if (!condition) throw new Error(message);
@@ -617,14 +617,39 @@ assert(transcriptOnlyNames.includes("Jalen Thompson"), "transcript-only estimate
 assert(!transcriptOnlyNames.includes("Student (Aaliyah Carter)"), "transcript-only estimates should avoid duplicate generic labels");
 assert(!transcriptOnlyNames.includes("Ms. Rivera"), "transcript-only estimates should exclude teacher-like speakers");
 assert(
-  transcriptOnlySession.students.every((student) => student.email.endsWith("@classloop.local")),
-  "transcript-only estimated students should use local placeholder emails until teacher confirmation",
+  transcriptOnlySession.students.every((student) => student.email === ""),
+  "transcript-only estimated students should keep blank emails until imported or manually added",
 );
 assertEqual(transcriptOnlySession.followUps.length, 3, "transcript-only estimates should create reviewable follow-ups");
 assertEqual(
   transcriptOnlySession.unmatchedParticipants?.length ?? 0,
   0,
   "transcript-only mode should not flag estimated speakers as unmatched before teacher confirmation",
+);
+
+const personalMeeting = createPersonalMeetingDraft({
+  ownerEmail: "rushil@classloop.test",
+  title: "",
+  minutes: `Meeting title: Product sync
+Date: 2026-05-27
+Context: Reviewing individual meeting minutes mode.
+Resources:
+- https://example.com/spec
+Questions:
+- Should statuses stay simple?
+Due dates:
+- Send template copy link by Friday
+Minutes:
+- I need to send the template copy link by Friday.
+- Review the dashboard polish next week.`,
+});
+assertEqual(personalMeeting.title, "Product sync", "personal meeting should read the template meeting title");
+assertEqual(personalMeeting.date, "2026-05-27", "personal meeting should read the template date");
+assertEqual(personalMeeting.resources.length, 1, "personal meeting should parse resource links");
+assert(personalMeeting.questions.includes("Should statuses stay simple?"), "personal meeting should collect questions");
+assert(
+  personalMeeting.tasks.some((task) => task.status === "todo" && task.dueDateText.toLowerCase().includes("friday")),
+  "personal meeting tasks should include editable status and due date text",
 );
 
 const meetingNotesMetadataSession = createGeneratedSession({

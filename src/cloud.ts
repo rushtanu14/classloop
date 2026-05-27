@@ -34,7 +34,7 @@ export type BackendStatus = {
 
 export type CloudProfile = {
   email: string;
-  role: "teacher" | "student";
+  role: "teacher" | "student" | "individual";
   billingProfile: BillingProfile;
   noTrainingOnStudentData: boolean;
 };
@@ -50,14 +50,14 @@ export const planCatalog = [
     tier: "free" as const,
     name: "Free",
     price: "$0",
-    detail: "1 generated session per day, transcript import, draft review, student portal preview, and CSV roster tools.",
+    detail: "1 generated session per day, Google/Zoom workflow, student accounts, recap email delivery, and roster tools.",
     sessionLimit: 1,
   },
   {
     tier: "pro" as const,
     name: "Pro",
     price: "$3.99/mo",
-    detail: "Unlimited sessions, live capture modes, multi-device cloud sync, email delivery logs, privacy exports, and advanced reports.",
+    detail: "Unlimited generated sessions plus private analytics and JSON/CSV/print report exports.",
     sessionLimit: Number.POSITIVE_INFINITY,
   },
 ];

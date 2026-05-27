@@ -176,7 +176,8 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   await expect(page.getByText(/Demo account upgrades are disabled/i)).toBeVisible();
   await expect(page.getByRole("heading", { name: /What Pro unlocks after payment/i })).toBeVisible();
   await expect(page.getByText(/Stripe verifies the upgrade/i)).toBeVisible();
-  await expect(page.getByText(/Cloud login is the multi-device account/i)).toBeVisible();
+  await expect(page.getByText(/Analytics and report exports/i)).toBeVisible();
+  await expect(page.getByText(/Google Classroom, Zoom transcript import, student accounts, and recap email delivery stay in the Free workflow/i)).toBeVisible();
 });
 
 test("hosted public screenshots and privacy routes expose compliance boundaries", async ({ page }) => {

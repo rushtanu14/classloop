@@ -18,7 +18,7 @@ export function profilePatchColumns(payload = {}) {
   if (typeof payload.noTrainingOnStudentData === "boolean") {
     allowed.no_training_on_student_data = payload.noTrainingOnStudentData;
   }
-  if (payload.role === "teacher" || payload.role === "student") {
+  if (payload.role === "teacher" || payload.role === "student" || payload.role === "individual") {
     allowed.role = payload.role;
   }
   return allowed;

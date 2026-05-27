@@ -60,6 +60,7 @@ function mockResponse() {
 const validWorkspaceState = {
   accounts: [],
   sessions: [],
+  personalMeetings: [],
   draft: null,
   demoLoaded: false,
   classGroups: [],
@@ -109,6 +110,7 @@ assert.deepEqual(validateProfilePatchPayload({ role: "teacher", noTrainingOnStud
   role: "teacher",
   noTrainingOnStudentData: false,
 });
+assert.deepEqual(validateProfilePatchPayload({ role: "individual" }), { role: "individual" });
 assertThrowsStatus(() => validateProfilePatchPayload({ plan_tier: "pro" }), 400, /unsupported field/i);
 assertThrowsStatus(() => validateProfilePatchPayload({ role: "owner" }), 400, /one of/i);
 

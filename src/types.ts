@@ -58,6 +58,7 @@ export type StudentSubmission = {
   sessionId: string;
   status: StudentSubmissionStatus;
   note: string;
+  attachmentUrl?: string;
   submittedAt?: string;
   reviewedAt?: string;
 };
@@ -123,7 +124,7 @@ export type SessionCapture = {
   sourceLabel: string;
   capturedAt: string;
   durationSeconds?: number;
-  transcriptSource: "file" | "paste" | "live_transcription" | "audio_recording";
+  transcriptSource: "file" | "paste" | "zoom_cloud_transcript" | "live_transcription" | "audio_recording";
 };
 
 export type SessionEmailDelivery = {

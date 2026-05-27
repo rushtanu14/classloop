@@ -20,14 +20,13 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /^ClassLoop$/i })).toBeVisible();
   const screenshotsButton = page.getByRole("button", { name: /^screenshots$/i });
   const docsButton = page.getByRole("button", { name: /^docs$/i });
-  const donateButton = page.getByRole("button", { name: /^donate$/i });
   const isWideViewport = (page.viewportSize()?.width ?? 0) > 920;
   const heroCopy = page.locator(".landing-hero-copy");
   await expect(heroCopy.getByRole("button")).toHaveCount(3);
   await expect(heroCopy.getByRole("button", { name: /open web demo/i })).toBeVisible();
   await expect(heroCopy.getByRole("button", { name: /add to phone/i })).toBeVisible();
   await expect(heroCopy.getByRole("button", { name: /view screenshots/i })).toBeVisible();
-  await expect(heroCopy.getByRole("button", { name: /download|macos|support classloop/i })).toHaveCount(0);
+  await expect(heroCopy.getByRole("button", { name: /download|macos/i })).toHaveCount(0);
   await expect(page.locator(".landing-hero .landing-platform-list")).toHaveCount(0);
   if (isWideViewport) {
     await expect(screenshotsButton).toBeVisible();
@@ -36,11 +35,7 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
     } else {
       await expect(page.getByRole("button", { name: /^privacy$/i })).toBeVisible();
     }
-    if (await donateButton.isVisible().catch(() => false)) {
-      await expect(donateButton).toBeVisible();
-    } else {
-      await expect(page.getByRole("button", { name: /^mobile$/i })).toBeVisible();
-    }
+    await expect(page.getByRole("button", { name: /^support$/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /^download$/i })).toBeVisible();
   }
   await expect(page.getByRole("button", { name: /open web demo/i })).toBeVisible();
@@ -67,13 +62,6 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   if (await docsButton.isVisible().catch(() => false)) {
     await docsButton.click();
     await expect(page.getByRole("heading", { name: /^ClassLoop docs\.$/i })).toBeVisible();
-  }
-
-  if (await donateButton.isVisible().catch(() => false)) {
-    await donateButton.click();
-    await expect(page.getByRole("heading", { name: /support classloop development/i })).toBeVisible();
-    await page.getByRole("button", { name: /support \$3/i }).click();
-    await expect(page.getByRole("status").filter({ hasText: /donation link has not been connected/i })).toBeVisible();
   }
 
   await page.goto("/?demoOnly=1");
@@ -176,7 +164,8 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   await expect(page.getByText(/Demo account upgrades are disabled/i)).toBeVisible();
   await expect(page.getByRole("heading", { name: /What Pro unlocks after payment/i })).toBeVisible();
   await expect(page.getByText(/Stripe verifies the upgrade/i)).toBeVisible();
-  await expect(page.getByText(/Cloud login is the multi-device account/i)).toBeVisible();
+  await expect(page.getByText(/Analytics and report exports/i)).toBeVisible();
+  await expect(page.getByText(/Google Classroom, Zoom transcript import, student accounts, and recap email delivery stay in the Free workflow/i)).toBeVisible();
 });
 
 test("hosted public screenshots and privacy routes expose compliance boundaries", async ({ page }) => {

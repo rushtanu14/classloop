@@ -339,6 +339,15 @@ async function importReviewAndPublishScenario(page: Page, scenario: EndToEndScen
   await expect(page.getByText(/review the student view/i)).toBeVisible();
   await expect(page.getByText(/student portal preview/i)).toBeVisible();
   await expect(page.getByText(/publish audit/i)).toBeVisible();
+  await expect(page.getByText(/google classroom post/i)).toBeVisible();
+  await expect(page.locator('[aria-label="Email recap recipients"]')).toContainText(scenario.student.email);
+  await page.getByLabel(/post type/i).selectOption("assignment");
+  await expect(page.getByLabel(/assignment due date/i)).toHaveValue(/\d{4}-\d{2}-\d{2}/);
+  await page
+    .getByLabel(/classroom body/i)
+    .fill(`Class-wide recap for ${scenario.title}\n\nResources and shared tasks only.`);
+  await page.getByRole("button", { name: /post to classroom/i }).click();
+  await expect(page.getByText(/connect google classroom oauth/i)).toBeVisible();
   await expect(page.locator(".preview-diff-row")).toHaveCount(2);
   await expect(page.getByLabel(new RegExp(`Preview for ${escapeRegExp(scenario.student.name)}`, "i"))).toBeVisible();
   await page.getByRole("button", { name: /publish to students/i }).click();
@@ -347,16 +356,29 @@ async function importReviewAndPublishScenario(page: Page, scenario: EndToEndScen
   await handleRosterPrompt(page, scenario.rosterSaveName);
 }
 
+function submissionNoteForScenario(scenario: EndToEndScenario) {
+  return `Finished the ClassLoop task for ${scenario.title}.`;
+}
+
+function submissionLinkForScenario(scenario: EndToEndScenario) {
+  return `https://docs.example.com/${scenario.student.name.toLowerCase().replace(/\s+/g, "-")}`;
+}
+
 async function completeScenarioAsStudent(page: Page, scenario: EndToEndScenario, allTitles: string[]) {
   await createAccount(page, "student", scenario.student.name, scenario.student.email, scenario.student.password);
   await expect(page.getByText(`${scenario.student.name}'s follow-up dashboard`)).toBeVisible();
+  await expect(page.getByText(/tasks due soon/i)).toBeVisible();
   await expect(page.locator(".today-card").getByRole("heading", { name: scenario.title })).toBeVisible();
   for (const otherTitle of allTitles.filter((title) => title !== scenario.title)) {
     await expect(page.locator(".student-page").getByText(otherTitle)).toHaveCount(0);
   }
   await expect(page.getByRole("region", { name: /classloop product feedback/i })).toHaveCount(0);
-  await page.getByRole("button", { name: /mark complete/i }).click();
-  await expect(page.locator(".today-card").getByText(/submitted/i)).toBeVisible();
+  await page.getByRole("button", { name: /open detail/i }).click();
+  await expect(page.getByLabel(/note to teacher/i)).toBeVisible();
+  await page.getByLabel(/note to teacher/i).fill(submissionNoteForScenario(scenario));
+  await page.getByLabel(/file or link/i).fill(submissionLinkForScenario(scenario));
+  await page.getByRole("button", { name: /complete check-in/i }).click();
+  await expect(page.getByRole("button", { name: /completed/i })).toBeVisible();
   await expect(page.getByRole("region", { name: /classloop product feedback/i })).toBeVisible();
   if (scenario.template === "Math review") {
     await page.getByRole("button", { name: /rate 2 out of 5/i }).click();
@@ -505,6 +527,10 @@ async function publishGeometrySample(page: Page) {
   await expect(page.getByText(/student portal preview/i)).toBeVisible();
   await expect(page.getByText(/per-student preview differences/i)).toBeVisible();
   await expect(page.getByText(/publish audit/i)).toBeVisible();
+  await expect(page.getByText(/teacher-approved class-wide post/i)).toBeVisible();
+  await expect(page.locator('[aria-label="Email recap recipients"]')).toContainText("Maya Chen");
+  await page.getByLabel(/include magic link or email code/i).check();
+  await expect(page.getByText(/supabase\/auth email delivery/i)).toBeVisible();
   expect(await page.locator(".preview-diff-row").count()).toBeGreaterThanOrEqual(2);
   await page.locator(".preview-diff-row").filter({ hasText: "Aarav" }).click();
   await expect(page.getByLabel(/Preview for Aarav Patel/i)).toBeVisible();
@@ -519,6 +545,50 @@ async function publishGeometrySample(page: Page) {
   await page.getByRole("button", { name: /save roster/i }).click();
   await expect(page.getByText(/Follow-through tracker/i)).toBeVisible();
 }
+
+test("teacher can scaffold Classroom roster/resources and Zoom cloud transcript import", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The integration scaffold smoke runs once; responsive coverage comes from the main app smoke.");
+  const runId = Date.now().toString(36);
+  await resetBrowser(page);
+  await createAccount(page, "teacher", `Integration Teacher ${runId}`, `integrations-${runId}@classloop.test`, `teacher-pass-${runId}`);
+
+  await page.getByRole("button", { name: /new session/i }).first().click();
+  await expect(page.getByLabel(/google docs class template/i)).toBeVisible();
+  await expect(page.getByText(/template link is not connected yet/i)).toBeVisible();
+  await expect(page.getByText(/roster source/i)).toBeVisible();
+  await page.getByRole("button", { name: /google classroom/i }).click();
+  await page.getByLabel(/classroom course/i).selectOption("cs4all-period-4");
+  await expect(page.getByText(/Everyday Algorithms Worksheet/i)).toBeVisible();
+  await expect(page.getByText(/recent same-course item/i).first()).toBeVisible();
+  await page.getByRole("button", { name: /import selected classroom course/i }).click();
+  await expect(page.getByText(/Imported 6 students from CS4All Intro to Computational Thinking/i)).toBeVisible();
+
+  await expect(page.getByText(/zoom cloud import/i)).toBeVisible();
+  await page.getByLabel(/search date or title/i).fill("CS4All");
+  await page.getByRole("button", { name: /import selected zoom transcript/i }).click();
+  await expect(page.getByText(/Imported Audio transcript VTT from CS4All Intro to Computational Thinking/i)).toBeVisible();
+  await page.getByRole("button", { name: /generate draft/i }).click();
+  await expect(page.getByText(/edit the draft before publishing/i)).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("tab", { name: /roster & matching/i }).click();
+  await expect
+    .poll(async () =>
+      page.locator(".roster-email-field input").evaluateAll((inputs) =>
+        inputs.some((input) => (input as HTMLInputElement).value === "pmehta@cs4all.nyc"),
+      ),
+    )
+    .toBe(true);
+
+  await page.getByRole("button", { name: /preview and publish/i }).click();
+  await expect(page.getByText(/google classroom post/i)).toBeVisible();
+  await page.getByRole("button", { name: /publish to students/i }).click();
+  await handleRosterPrompt(page);
+  const exported = await downloadCurrentReportJson(page);
+  expect(exported.capture?.transcriptSource).toBe("zoom_cloud_transcript");
+  expect(exported.transcript).toBe("");
+  expect(exported.notes).toContain("Raw Zoom cloud transcript auto-deleted after draft generation.");
+  expect(exported.students.map((student) => student.email)).toContain("acarter@cs4all.nyc");
+  expect(exported.resources.some((resource) => resource.url.includes("classroom.google.com/c/CS4ALL"))).toBe(true);
+});
 
 test("teacher and student end-to-end flows work across three realistic session types without cross-user state leaks", async ({
   page,
@@ -688,6 +758,9 @@ Leo Martinez, leo-club-${runId}@classloop.test`,
     if (!primaryStudent) throw new Error(`Missing exported student ${scenario.student.email}`);
     const followUp = exported.followUps.find((item) => item.studentId === primaryStudent.id);
     expect(followUp?.status).toBe("submitted");
+    const submittedPayload = exported.submissions?.find((item) => item.studentId === primaryStudent.id);
+    expect(submittedPayload?.note).toBe(submissionNoteForScenario(scenario));
+    expect(submittedPayload?.attachmentUrl).toBe(submissionLinkForScenario(scenario));
     const classWideActionStatuses = exported.actionItems.filter((item) => !item.ownerId).map((item) => item.status);
     expect(classWideActionStatuses.length).toBeGreaterThan(0);
     expect(classWideActionStatuses).not.toContain("submitted");
@@ -704,6 +777,8 @@ Leo Martinez, leo-club-${runId}@classloop.test`,
     const reviewedSubmission = reviewedExport.submissions?.find((item) => item.studentId === primaryStudent.id);
     expect(reviewedFollowUp?.status).toBe("reviewed");
     expect(reviewedSubmission?.reviewedAt).toBeTruthy();
+    expect(reviewedSubmission?.note).toBe(submissionNoteForScenario(scenario));
+    expect(reviewedSubmission?.attachmentUrl).toBe(submissionLinkForScenario(scenario));
   }
 
   await page.getByRole("button", { name: /rosters/i }).click();
@@ -963,7 +1038,7 @@ test("privacy, sync billing, appearance, and tutorial controls are usable", asyn
   await expect(page.getByText(/You are on a demo account/i)).toBeVisible();
 });
 
-test("live capture modes are visible but Pro-gated for Free accounts", async ({ page }) => {
+test("live capture modes stay free while local billing tampering does not unlock Pro", async ({ page }) => {
   const runId = Date.now().toString(36);
   const email = `capture-${runId}@classloop.test`;
   const password = `teacher-pass-${runId}`;
@@ -980,23 +1055,8 @@ test("live capture modes are visible but Pro-gated for Free accounts", async ({ 
   await expect(page.getByRole("button", { name: /Transcript\s*Upload or paste/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /In-person class/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /Online meeting/i })).toBeVisible();
-  await expect(page.getByText(/Pro only/i).first()).toBeVisible();
-
-  await page.getByRole("button", { name: /In-person class/i }).click();
-  await expect(page.getByText(/In-person live capture is available with Pro/i)).toBeVisible();
-
-  await page.getByRole("button", { name: /^plan options$/i }).click();
-  await page.getByRole("button", { name: /upgrade to pro/i }).scrollIntoViewIfNeeded();
-  await page.getByRole("button", { name: /upgrade to pro/i }).click({ force: true });
-  await expect(
-    page.locator(".settings-message").filter({ hasText: /Connect or create a cloud login|Pro now requires Stripe Checkout/i }),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: /downgrade to free/i })).toHaveCount(0);
-  await expect(page.getByText(/FREE · not_configured/i)).toBeVisible();
-
-  await signInWithVerifiedProEntitlement(page, email, password);
-  await page.getByRole("button", { name: /new session/i }).first().click();
   await expect(page.getByText(/Pro only/i)).toHaveCount(0);
+
   await page.getByRole("button", { name: /In-person class/i }).click();
   await expect(page.getByText(/No voiceprints are created/i)).toBeVisible();
   await expect(page.getByText(/unknown voice segments/i)).toBeVisible();
@@ -1007,9 +1067,19 @@ test("live capture modes are visible but Pro-gated for Free accounts", async ({ 
   await expect(page.getByRole("dialog", { name: /share the meeting tab or window with audio/i })).toBeVisible();
   await expect(page.getByText(/Paste the platform transcript after class/i)).toBeVisible();
   await page.getByRole("button", { name: /not now/i }).click();
+
+  await page.getByRole("button", { name: /^plan options$/i }).click();
+  await page.getByRole("button", { name: /upgrade to pro/i }).scrollIntoViewIfNeeded();
+  await page.getByRole("button", { name: /upgrade to pro/i }).click({ force: true });
+  await expect(
+    page.locator(".settings-message").filter({ hasText: /Connect or create a cloud login|Pro now requires Stripe Checkout/i }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /downgrade to free/i })).toHaveCount(0);
+  await expect(page.getByText(/FREE · not_configured/i)).toBeVisible();
 });
 
-test("Stripe embedded Checkout page opens from Pro upgrade without unlocking Pro first", async ({ page }) => {
+test("Stripe embedded Checkout page opens from Pro upgrade without unlocking Pro first", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The embedded checkout smoke runs once on desktop; mobile checkout is covered by responsive app smokes.");
   const runId = Date.now().toString(36);
   const email = `stripe-${runId}@classloop.test`;
   const password = `teacher-pass-${runId}`;

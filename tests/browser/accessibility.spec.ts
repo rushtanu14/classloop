@@ -105,7 +105,7 @@ test.describe("WCAG-targeted accessibility checks", () => {
     if ((page.viewportSize()?.width ?? 0) > 920) {
       await expect(page.getByRole("button", { name: /^screenshots$/i })).toBeVisible();
       await expect(page.getByRole("button", { name: /^docs$/i })).toBeVisible();
-      await expect(page.getByRole("button", { name: /^donate$/i })).toBeVisible();
+      await expect(page.getByRole("button", { name: /^support$/i })).toBeVisible();
     }
 
     await expectNoUnnamedInteractive(page, ".landing-page");

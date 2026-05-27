@@ -617,8 +617,8 @@ assert(transcriptOnlyNames.includes("Jalen Thompson"), "transcript-only estimate
 assert(!transcriptOnlyNames.includes("Student (Aaliyah Carter)"), "transcript-only estimates should avoid duplicate generic labels");
 assert(!transcriptOnlyNames.includes("Ms. Rivera"), "transcript-only estimates should exclude teacher-like speakers");
 assert(
-  transcriptOnlySession.students.every((student) => student.email.endsWith("@classloop.local")),
-  "transcript-only estimated students should use local placeholder emails until teacher confirmation",
+  transcriptOnlySession.students.every((student) => student.email === ""),
+  "transcript-only estimated students should keep blank emails until imported or manually added",
 );
 assertEqual(transcriptOnlySession.followUps.length, 3, "transcript-only estimates should create reviewable follow-ups");
 assertEqual(

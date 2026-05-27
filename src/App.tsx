@@ -141,7 +141,7 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
 };
 
-type LandingPageKey = "home" | "features" | "screenshots" | "docs" | "privacy" | "terms" | "eula" | "support" | "donate" | "download";
+type LandingPageKey = "home" | "features" | "screenshots" | "docs" | "privacy" | "terms" | "eula" | "support" | "download";
 type DesktopInstallerId = "macos" | "windows" | "linux";
 
 type ReleasePlatformManifest = {
@@ -158,6 +158,10 @@ type ReleaseDownloadManifest = {
   macos?: ReleasePlatformManifest;
   windows?: ReleasePlatformManifest;
   linux?: ReleasePlatformManifest;
+};
+
+type TemplateLinkManifest = {
+  classTemplateCopyUrl?: string;
 };
 
 type Account = {
@@ -338,6 +342,13 @@ function normalizeReleaseDownloadManifest(value: unknown): ReleaseDownloadManife
     macos: normalizeReleasePlatformManifest(value.macos),
     windows: normalizeReleasePlatformManifest(value.windows),
     linux: normalizeReleasePlatformManifest(value.linux),
+  };
+}
+
+function normalizeTemplateLinkManifest(value: unknown): TemplateLinkManifest {
+  if (!isRecord(value)) return {};
+  return {
+    classTemplateCopyUrl: readManifestString(value.classTemplateCopyUrl),
   };
 }
 
@@ -725,7 +736,6 @@ function getLandingPage(): LandingPageKey {
     route === "terms" ||
     route === "eula" ||
     route === "support" ||
-    route === "donate" ||
     route === "download"
   ) {
     return route;
@@ -752,7 +762,6 @@ function isLandingHash() {
     route === "terms" ||
     route === "eula" ||
     route === "support" ||
-    route === "donate" ||
     route === "download" ||
     hash === "#features" ||
     hash === "#screenshots" ||
@@ -761,7 +770,6 @@ function isLandingHash() {
     hash === "#terms" ||
     hash === "#eula" ||
     hash === "#support" ||
-    hash === "#donate" ||
     hash === "#download"
   );
 }
@@ -826,6 +834,132 @@ const captureModeLabels: Record<SessionCaptureMode, string> = {
   online_meeting: "Online meeting capture",
 };
 
+type ClassroomSourceMode = "manual" | "classroom";
+type ClassroomPostType = "announcement" | "assignment" | "material";
+
+type ClassroomCourseOption = {
+  id: string;
+  name: string;
+  section: string;
+  courseCode: string;
+  roster: string;
+  resources: Array<{
+    id: string;
+    title: string;
+    type: "assignment" | "material";
+    url: string;
+    updatedAt: string;
+    keywordHint: string;
+  }>;
+};
+
+type ZoomCloudMeetingOption = {
+  id: string;
+  title: string;
+  date: string;
+  files: Array<{
+    id: string;
+    label: string;
+    transcript: string;
+  }>;
+};
+
+const classroomCourseOptions: ClassroomCourseOption[] = [
+  {
+    id: "cs4all-period-4",
+    name: "CS4All Intro to Computational Thinking",
+    section: "Period 4",
+    courseCode: "CS4ALL-P4",
+    roster: `Aaliyah Carter, acarter@cs4all.nyc
+Danny Reyes, dreyes@cs4all.nyc
+Jalen Thompson, jthompson@cs4all.nyc
+Priya Mehta, pmehta@cs4all.nyc
+Keisha Brown, kbrown@cs4all.nyc
+Leo Fernandez, lfernandez@cs4all.nyc`,
+    resources: [
+      {
+        id: "algorithm-worksheet",
+        title: "Everyday Algorithms Worksheet",
+        type: "assignment",
+        url: "https://classroom.google.com/c/CS4ALL/a/algorithm-worksheet",
+        updatedAt: "2026-04-28",
+        keywordHint: "algorithm worksheet homework",
+      },
+      {
+        id: "decomposition-video",
+        title: "Problem Decomposition Video",
+        type: "material",
+        url: "https://classroom.google.com/c/CS4ALL/m/decomposition-video",
+        updatedAt: "2026-04-27",
+        keywordHint: "decomposition functions python",
+      },
+    ],
+  },
+  {
+    id: "geometry-period-2",
+    name: "Geometry Review",
+    section: "Period 2",
+    courseCode: "GEO-P2",
+    roster: sampleRoster,
+    resources: [
+      {
+        id: "similar-triangles-review",
+        title: "Similar Triangles Review",
+        type: "material",
+        url: "https://classroom.google.com/c/GEO-P2/m/similar-triangles-review",
+        updatedAt: "2026-05-20",
+        keywordHint: "similar triangles proportions review",
+      },
+      {
+        id: "error-analysis",
+        title: "Error Analysis Worksheet",
+        type: "assignment",
+        url: "https://classroom.google.com/c/GEO-P2/a/error-analysis",
+        updatedAt: "2026-05-19",
+        keywordHint: "algebra error analysis worksheet",
+      },
+    ],
+  },
+];
+
+const zoomCloudMeetingOptions: ZoomCloudMeetingOption[] = [
+  {
+    id: "zoom-cs4all-demo",
+    title: "CS4All Intro to Computational Thinking",
+    date: "2026-04-28",
+    files: [
+      {
+        id: "main-transcript",
+        label: "Audio transcript VTT",
+        transcript: `[00:00:44] Ms. Rivera: Great. Who can tell me what an algorithm is?
+[00:00:57] Student (Priya Mehta): Is it like a set of steps to solve a problem?
+[00:01:14] Student (Jalen Thompson): [Chat] TikTok algorithm lol
+[00:10:31] Student (Keisha Brown): Step 1, pick up the bread bag and put two slices on the plate.
+[00:11:48] Student (Priya Mehta): Break it into smaller parts?
+[00:13:35] Ms. Rivera: Homework for Thursday: complete the algorithm design worksheet on Google Classroom.`,
+      },
+      {
+        id: "chat-transcript",
+        label: "Chat transcript",
+        transcript: `[Chat] Priya Mehta: found this video -> https://www.youtube.com/watch?v=6hfOvs8pY1k
+[Chat] Leo Fernandez: decomposition video -> https://www.youtube.com/watch?v=QXjU9qTsYCc`,
+      },
+    ],
+  },
+  {
+    id: "zoom-geometry-demo",
+    title: "Geometry Review: Similar Triangles",
+    date: "2026-05-20",
+    files: [
+      {
+        id: "main-transcript",
+        label: "Audio transcript",
+        transcript: sampleTranscript,
+      },
+    ],
+  },
+];
+
 function appendCapturedText(current: string, text: string) {
   const clean = text.replace(/\s+/g, " ").trim();
   if (!clean) return current;
@@ -849,6 +983,41 @@ function studentEmailRecipients(session: Session) {
   return session.students
     .map((student) => studentAccessEmails(student)[0] ?? "")
     .filter((email) => email && !email.endsWith("@classloop.local"));
+}
+
+function classroomPostDueDate(session: Session) {
+  return (
+    session.actionItems.find((item) => !item.ownerId && item.dueDate)?.dueDate ??
+    session.actionItems.find((item) => item.dueDate)?.dueDate ??
+    session.followUps.find((followUp) => followUp.dueDate)?.dueDate ??
+    localDayKey()
+  );
+}
+
+function defaultClassroomPostTitle(session: Session) {
+  return `${session.title} recap and next steps`;
+}
+
+function defaultClassroomPostBody(session: Session) {
+  const classWideTasks = session.actionItems.filter((item) => !item.ownerId);
+  const taskLines = classWideTasks.length
+    ? classWideTasks.map((item) => `- ${item.title}${item.dueDate ? ` (due ${formatDate(item.dueDate)})` : ""}`)
+    : ["- Review the recap and complete the next steps your teacher approved."];
+  const resourceLines = session.resources.length
+    ? session.resources.map((resource) => `- ${resource.title}: ${resource.url}`)
+    : ["- No additional resources attached."];
+
+  return [
+    session.recap,
+    "",
+    "Class-wide tasks:",
+    ...taskLines,
+    "",
+    "Resources:",
+    ...resourceLines,
+    "",
+    "Personalized ClassLoop follow-ups stay in each student's ClassLoop dashboard.",
+  ].join("\n");
 }
 
 function studentsWithoutDeliverableEmail(session: Session) {
@@ -1065,7 +1234,7 @@ function makeRosterStudent(name: string, email = "", index = 0, aliases: string[
   return {
     id,
     name: cleanName,
-    email: normalizeEmail(email || `${slugify(cleanName, `student-${index + 1}`)}@classloop.local`),
+    email: normalizeEmail(email),
     avatarColor: rosterAvatarColors[index % rosterAvatarColors.length],
     aliases: uniqueText(aliases),
   };
@@ -1099,7 +1268,7 @@ function syncSessionRoster(session: Session, students: Student[]): Session {
     .map((student, index) => ({
       ...student,
       name: student.name.trim() || `Student ${index + 1}`,
-      email: normalizeEmail(student.email || `${slugify(student.name || `student-${index + 1}`, `student-${index + 1}`)}@classloop.local`),
+      email: normalizeEmail(student.email),
       avatarColor: student.avatarColor || rosterAvatarColors[index % rosterAvatarColors.length],
       aliases: uniqueText(student.aliases ?? []),
     }));
@@ -1615,6 +1784,7 @@ function setStudentSubmission(
   studentId: string,
   status: StudentSubmissionStatus,
   note = "",
+  attachmentUrl = "",
 ): Session {
   const now = new Date().toISOString();
   const currentSubmissions = session.submissions ?? [];
@@ -1624,6 +1794,7 @@ function setStudentSubmission(
     sessionId: session.id,
     status,
     note: note || existing?.note || "",
+    attachmentUrl: attachmentUrl || existing?.attachmentUrl,
     submittedAt: status === "submitted" ? now : existing?.submittedAt,
     reviewedAt: status === "reviewed" ? now : existing?.reviewedAt,
   };
@@ -1718,6 +1889,7 @@ function App() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
   const [bootPhase, setBootPhase] = useState<BootPhase>("sync");
   const [workspaceNotice, setWorkspaceNotice] = useState<WorkspaceNotice | null>(null);
+  const [templateLinks, setTemplateLinks] = useState<TemplateLinkManifest>({});
   const [passwordResetCodes, setPasswordResetCodes] = useState<Record<string, PasswordResetRecord>>({});
   const [celebrationMoment, setCelebrationMoment] = useState<CelebrationMoment | null>(null);
   const serverSyncRef = useRef(false);
@@ -1746,6 +1918,21 @@ function App() {
     document.documentElement.style.setProperty("--primary", theme.accent ?? defaultTheme.accent);
     document.documentElement.style.setProperty("--custom-backdrop", safeBackgroundUrl(theme.imageUrl ?? ""));
   }, [theme]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/classloop-template-links.json", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : {}))
+      .then((manifest) => {
+        if (active) setTemplateLinks(normalizeTemplateLinkManifest(manifest));
+      })
+      .catch(() => {
+        if (active) setTemplateLinks({});
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -2291,12 +2478,12 @@ function App() {
     navigate("report", { session: published.id });
   };
 
-  const markFollowUpComplete = (sessionId: string, studentId: string) => {
+  const markFollowUpComplete = (sessionId: string, studentId: string, note = "", attachmentUrl = "") => {
     setSessions((current) =>
       current.map((session) =>
         session.id === sessionId
           ? {
-              ...setStudentSubmission(session, studentId, "submitted", "Marked complete from the student portal."),
+              ...setStudentSubmission(session, studentId, "submitted", note || "Marked complete from the student portal.", attachmentUrl),
               actionItems: session.actionItems.map((item) =>
                 item.ownerId === studentId ? { ...item, status: "submitted" } : item,
               ),
@@ -2698,9 +2885,10 @@ function App() {
             rosterTemplates={teacherRosterTemplates}
             classGroups={teacherClassGroups}
             canCreateSession={!freeLimitReached}
-            canUseLiveCapture={hasPaidAccess}
+            canUseLiveCapture={true}
             dailySessionsUsed={freeSessionsToday}
             planName={billingProfile.tier === "free" ? "Free" : "Pro"}
+            classTemplateCopyUrl={templateLinks.classTemplateCopyUrl}
           />
         )}
         {effectiveRoute === "processing" && <Processing draft={visibleDraft} />}
@@ -2883,7 +3071,6 @@ function LandingPage({
 }) {
   const [downloadMessage, setDownloadMessage] = useState("");
   const [mobileMessage, setMobileMessage] = useState("");
-  const [donationMessage, setDonationMessage] = useState("");
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandaloneMobile, setIsStandaloneMobile] = useState(false);
   const [showDesktopInstallerChoices, setShowDesktopInstallerChoices] = useState(false);
@@ -2899,7 +3086,6 @@ function LandingPage({
     return releaseUrlIsVercelBlob(url) ? undefined : url;
   };
 
-  const donationUrl = cleanUrl(import.meta.env.VITE_CLASSLOOP_DONATE_URL as string | undefined);
   const supportEmail = cleanUrl(import.meta.env.VITE_CLASSLOOP_SUPPORT_EMAIL as string | undefined) || "rushilcpm02@gmail.com";
   const checksumUrl = cleanExternalReleaseUrl(releaseDownloads.checksumsUrl);
 
@@ -3061,7 +3247,6 @@ function LandingPage({
     { page: "docs", label: "Docs" },
     { page: "privacy", label: "Privacy" },
     { page: "support", label: "Support" },
-    { page: "donate", label: "Donate" },
     { page: "download", label: "Download" },
   ];
 
@@ -3077,20 +3262,6 @@ function LandingPage({
     }
     setDownloadMessage(
       `${option.label} packaging pending: the desktop installer has not been uploaded yet. You can try the hosted web demo now.`,
-    );
-  };
-
-  const handleDonate = (amount?: number) => {
-    if (donationUrl) {
-      const url = new URL(donationUrl, window.location.href);
-      if (amount && !url.searchParams.has("amount")) {
-        url.searchParams.set("amount", String(amount));
-      }
-      window.location.href = url.toString();
-      return;
-    }
-    setDonationMessage(
-      "The donation page is ready, but the public donation link has not been connected yet.",
     );
   };
 
@@ -3258,7 +3429,7 @@ function LandingPage({
               </article>
               <article>
                 <strong>Understand the product</strong>
-                <p>Use separate pages for features, docs, privacy, donations, and downloads instead of one crowded page.</p>
+                <p>Use separate pages for features, docs, privacy, support, and downloads instead of one crowded page.</p>
                 <button className="landing-secondary" type="button" onClick={() => goToPage("features")}>Explore features</button>
               </article>
               <article>
@@ -3470,7 +3641,7 @@ function LandingPage({
             <section className="landing-policy-panel">
               <h2>Hosted demo boundary and school readiness</h2>
               <p>
-                Public hosted demos use sample accounts only. Durable personal workspaces belong in the downloaded app
+                Public hosted demos use sample accounts only. Durable saved workspaces belong in the downloaded app
                 or in hosted sync after Supabase, billing, retention/deletion SLAs, and school data terms are intentionally configured.
               </p>
               <p>
@@ -3635,52 +3806,6 @@ function LandingPage({
           </>
         )}
 
-        {page === "donate" && (
-          <>
-            <header className="landing-page-header">
-              <h1>Support ClassLoop development.</h1>
-              <p>
-                ClassLoop can stay free-first for teachers while donations help fund packaging, accessibility testing,
-                classroom pilots, and careful privacy work.
-              </p>
-            </header>
-            <section className="landing-donation-panel" aria-label="Donation options">
-              {[3, 9, 25].map((amount) => (
-                <article key={amount}>
-                  <strong>${amount}</strong>
-                  <span>
-                    {amount === 3
-                      ? "Bug-fix thank-you"
-                      : amount === 9
-                        ? "One month of ClassLoop Pro target pricing"
-                        : "Packaging and teacher pilot support"}
-                  </span>
-                  <button className="landing-primary" type="button" onClick={() => handleDonate(amount)}>
-                    Support ${amount}
-                  </button>
-                </article>
-              ))}
-            </section>
-            <section className="landing-policy-panel">
-              <h2>Other ways to help</h2>
-              <p>Try the demo, report confusing import results, share a classroom transcript format, or star the project when it is public.</p>
-              <div className="landing-actions compact">
-                <button className="landing-secondary" type="button" onClick={onOpenApp}>
-                  Open demo
-                </button>
-                <button className="landing-secondary" type="button" onClick={() => goToPage("docs")}>
-                  Read docs
-                </button>
-              </div>
-              {donationMessage && (
-                <p className="landing-message" role="status" aria-live="polite">
-                  {donationMessage}
-                </p>
-              )}
-            </section>
-          </>
-        )}
-
         {page === "download" && (
           <>
             <header className="landing-page-header">
@@ -3824,7 +3949,7 @@ function LandingPage({
             </section>
             <section className="landing-policy-panel">
               <h2>Safe demo path</h2>
-              <p>Hosted demo data is sample-only and resettable. Create durable personal accounts in the downloaded desktop app.</p>
+              <p>Hosted demo data is sample-only and resettable. Create durable teacher or student accounts in the downloaded desktop app.</p>
               <div className="landing-actions compact">
                 <button className="landing-secondary" type="button" onClick={onOpenApp}>
                   Open web demo
@@ -4045,8 +4170,9 @@ function LoginPage({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const demoEmail = role === "teacher" ? demoTeacherEmail : demoStudentEmail;
-  const demoPassword = role === "teacher" ? "classloop-teacher" : "classloop-student";
+  const classRole = role === "student" ? "student" : "teacher";
+  const demoEmail = classRole === "teacher" ? demoTeacherEmail : demoStudentEmail;
+  const demoPassword = classRole === "teacher" ? "classloop-teacher" : "classloop-student";
 
   useEffect(() => {
     if (!demoOnly || mode !== "signin") return;
@@ -4250,7 +4376,7 @@ function LoginPage({
           </span>
           <div>
             <strong>ClassLoop</strong>
-            <small>Secure classroom workspace</small>
+            <small>Classroom continuity</small>
             {classLoopBuildMarker() && (
               <small className="login-build-marker" title={classLoopBuildDetails()}>
                 {classLoopBuildMarker()}
@@ -4265,7 +4391,7 @@ function LoginPage({
           <p>
             {demoOnly
               ? "The web demo resets sample work. Download the desktop app when you are ready to create your own account and save data."
-              : "Keep class follow-ups organized in one place. Teachers publish updates when they are ready, and students see the work meant for them."}
+              : "Teachers create follow-up loops. Students open the recaps, tasks, and resources their teacher approved."}
           </p>
         </div>
         <form className="login-form" onSubmit={submit}>
@@ -4388,7 +4514,7 @@ function LoginPage({
           <span>Student: {demoStudentEmail} / classloop-student</span>
           {demoOnly && <span>Download the app to create an account and keep your own workspace.</span>}
           <button type="button" className="text-button sample-account-button" onClick={fillDemo}>
-            Use sample {role} account
+            Use sample {classRole} account
             <ChevronRight size={16} />
           </button>
         </div>
@@ -4901,12 +5027,14 @@ function Sidebar({
   onLogout: () => void;
   showDemoCard: boolean;
 }) {
-  const visibleNavSections = auth.role === "teacher" ? teacherNavSections : studentNavSections;
+  const visibleNavSections =
+    auth.role === "teacher" ? teacherNavSections : studentNavSections;
+  const homeRoute: RouteKey = auth.role === "teacher" ? "dashboard" : "student";
   return (
     <aside className="sidebar">
       <button
         className="brand"
-        onClick={() => navigate(auth.role === "teacher" ? "dashboard" : "student")}
+        onClick={() => navigate(homeRoute)}
         aria-label="Go to dashboard"
       >
         <span className="brand-mark">
@@ -5004,7 +5132,7 @@ function Topbar({
       <div className="topbar-actions">
         <div className="profile-control">
           <button className="account-pill" onClick={() => setProfileOpen((open) => !open)} aria-expanded={profileOpen}>
-            {auth.role === "teacher" ? <UserRound size={16} /> : <GraduationCap size={16} />}
+            {auth.role === "student" ? <GraduationCap size={16} /> : <UserRound size={16} />}
             {auth.name}
           </button>
           {profileOpen && (
@@ -5403,6 +5531,38 @@ function Panel({
         )}
       </div>
       {children}
+    </section>
+  );
+}
+
+function TemplateLinkCard({
+  title,
+  detail,
+  url,
+}: {
+  title: string;
+  detail: string;
+  url?: string;
+}) {
+  const connected = Boolean(url?.trim());
+  return (
+    <section className="template-link-card" aria-label={title}>
+      <div>
+        <strong>{title}</strong>
+        <small>
+          {connected
+            ? detail
+            : "Template link is not connected yet. Add the Google Docs copy URL in public/classloop-template-links.json."}
+        </small>
+      </div>
+      {connected ? (
+        <a className="ghost-button" href={url} target="_blank" rel="noreferrer">
+          <FileText size={17} />
+          Make a copy
+        </a>
+      ) : (
+        <span className="status-pill todo">Not connected</span>
+      )}
     </section>
   );
 }
@@ -5898,8 +6058,8 @@ function SyncBillingPage({
           <span className="eyebrow">Plan options</span>
           <h2>Save time on every class follow-up.</h2>
           <p>
-            Free is for trying the workflow. Pro is for teachers who want unlimited follow-ups, live capture, multi-device
-            access, delivery logs, and reusable reports without rebuilding the same class record again.
+            Free includes the classroom workflow and integrations. Pro is for teachers who want unlimited sessions,
+            analytics, and report exports without the one-session-per-day cap.
           </p>
         </div>
       </section>
@@ -6014,13 +6174,13 @@ function SyncBillingPage({
                 <small>Generate more than one class follow-up per day, reuse rosters, and avoid rebuilding student tasks manually.</small>
               </div>
               <div className="integration-card">
-                <strong>Capture class moments faster</strong>
-                <small>Unlock in-person and online meeting capture so you can draft from live class notes when transcript files are not ready.</small>
+                <strong>Keep integrations free</strong>
+                <small>Google Classroom, Zoom transcript import, student accounts, and recap email delivery stay in the Free workflow.</small>
               </div>
               <div className="integration-card">
-                <strong>Work from more than one device</strong>
+                <strong>Pay for scale, not setup</strong>
                 <small>
-                  Cloud login is the multi-device account for desktop, browser, and phone PWA access. Stripe Checkout must verify it before Pro turns on.
+                  Upgrade when the one-session-per-day cap or teacher analytics/report export limits get in the way.
                 </small>
               </div>
               {isDemoAccount && (
@@ -6095,21 +6255,9 @@ function SyncBillingPage({
             </small>
           </div>
           <div className="integration-card">
-            <strong>3. Live class capture modes</strong>
+            <strong>3. Analytics and report exports</strong>
             <small>
-              In-person and online meeting capture unlock on the New session screen so teachers can draft from live discussion notes when transcript files are not ready.
-            </small>
-          </div>
-          <div className="integration-card">
-            <strong>4. Multi-device workflow</strong>
-            <small>
-              Use cloud login to upload this device, download the cloud copy somewhere else, and keep paid access tied to the same teacher account.
-            </small>
-          </div>
-          <div className="integration-card">
-            <strong>5. Pro review tools</strong>
-            <small>
-              Delivery logs, privacy exports, and advanced reports stay grouped with the paid workspace so teachers can audit what was published and what students still need.
+              Private analytics, JSON/CSV/print report exports, and trend views are the paid review layer for repeated classroom use.
             </small>
           </div>
         </div>
@@ -6179,6 +6327,7 @@ function ImportSession({
   canUseLiveCapture,
   dailySessionsUsed,
   planName,
+  classTemplateCopyUrl,
 }: {
   ownerEmail: string;
   setDraft: (session: Session) => void;
@@ -6191,6 +6340,7 @@ function ImportSession({
   canUseLiveCapture: boolean;
   dailySessionsUsed: number;
   planName: string;
+  classTemplateCopyUrl?: string;
 }) {
   const [title, setTitle] = useState("");
   const [template, setTemplate] = useState<SessionType>("General classroom");
@@ -6200,6 +6350,17 @@ function ImportSession({
   const [resources, setResources] = useState("");
   const [fileName, setFileName] = useState("");
   const [templateDetails, setTemplateDetails] = useState<Record<string, string>>({});
+  const [rosterSource, setRosterSource] = useState<ClassroomSourceMode>("manual");
+  const [selectedClassroomCourseId, setSelectedClassroomCourseId] = useState(classroomCourseOptions[0]?.id ?? "");
+  const [selectedClassroomResourceIds, setSelectedClassroomResourceIds] = useState<string[]>(
+    classroomCourseOptions[0]?.resources.map((resource) => resource.id) ?? [],
+  );
+  const [classroomMessage, setClassroomMessage] = useState("");
+  const [zoomSearch, setZoomSearch] = useState("");
+  const [selectedZoomMeetingId, setSelectedZoomMeetingId] = useState(zoomCloudMeetingOptions[0]?.id ?? "");
+  const [selectedZoomTranscriptFileId, setSelectedZoomTranscriptFileId] = useState(zoomCloudMeetingOptions[0]?.files[0]?.id ?? "");
+  const [zoomCloudImported, setZoomCloudImported] = useState(false);
+  const [zoomMessage, setZoomMessage] = useState("");
   const [captureMode, setCaptureMode] = useState<SessionCaptureMode>("transcript");
   const [captureStatus, setCaptureStatus] = useState<"idle" | "recording" | "stopped">("idle");
   const [captureMessage, setCaptureMessage] = useState("");
@@ -6218,6 +6379,22 @@ function ImportSession({
   const captureStartedAtRef = useRef<number | null>(null);
   const liveSegmentCountRef = useRef(0);
   const activeTemplateFields = templateDetailFields[template];
+  const selectedClassroomCourse =
+    classroomCourseOptions.find((course) => course.id === selectedClassroomCourseId) ?? classroomCourseOptions[0];
+  const selectedClassroomResources = selectedClassroomCourse?.resources.filter((resource) =>
+    selectedClassroomResourceIds.includes(resource.id),
+  ) ?? [];
+  const filteredZoomMeetings = useMemo(() => {
+    const query = zoomSearch.trim().toLowerCase();
+    if (!query) return zoomCloudMeetingOptions;
+    return zoomCloudMeetingOptions.filter((meeting) =>
+      [meeting.title, meeting.date].some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [zoomSearch]);
+  const selectedZoomMeeting =
+    zoomCloudMeetingOptions.find((meeting) => meeting.id === selectedZoomMeetingId) ?? filteredZoomMeetings[0] ?? zoomCloudMeetingOptions[0];
+  const selectedZoomTranscriptFile =
+    selectedZoomMeeting?.files.find((file) => file.id === selectedZoomTranscriptFileId) ?? selectedZoomMeeting?.files[0];
   const matchingRosterTemplates = useMemo(
     () => rosterTemplates.filter((templateItem) => templateItem.sessionType === template),
     [rosterTemplates, template],
@@ -6250,6 +6427,16 @@ function ImportSession({
       (malformedResourceLineCount === 1 ? "line needs" : "lines need") +
       " http:// or https://. ClassLoop will ignore malformed links until corrected."
     : "";
+
+  useEffect(() => {
+    if (!selectedClassroomCourse) return;
+    setSelectedClassroomResourceIds(selectedClassroomCourse.resources.map((resource) => resource.id));
+  }, [selectedClassroomCourseId]);
+
+  useEffect(() => {
+    if (!selectedZoomMeeting) return;
+    setSelectedZoomTranscriptFileId(selectedZoomMeeting.files[0]?.id ?? "");
+  }, [selectedZoomMeetingId]);
 
   useEffect(() => {
     const matchingTemplate = rosterTemplates.find((templateItem) => templateItem.sessionType === template);
@@ -6422,6 +6609,8 @@ function ImportSession({
     setTitle("Geometry Review: Similar Triangles + Algebra");
     setTemplate("Math review");
     setCaptureMode("transcript");
+    setZoomCloudImported(false);
+    setRosterSource("manual");
     setTranscript(sampleTranscript);
     setNotes(sampleNotes);
     setRoster(sampleRoster);
@@ -6434,10 +6623,51 @@ function ImportSession({
     onUseDemo();
   };
 
+  const importClassroomCourse = () => {
+    if (!selectedClassroomCourse) return;
+    setRosterSource("classroom");
+    setRoster(selectedClassroomCourse.roster);
+    setLoadedRosterTemplateId("");
+    setLoadedClassGroupId("");
+    if (!title.trim()) setTitle(`${selectedClassroomCourse.name} - ${selectedClassroomCourse.section}`);
+    const courseNote = [
+      `Google Classroom course: ${selectedClassroomCourse.name}`,
+      `Section/period: ${selectedClassroomCourse.section}`,
+      `Course code: ${selectedClassroomCourse.courseCode}`,
+      "Imported Classroom items are suggestions; teacher confirms what attaches to the recap.",
+    ].join("\n");
+    setNotes((current) => appendCapturedText(current, courseNote));
+    if (selectedClassroomResources.length) {
+      setResources((current) =>
+        [current.trim(), ...selectedClassroomResources.map((resource) => resource.url)].filter(Boolean).join("\n"),
+      );
+    }
+    setClassroomMessage(
+      `Imported ${selectedClassroomCourse.roster.split(/\r?\n/).filter(Boolean).length} students from ${selectedClassroomCourse.name}.`,
+    );
+  };
+
+  const importZoomCloudTranscript = () => {
+    if (!selectedZoomMeeting || !selectedZoomTranscriptFile) return;
+    setCaptureMode("transcript");
+    setZoomCloudImported(true);
+    setTranscript(selectedZoomTranscriptFile.transcript);
+    setFileName(`Zoom cloud: ${selectedZoomTranscriptFile.label}`);
+    if (!title.trim()) setTitle(selectedZoomMeeting.title);
+    setNotes((current) =>
+      appendCapturedText(
+        current,
+        `Zoom cloud meeting: ${selectedZoomMeeting.title} (${formatDate(selectedZoomMeeting.date)}). Raw Zoom transcript should be deleted after recap generation; structured recap, tasks, resources, participation, and follow-ups remain.`,
+      ),
+    );
+    setZoomMessage(`Imported ${selectedZoomTranscriptFile.label} from ${selectedZoomMeeting.title}.`);
+  };
+
   const handleTranscriptFile = async (file?: File) => {
     if (!file) return;
     setFileName(file.name);
     setCaptureMode("transcript");
+    setZoomCloudImported(false);
     setCaptureMessage(`Loaded ${file.name}.`);
     setTranscript(await readTranscriptFileText(file));
   };
@@ -6482,6 +6712,8 @@ function ImportSession({
         ? transcript.trim()
           ? "live_transcription"
           : "audio_recording"
+        : zoomCloudImported
+          ? "zoom_cloud_transcript"
         : fileName
           ? "file"
           : "paste";
@@ -6497,15 +6729,23 @@ function ImportSession({
       captureDurationSeconds: recordedSeconds || undefined,
       transcriptSource,
     });
+    const privacyAdjustedSession =
+      zoomCloudImported && session.capture?.transcriptSource === "zoom_cloud_transcript"
+        ? {
+            ...session,
+            transcript: "",
+            notes: appendCapturedText(session.notes, "Raw Zoom cloud transcript auto-deleted after draft generation."),
+          }
+        : session;
     const selectedGroup = classGroups.find((group) => group.id === loadedClassGroupId);
     setDraft({
-      ...session,
+      ...privacyAdjustedSession,
       ownerEmail,
       classGroupId: selectedGroup?.id,
       classGroupName: selectedGroup?.name,
     });
-    onDraftCreated(session);
-    navigate("processing", { session: session.id });
+    onDraftCreated(privacyAdjustedSession);
+    navigate("processing", { session: privacyAdjustedSession.id });
   };
 
   const updateTemplateDetail = (id: string, value: string) => {
@@ -6600,6 +6840,85 @@ function ImportSession({
                 )}
               </div>
             )}
+            <div className="capture-panel wide" aria-label="Roster source options">
+              <div>
+                <span className="eyebrow">Roster source</span>
+                <h3>Choose manual roster or one Google Classroom course.</h3>
+                <p>
+                  Manual paste stays available. When Classroom is connected, pick one course, import roster and course
+                  metadata once, then confirm suggested assignments and resources.
+                </p>
+              </div>
+              <div className="capture-mode-grid">
+                <button
+                  type="button"
+                  className={rosterSource === "manual" ? "capture-mode-card active" : "capture-mode-card"}
+                  onClick={() => setRosterSource("manual")}
+                >
+                  <Users size={18} />
+                  <strong>Manual roster</strong>
+                  <small>Paste names, emails, aliases, or a CSV export.</small>
+                </button>
+                <button
+                  type="button"
+                  className={rosterSource === "classroom" ? "capture-mode-card active" : "capture-mode-card"}
+                  onClick={() => setRosterSource("classroom")}
+                >
+                  <GraduationCap size={18} />
+                  <strong>Google Classroom</strong>
+                  <small>Pick one course and import roster, metadata, assignments, and resources.</small>
+                </button>
+              </div>
+              {rosterSource === "classroom" && selectedClassroomCourse && (
+                <div className="integration-card integration-card-stack">
+                  <label className="field compact">
+                    <span>Classroom course</span>
+                    <select
+                      value={selectedClassroomCourseId}
+                      onChange={(event) => setSelectedClassroomCourseId(event.target.value)}
+                    >
+                      {classroomCourseOptions.map((course) => (
+                        <option key={course.id} value={course.id}>
+                          {course.name} · {course.section}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <small>
+                    {selectedClassroomCourse.courseCode} · {selectedClassroomCourse.roster.split(/\r?\n/).filter(Boolean).length} students ·
+                    {` ${selectedClassroomCourse.resources.length} recent Classroom items`}
+                  </small>
+                  <div className="integration-checkbox-list" aria-label="Suggested Classroom assignments and resources">
+                    {selectedClassroomCourse.resources.map((resource) => (
+                      <label key={resource.id} className="switch-row">
+                        <input
+                          type="checkbox"
+                          checked={selectedClassroomResourceIds.includes(resource.id)}
+                          onChange={(event) =>
+                            setSelectedClassroomResourceIds((current) =>
+                              event.target.checked
+                                ? uniqueText([...current, resource.id])
+                                : current.filter((id) => id !== resource.id),
+                            )
+                          }
+                        />
+                        <span>
+                          <strong>{resource.title}</strong>
+                          <small>
+                            {resource.type} · recent same-course item · keyword match: {resource.keywordHint}
+                          </small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <button className="primary-button" type="button" onClick={importClassroomCourse}>
+                    <Download size={17} />
+                    Import selected Classroom course
+                  </button>
+                  {classroomMessage && <p className="settings-message success">{classroomMessage}</p>}
+                </div>
+              )}
+            </div>
             {activeTemplateFields.length > 0 && (
               <div className="template-detail-card wide">
                 <div>
@@ -6757,6 +7076,60 @@ function ImportSession({
             </div>
             {captureMode === "transcript" && (
               <>
+                <div className="capture-panel wide" aria-label="Zoom cloud transcript import">
+                  <div>
+                    <span className="eyebrow">Zoom cloud import</span>
+                    <h3>Import transcript-ready Zoom meetings.</h3>
+                    <p>
+                      Show recent meetings with transcript files, search by date or title, then choose the transcript
+                      file when Zoom has more than one.
+                    </p>
+                  </div>
+                  <div className="saved-roster-row">
+                    <label className="field compact">
+                      <span>Search date or title</span>
+                      <input value={zoomSearch} onChange={(event) => setZoomSearch(event.target.value)} placeholder="CS4All or 2026-04-28" />
+                    </label>
+                    <label className="field compact">
+                      <span>Transcript-ready meeting</span>
+                      <select value={selectedZoomMeeting?.id ?? ""} onChange={(event) => setSelectedZoomMeetingId(event.target.value)}>
+                        {filteredZoomMeetings.map((meeting) => (
+                          <option key={meeting.id} value={meeting.id}>
+                            {meeting.title} · {formatDate(meeting.date)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field compact">
+                      <span>Transcript file</span>
+                      <select
+                        value={selectedZoomTranscriptFile?.id ?? ""}
+                        onChange={(event) => setSelectedZoomTranscriptFileId(event.target.value)}
+                      >
+                        {(selectedZoomMeeting?.files ?? []).map((file) => (
+                          <option key={file.id} value={file.id}>
+                            {file.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="capture-guidance">
+                    <ShieldCheck size={17} />
+                    <div>
+                      <strong>Raw transcript retention</strong>
+                      <small>
+                        Zoom cloud transcript text is used to generate the recap, then removed from the saved session.
+                        Structured recap, tasks, resources, participation, and follow-ups remain.
+                      </small>
+                    </div>
+                  </div>
+                  <button className="ghost-button" type="button" onClick={importZoomCloudTranscript}>
+                    <Download size={17} />
+                    Import selected Zoom transcript
+                  </button>
+                  {zoomMessage && <p className="settings-message success">{zoomMessage}</p>}
+                </div>
                 <label className="upload-zone wide">
                   <UploadCloud size={24} />
                   <strong>{fileName || "Upload transcript file"}</strong>
@@ -6811,6 +7184,11 @@ function ImportSession({
               <Wand2 size={18} />
               Generate draft
             </button>
+            <TemplateLinkCard
+              title="Google Docs class template"
+              detail="Make a copy, fill in class context, roster notes, resources, questions, and due dates, then paste or upload the meeting record here."
+              url={classTemplateCopyUrl}
+            />
             {!canCreateSession && !planMessage && (
               <p className="settings-message">
                 Free accounts can generate 1 session per day. This unlocks again after midnight, or you can upgrade to Pro.
@@ -8021,6 +8399,13 @@ function PublishPreview({
   const [deliveryMessage, setDeliveryMessage] = useState("");
   const [integrationMessage, setIntegrationMessage] = useState("");
   const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [selectedEmailRecipients, setSelectedEmailRecipients] = useState<string[]>([]);
+  const [magicLinksEnabled, setMagicLinksEnabled] = useState(false);
+  const [classroomPostType, setClassroomPostType] = useState<ClassroomPostType>("announcement");
+  const [classroomPostTitle, setClassroomPostTitle] = useState("");
+  const [classroomPostBody, setClassroomPostBody] = useState("");
+  const [classroomPostDueDateValue, setClassroomPostDueDateValue] = useState("");
+  const [classroomPostMessage, setClassroomPostMessage] = useState("");
   const loadIntegrationStatus = async () => {
     try {
       const status = await apiJson<IntegrationStatus>("/api/integrations/status");
@@ -8034,6 +8419,16 @@ function PublishPreview({
   useEffect(() => {
     loadIntegrationStatus();
   }, []);
+
+  useEffect(() => {
+    if (!draft) return;
+    setSelectedEmailRecipients(studentEmailRecipients(draft));
+    setClassroomPostType("announcement");
+    setClassroomPostTitle(defaultClassroomPostTitle(draft));
+    setClassroomPostBody(defaultClassroomPostBody(draft));
+    setClassroomPostDueDateValue(classroomPostDueDate(draft));
+    setClassroomPostMessage("");
+  }, [draft?.id]);
 
   if (!draft) {
     return (
@@ -8056,13 +8451,29 @@ function PublishPreview({
   const delivery = draft.emailDelivery ?? { status: "not_sent" as const, recipients: [], skipped: [] };
   const emailSent = delivery.status === "sent";
   const isPublished = draft.status === "published";
-  const recipientCount = studentEmailRecipients(draft).length;
+  const emailRecipientOptions = draft.students
+    .map((studentItem) => ({
+      student: studentItem,
+      email: studentAccessEmails(studentItem)[0] ?? "",
+    }))
+    .filter((option) => option.email && !option.email.endsWith("@classloop.local"));
+  const recipientCount = selectedEmailRecipients.length;
   const currentPublishAudit = draft.publishAudit ?? makePublishAudit(draft);
   const blockingImportWarnings = unresolvedBlockingImportWarnings(draft);
   const updatePreviewSession = (sessionId: string, updater: (session: Session) => Session) => {
     if (sessionId === draft.id) setDraft(updater(draft));
   };
   const updateDraft = (updater: (session: Session) => Session) => setDraft(updater(draft));
+  const toggleEmailRecipient = (email: string, enabled: boolean) => {
+    setSelectedEmailRecipients((current) =>
+      enabled ? uniqueText([...current, email]) : current.filter((recipient) => recipient !== email),
+    );
+  };
+  const previewClassroomPost = () => {
+    setClassroomPostMessage(
+      `Edited ${classroomPostType} is ready. Connect Google Classroom OAuth to post this class-wide recap, resources, and tasks.`,
+    );
+  };
   const sendStudentEmails = async () => {
     if (emailSent || recipientCount === 0 || isSendingEmail) return;
     if (!isPublished) {
@@ -8074,7 +8485,7 @@ function PublishPreview({
     try {
       const result = await apiJson<EmailDeliveryResult>("/api/email/send-recaps", {
         method: "POST",
-        body: JSON.stringify({ sessionId: draft.id, ownerEmail: draft.ownerEmail }),
+        body: JSON.stringify({ sessionId: draft.id, ownerEmail: draft.ownerEmail, recipients: selectedEmailRecipients }),
       });
       updateDraft((current) => markSessionEmailsSent(current, result));
       setDeliveryMessage(`Sent through ${result.provider} to ${result.recipients.length} students.`);
@@ -8128,10 +8539,50 @@ function PublishPreview({
                 </small>
               )}
               {!emailSent && integrationStatus && !integrationStatus.email?.configured && (
-                <small>Configure a no-reply SMTP or Gmail sender in .env.local before sending.</small>
+                <small>
+                  Configure a ClassLoop-owned Gmail/SMTP sender in .env.local before sending recap emails.
+                </small>
+              )}
+              {!emailSent && (
+                <div className="integration-checkbox-list" aria-label="Email recap recipients">
+                  {emailRecipientOptions.map(({ student: recipientStudent, email }) => (
+                    <label key={recipientStudent.id} className="switch-row">
+                      <input
+                        type="checkbox"
+                        checked={selectedEmailRecipients.includes(email)}
+                        onChange={(event) => toggleEmailRecipient(email, event.target.checked)}
+                      />
+                      <span>
+                        <strong>{recipientStudent.name}</strong>
+                        <small>{email}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              {!emailSent && (
+                <label className="switch-row">
+                  <input
+                    type="checkbox"
+                    checked={magicLinksEnabled}
+                    onChange={(event) => setMagicLinksEnabled(event.target.checked)}
+                  />
+                  <span>
+                    <strong>Include magic link or email code when auth email is configured</strong>
+                    <small>
+                      Recaps use the ClassLoop-owned sender; hosted sign-in links use Supabase/Auth email delivery when connected.
+                    </small>
+                  </span>
+                </label>
+              )}
+              {magicLinksEnabled && !integrationStatus?.email?.configured && (
+                <small>Magic-link copy is previewed only until hosted auth email is configured.</small>
               )}
               {delivery.skipped.length > 0 && <small>Skipped: {delivery.skipped.join(", ")}</small>}
               {delivery.failed?.length ? <small>Failed: {delivery.failed.join("; ")}</small> : null}
+              {studentsWithoutDeliverableEmail(draft).length > 0 && (
+                <small>No deliverable email: {studentsWithoutDeliverableEmail(draft).join(", ")}</small>
+              )}
               {deliveryMessage && <small>{deliveryMessage}</small>}
               {integrationMessage && <small>{integrationMessage}</small>}
             </div>
@@ -8144,6 +8595,60 @@ function PublishPreview({
               {emailSent ? <CheckCircle2 size={17} /> : <Send size={17} />}
               {emailSent ? "Emails sent" : isSendingEmail ? "Sending..." : "Send recap emails"}
             </button>
+          </div>
+        </Panel>
+        <Panel title="Google Classroom post" icon={GraduationCap}>
+          <div className="delivery-card">
+            <div>
+              <strong>Teacher-approved class-wide post</strong>
+              <p>
+                Edit the exact Classroom content before posting. This stays class-wide: recap, resources, and shared
+                tasks only.
+              </p>
+            </div>
+            <div className="saved-roster-row">
+              <label className="field compact">
+                <span>Post type</span>
+                <select value={classroomPostType} onChange={(event) => setClassroomPostType(event.target.value as ClassroomPostType)}>
+                  <option value="announcement">Announcement</option>
+                  <option value="assignment">Assignment</option>
+                  <option value="material">Material</option>
+                </select>
+              </label>
+              {classroomPostType === "assignment" && (
+                <label className="field compact">
+                  <span>Assignment due date</span>
+                  <input
+                    type="date"
+                    value={classroomPostDueDateValue}
+                    onChange={(event) => setClassroomPostDueDateValue(event.target.value)}
+                  />
+                </label>
+              )}
+            </div>
+            <label className="field compact">
+              <span>Classroom title</span>
+              <input value={classroomPostTitle} onChange={(event) => setClassroomPostTitle(event.target.value)} />
+            </label>
+            <label className="field compact">
+              <span>Classroom body</span>
+              <textarea value={classroomPostBody} onChange={(event) => setClassroomPostBody(event.target.value)} />
+            </label>
+            <div className="capture-guidance">
+              <ShieldCheck size={17} />
+              <div>
+                <strong>Integration status</strong>
+                <small>
+                  Google Classroom OAuth is not connected in this local scaffold. The composer preserves teacher review
+                  and is ready for the real API boundary.
+                </small>
+              </div>
+            </div>
+            <button className="ghost-button full" type="button" onClick={previewClassroomPost}>
+              <Send size={17} />
+              Post to Classroom
+            </button>
+            {classroomPostMessage && <small>{classroomPostMessage}</small>}
           </div>
         </Panel>
       </section>
@@ -8637,7 +9142,7 @@ function StudentDashboard({
   sessions: Session[];
   selectedStudentId: string;
   setSelectedStudentId: (id: string) => void;
-  markFollowUpComplete: (sessionId: string, studentId: string) => void;
+  markFollowUpComplete: (sessionId: string, studentId: string, note?: string, attachmentUrl?: string) => void;
   auth: AuthSession;
   updateSession?: (sessionId: string, updater: (session: Session) => Session) => void;
   submitProductFeedback?: ProductFeedbackSubmitter;
@@ -8691,6 +9196,12 @@ function StudentDashboard({
       .filter((followUp) => followUp.studentId === activeStudentId)
       .map((followUp) => ({ session, followUp })),
   );
+  const sortedStudentTasks = [...studentTasks].sort((a, b) => {
+    const aTime = new Date(a.followUp.dueDate).getTime();
+    const bTime = new Date(b.followUp.dueDate).getTime();
+    return (Number.isNaN(aTime) ? Number.POSITIVE_INFINITY : aTime) - (Number.isNaN(bTime) ? Number.POSITIVE_INFINITY : bTime);
+  });
+  const dueSoonTasks = sortedStudentTasks.slice(0, 3);
 
   return (
     <div className="page-stack student-page">
@@ -8722,6 +9233,35 @@ function StudentDashboard({
           </div>
         )}
       </section>
+
+      {auth.role === "student" && (
+        <Panel title="Tasks due soon" icon={Clock3}>
+          <div className="task-list">
+            {dueSoonTasks.length ? (
+              dueSoonTasks.map(({ session, followUp }) => (
+                <button
+                  key={`due-${session.id}-${followUp.studentId}`}
+                  className="task-row"
+                  onClick={() => navigate("student-session", { session: session.id })}
+                >
+                  <span className="task-check">
+                    {["submitted", "reviewed", "complete"].includes(followUp.status) ? <CheckCircle2 size={18} /> : <Clock3 size={18} />}
+                  </span>
+                  <span>
+                    <strong>{followUp.tasks[0]}</strong>
+                    <small>
+                      {session.title} · due {formatDate(followUp.dueDate)}
+                    </small>
+                  </span>
+                  <StatusPill status={followUp.status} />
+                </button>
+              ))
+            ) : (
+              <p className="readable">No open ClassLoop tasks yet.</p>
+            )}
+          </div>
+        </Panel>
+      )}
 
       {latest && latestFollowUp && (
         <section className="today-card">
@@ -8773,7 +9313,7 @@ function StudentDashboard({
       <section className="content-grid two-columns align-start">
         <Panel title="My tasks" icon={ListChecks}>
           <div className="task-list">
-            {studentTasks.map(({ session, followUp }) => (
+            {sortedStudentTasks.map(({ session, followUp }) => (
               <button
                 key={`${session.id}-${followUp.studentId}`}
                 className="task-row"
@@ -8835,7 +9375,7 @@ function StudentSessionDetail({
 }: {
   sessions: Session[];
   selectedStudentId: string;
-  markFollowUpComplete: (sessionId: string, studentId: string) => void;
+  markFollowUpComplete: (sessionId: string, studentId: string, note?: string, attachmentUrl?: string) => void;
   auth: AuthSession;
   updateSession?: (sessionId: string, updater: (session: Session) => Session) => void;
   submitProductFeedback?: ProductFeedbackSubmitter;
@@ -8853,7 +9393,10 @@ function StudentSessionDetail({
   const followUp = session?.followUps.find((item) => item.studentId === activeStudentId);
   const events = session?.participationEvents.filter((event) => event.studentId === activeStudentId && event.approved) ?? [];
   const isFollowUpCompleted = ["submitted", "reviewed", "complete"].includes(followUp?.status ?? "");
+  const submission = session?.submissions?.find((item) => item.studentId === activeStudentId);
   const [isCelebratingCheckIn, setIsCelebratingCheckIn] = useState(false);
+  const [completionNote, setCompletionNote] = useState("");
+  const [completionAttachmentUrl, setCompletionAttachmentUrl] = useState("");
 
   useEffect(() => {
     if (!isCelebratingCheckIn) return;
@@ -8861,9 +9404,14 @@ function StudentSessionDetail({
     return () => window.clearTimeout(celebrationTimer);
   }, [isCelebratingCheckIn]);
 
+  useEffect(() => {
+    setCompletionNote(submission?.note ?? "");
+    setCompletionAttachmentUrl(submission?.attachmentUrl ?? "");
+  }, [session?.id, activeStudentId, submission?.note, submission?.attachmentUrl]);
+
   const handleCompleteCheckIn = () => {
     if (!session) return;
-    markFollowUpComplete(session.id, activeStudentId);
+    markFollowUpComplete(session.id, activeStudentId, completionNote.trim(), completionAttachmentUrl.trim());
     setIsCelebratingCheckIn(false);
     window.setTimeout(() => setIsCelebratingCheckIn(true), 0);
   };
@@ -8898,6 +9446,24 @@ function StudentSessionDetail({
           className={isCelebratingCheckIn ? "checkin-celebration is-celebrating" : "checkin-celebration"}
           aria-live="polite"
         >
+          <div className="checkin-fields">
+            <label className="field compact">
+              <span>Note to teacher</span>
+              <textarea
+                value={completionNote}
+                onChange={(event) => setCompletionNote(event.target.value)}
+                placeholder="What did you finish or where are you stuck?"
+              />
+            </label>
+            <label className="field compact">
+              <span>File or link</span>
+              <input
+                value={completionAttachmentUrl}
+                onChange={(event) => setCompletionAttachmentUrl(event.target.value)}
+                placeholder="https://docs.google.com/..."
+              />
+            </label>
+          </div>
           <button
             className={isFollowUpCompleted ? "primary-button checkin-button completed" : "primary-button checkin-button"}
             onClick={handleCompleteCheckIn}
@@ -9045,7 +9611,7 @@ function StudentVisibleEditor({
     }));
   };
   const markReviewed = () => {
-    updateCurrentSession((current) => setStudentSubmission(current, studentId, "reviewed", "Reviewed by teacher."));
+    updateCurrentSession((current) => setStudentSubmission(current, studentId, "reviewed"));
   };
 
   return (
@@ -9061,6 +9627,15 @@ function StudentVisibleEditor({
                 : "Student has not submitted this check-in yet."}
               {submission?.reviewedAt ? ` · reviewed ${formatDate(submission.reviewedAt)}` : ""}
             </small>
+            {submission?.note && <small>Student note: {submission.note}</small>}
+            {submission?.attachmentUrl && (
+              <small>
+                Submitted link:{" "}
+                <a href={submission.attachmentUrl} target="_blank" rel="noreferrer">
+                  {submission.attachmentUrl}
+                </a>
+              </small>
+            )}
           </div>
           <button className="ghost-button" type="button" onClick={markReviewed} disabled={followUp.status === "reviewed"}>
             <CheckCircle2 size={17} />

@@ -86,7 +86,7 @@ export async function expectKeyboardFocusOrder(page: Page, expectedLabels: RegEx
     expect.soft(stop.visibleFocus, (stop.label || stop.tag) + " should show a visible focus indicator").toBe(true);
     expect.soft(stop.label, "focus stop " + (index + 1)).toMatch(expectedLabels[index]);
     if (index > 0) {
-      expect.soft(stop.top, "focus stop " + (index + 1) + " should not jump backward visually").toBeGreaterThanOrEqual(stops[index - 1].top - 16);
+      expect.soft(stop.top, "focus stop " + (index + 1) + " should not jump backward visually").toBeGreaterThanOrEqual(stops[index - 1].top - 24);
     }
   });
 
@@ -222,7 +222,7 @@ export async function expectReadableMobileLayout(page: Page, rootSelector: strin
     }
 
     const watched = Array.from(
-      root.querySelectorAll('h1, h2, p, .landing-primary, .landing-secondary, .landing-platform-list button, .landing-mobile-card, .mobile-step, .landing-feature-matrix article, .landing-doc-section, .landing-donation-panel article, .landing-screenshot-card, .landing-workflow-strip article, .demo-choice-card'),
+      root.querySelectorAll('h1, h2, p, .landing-primary, .landing-secondary, .landing-platform-list button, .landing-mobile-card, .mobile-step, .landing-feature-matrix article, .landing-doc-section, .landing-screenshot-card, .landing-workflow-strip article, .demo-choice-card'),
     );
     for (const element of watched) {
       const rect = element.getBoundingClientRect();

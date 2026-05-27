@@ -53,7 +53,7 @@ export type ImportDraftInput = {
   captureMode?: SessionCaptureMode;
   captureSourceLabel?: string;
   captureDurationSeconds?: number;
-  transcriptSource?: "file" | "paste" | "live_transcription" | "audio_recording";
+  transcriptSource?: "file" | "paste" | "zoom_cloud_transcript" | "live_transcription" | "audio_recording";
 };
 
 export type TranscriptTextFile = {
@@ -525,7 +525,7 @@ function studentFromRosterEntry(entry: RosterEntry, index: number, seenIds: Set<
   return {
     id: uniqueStudentId(cleanName, index, seenIds),
     name: cleanName,
-    email: cleanEmail || `${slugify(cleanName, `student-${index + 1}`)}@classloop.local`,
+    email: cleanEmail,
     avatarColor: avatarColors[index % avatarColors.length],
     aliases: aliases.length ? unique(aliases) : undefined,
   };
@@ -628,9 +628,9 @@ function parseRoster(roster: string, transcript: string): Student[] {
       seenEstimatedNames.add(normalized);
       return true;
     })
-    .map((name, index) => ({
+    .map((name) => ({
       name,
-      email: `${slugify(name, `student-${index + 1}`)}@classloop.local`,
+      email: "",
     }));
 
   return studentsFromRosterEntries(estimatedEntries);

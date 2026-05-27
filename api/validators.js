@@ -29,11 +29,12 @@ const optionalText = (max, defaultValue) => field.string({ max, optional: true, 
 const requiredTrimmed = (max, pattern) => field.string({ max, pattern });
 const optionalTrimmed = (max, defaultValue, pattern) => field.string({ max, optional: true, defaultValue, pattern });
 const optionalEmail = field.string({ max: 320, optional: true, pattern: emailPattern });
+const emailOrBlank = field.string({ max: 320, pattern: /^$|^[^\s@]+@[^\s@]+\.[^\s@]+$/ });
 
 const studentSchema = {
   id: requiredTrimmed(160, looseIdPattern),
   name: requiredTrimmed(160),
-  email: field.string({ max: 320, pattern: emailPattern }),
+  email: emailOrBlank,
   avatarColor: requiredTrimmed(40),
   guardian: optionalTrimmed(200),
   aliases: field.array(requiredTrimmed(160), { max: 20, optional: true, defaultValue: [] }),
@@ -100,7 +101,7 @@ const captureSchema = {
   sourceLabel: requiredTrimmed(220),
   capturedAt: requiredIsoDate,
   durationSeconds: field.number({ min: 0, max: 24 * 60 * 60, optional: true }),
-  transcriptSource: field.enum(["file", "paste", "live_transcription", "audio_recording"]),
+  transcriptSource: field.enum(["file", "paste", "zoom_cloud_transcript", "live_transcription", "audio_recording"]),
 };
 
 const emailDeliverySchema = {
@@ -136,6 +137,7 @@ const submissionSchema = {
   sessionId: requiredTrimmed(160, looseIdPattern),
   status: field.enum(studentSubmissionStatuses),
   note: optionalText(2_000, ""),
+  attachmentUrl: field.string({ max: 2_048, optional: true, defaultValue: "" }),
   submittedAt: optionalIsoDate,
   reviewedAt: optionalIsoDate,
 };

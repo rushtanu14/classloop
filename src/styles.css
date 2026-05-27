@@ -605,7 +605,6 @@ select:focus-visible,
 .landing-mobile-card,
 .mobile-step,
 .landing-download-band,
-.landing-donation-panel article,
 .landing-policy-panel,
 .landing-legal-grid article,
 .landing-feedback-panel {
@@ -747,8 +746,7 @@ select:focus-visible,
 .landing-feature-band,
 .landing-feature-matrix,
 .landing-callout-grid,
-.landing-pwa-checklist,
-.landing-donation-panel {
+.landing-pwa-checklist {
   display: grid;
   gap: 16px;
   margin-top: 16px;
@@ -759,8 +757,7 @@ select:focus-visible,
 }
 
 .landing-feature-matrix,
-.landing-pwa-checklist,
-.landing-donation-panel {
+.landing-pwa-checklist {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
@@ -779,7 +776,6 @@ select:focus-visible,
 .landing-feature-matrix article,
 .landing-callout-grid article,
 .landing-pwa-checklist article,
-.landing-donation-panel article,
 .landing-legal-grid article {
   display: grid;
   align-content: start;
@@ -807,9 +803,7 @@ select:focus-visible,
 .landing-legal-grid h2,
 .landing-legal-grid p,
 .landing-feedback-panel h2,
-.landing-feedback-panel p,
-.landing-donation-panel strong,
-.landing-donation-panel span {
+.landing-feedback-panel p {
   margin: 0;
 }
 
@@ -1122,22 +1116,6 @@ select:focus-visible,
 .landing-feedback-form .landing-actions,
 .landing-feedback-form .landing-message {
   grid-column: 1 / -1;
-}
-
-.landing-donation-panel article {
-  min-height: 220px;
-}
-
-.landing-donation-panel strong {
-  color: #0f766e;
-  font-size: 2.7rem;
-  line-height: 1;
-}
-
-.landing-donation-panel span {
-  color: #506070;
-  line-height: 1.5;
-  font-weight: 800;
 }
 
 .app-shell {
@@ -2020,10 +1998,22 @@ button.account-pill {
 
 .checkin-celebration {
   position: relative;
-  display: inline-flex;
-  align-items: center;
+  display: grid;
+  align-items: stretch;
   justify-content: center;
-  flex: 0 0 auto;
+  gap: 10px;
+  flex: 0 1 360px;
+  min-width: min(360px, 100%);
+}
+
+.checkin-fields {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
+.checkin-fields textarea {
+  min-height: 78px;
 }
 
 .checkin-button.completed {
@@ -3330,6 +3320,18 @@ button:disabled:hover {
   margin: 6px 0 0;
 }
 
+.integration-checkbox-list {
+  display: grid;
+  gap: 10px;
+}
+
+.integration-checkbox-list .switch-row {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
 .integration-grid {
   display: grid;
   gap: 10px;
@@ -3675,6 +3677,28 @@ button:disabled:hover {
   border-radius: 14px;
   color: var(--green);
   background: #dff8f4;
+}
+
+.template-link-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-strong) 88%, var(--primary-soft));
+}
+
+.template-link-card strong,
+.template-link-card small {
+  display: block;
+}
+
+.template-link-card small {
+  margin-top: 4px;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 .processing-page {
@@ -6128,7 +6152,6 @@ th {
   .landing-docs-layout,
   .landing-legal-grid,
   .landing-support-layout,
-  .landing-donation-panel,
   .landing-download-band,
   .landing-feedback-panel,
   .landing-feedback-form {
@@ -6393,6 +6416,7 @@ th {
   .capture-controls,
   .saved-roster-row,
   .resource-edit-row,
+  .template-link-card,
   .usage-grid,
   .session-prep-grid {
     grid-template-columns: 1fr;

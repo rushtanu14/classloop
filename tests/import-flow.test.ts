@@ -645,6 +645,41 @@ assert(!notesUnmatchedNames.includes("Decision made"), "singular meeting-note me
 assert(!notesUnmatchedNames.includes("Owners"), "owners metadata labels should not become unmatched speakers");
 assert(!notesUnmatchedNames.includes("Next checkpoint"), "checkpoint metadata labels should not become unmatched speakers");
 
+const integrationMetadataSession = createGeneratedSession({
+  title: "Classroom and Zoom import metadata labels",
+  template: "CS workshop",
+  transcript: `[00:00:57] Student (Priya Mehta): Is it like a set of steps to solve a problem?
+[00:01:14] Student (Jalen Thompson): [Chat] TikTok algorithm lol`,
+  notes: `Google Classroom course: CS4All Intro to Computational Thinking
+Section/period: Period 4
+Course code: CS4ALL-P4
+Imported Classroom items are suggestions; teacher confirms what attaches to the recap.
+Zoom cloud meeting: CS4All Intro to Computational Thinking (Apr 28, 2026). Raw Zoom transcript should be deleted after recap generation; structured recap, tasks, resources, participation, and follow-ups remain.`,
+  roster: `Priya Mehta, priya@classloop.test
+Jalen Thompson, jalen@classloop.test`,
+  resources: "",
+});
+const normalizeLabelForTest = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const integrationUnmatchedNames = (integrationMetadataSession.unmatchedParticipants ?? []).map((participant) =>
+  normalizeLabelForTest(participant.name),
+);
+[
+  "Google Classroom course",
+  "Section period",
+  "Course code",
+  "Zoom cloud meeting",
+].forEach((label) => {
+  assert(
+    !integrationUnmatchedNames.includes(normalizeLabelForTest(label)),
+    `${label} should be ignored as integration metadata instead of becoming an unmatched speaker`,
+  );
+});
+assertEqual(
+  integrationMetadataSession.unmatchedParticipants?.length ?? 0,
+  0,
+  "Classroom and Zoom import metadata should not create false unmatched speakers",
+);
+
 const complianceLabelSession = createGeneratedSession({
   title: "Compliance and support label noise",
   template: "General classroom",

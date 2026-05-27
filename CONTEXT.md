@@ -112,6 +112,62 @@ _Avoid_: Paid subscription, live billing, server entitlement
 The production transition where ClassLoop uses activated live Stripe account details, live product and price IDs, live webhook signing secret, production Vercel environment variables, and a real low-risk checkout verification.
 _Avoid_: Sandbox checkout, copied test price, local-only billing test
 
+**Individual Account**:
+A non-teacher personal ClassLoop account for turning the account owner's pasted meeting minutes into their own recap and tasks.
+_Avoid_: Student account, teacher account, public classroom signup
+
+**Class Account**:
+A classroom-focused ClassLoop account path that contains Teacher and Student roles under one class-oriented entry point.
+_Avoid_: Individual account, three equal login tabs
+
+**Personal Meetings Mode**:
+The Individual Account area inside ClassLoop for personal meeting recap and task workflows.
+_Avoid_: Separate product name, rebrand, Personal Loop
+
+**Personal Meeting Record**:
+Meeting minutes or notes pasted by an Individual Account owner for their own follow-up, without a roster, student dashboards, publishing, or class analytics.
+_Avoid_: Class artifact, student follow-up, classroom publication
+
+**Personal Meeting**:
+A separate Individual Account record built from pasted meeting minutes into an owner-only recap, decisions, and personal tasks.
+_Avoid_: Classroom Session, session template, class record
+
+**Personal Meeting Template**:
+The copyable meeting-minutes structure for Individual Accounts with only meeting title, date, context, resources, questions, and due dates.
+_Avoid_: Classroom template, roster template, teacher notes template
+
+**Class Meeting Template**:
+The copyable Google Docs-style template shown in the Class Account import flow to help teachers provide the class-specific details ClassLoop needs.
+_Avoid_: Personal meeting template, generic meeting-minutes template
+
+**Google Docs Template Copy Link**:
+A public viewer/copy URL for a Rushil-owned Google Doc template, where Rushil can edit the source doc and users make their own copy before filling it out.
+_Avoid_: Static in-app-only template, user-editable source doc, unauthenticated write access
+
+**Template Link Config**:
+Configurable ClassLoop template URLs, preferably env-backed or loaded from a tiny public manifest, so Rushil can change Google Docs copy links without changing app logic.
+_Avoid_: Hardcoded public template URL, broken fake template button
+
+**Owner-Editable Template Source**:
+The Rushil-owned source Google Doc behind a template copy link. Editing this source doc changes what future users copy, without requiring a ClassLoop code change.
+_Avoid_: App-only hardcoded template text, public users editing the source doc
+
+**Free Individual Mode**:
+Individual Account access where all V1 personal meeting features are free and not gated by ClassLoop Pro.
+_Avoid_: Pro-gated personal meeting generation, shared classroom free-limit counter
+
+**Personal Task Due Date**:
+A lightweight editable text field next to a personal task status, used to record when the owner thinks the task is due.
+_Avoid_: Notification reminder, calendar integration, scheduled automation
+
+**Personal Dashboard**:
+The Individual Account home surface for the owner's meeting recaps, personal tasks, and follow-through status.
+_Avoid_: Teacher dashboard, student portal, class analytics
+
+**Student Contact Email**:
+A student email address that was imported from a roster/source system or manually entered by the teacher.
+_Avoid_: Generated placeholder email, name-only account link
+
 ## Relationships
 
 - A **Class Artifact** may be synthetic or may come from **Redacted Real-Class Data**.
@@ -144,6 +200,22 @@ _Avoid_: Sandbox checkout, copied test price, local-only billing test
 - Real paid access must be a **Server-Owned Entitlement**. A **Local Testing Upgrade** can unlock Pro controls on one device for validation, but it must not be treated as live billing or durable paid access.
 - A **Live Stripe Cutover** requires an activated live Stripe account, live `ClassLoop Pro` product and recurring price, production Vercel Supabase and Stripe environment variables, a live webhook endpoint, and one verified low-risk live checkout/portal cycle.
 - The **Sample Workspace** must not create a **Server-Owned Entitlement** or start a **Live Stripe Cutover**.
+- An **Individual Account** uses **Personal Meeting Records** for the owner only. The V1 flow is paste-only meeting minutes to a personal recap and tasks; it does not include rosters, student portals, publish-to-others, or class analytics.
+- The login/signup choice should be two top-level paths: **Individual Account** and **Class Account**. The **Class Account** path then asks whether the person is a Teacher or Student.
+- An **Individual Account** should land on a **Personal Dashboard**. It can reuse teacher-like draft/review mechanics, but it should remove classroom-specific surfaces and focus on the owner's own meetings and tasks.
+- The product name remains ClassLoop. Individual surfaces may be labeled **Personal Meetings Mode**, but they should not introduce a separate product or brand name.
+- A **Student Contact Email** must stay blank when ClassLoop only has a student's name. ClassLoop should not synthesize placeholder emails or link an account to a student by name alone; email linkage requires import data or manual teacher entry.
+- A **Personal Meeting** is separate from a classroom `Session`. It should not show classroom template options; Individual V1 has one paste-only intake path: paste meeting minutes, generate a personal draft, review recap/tasks, and track the owner's own follow-through.
+- Individual V1 should trim classroom features by default: no roster manager, class groups, student portal, publish-to-students, attendance, participation matching, per-student previews, classroom analytics, or classroom template chooser.
+- Individual V1 should not include live capture, audio capture, file upload, Zoom import, or external meeting integrations until the paste-only personal workflow is proven.
+- The **Personal Meeting Template** should ask only for: Meeting title, Date, Context, Resources, Questions, and Due dates. Personal tasks are generated from the pasted minutes/template content rather than entered as a separate required field.
+- The class import flow should show the **Class Meeting Template** directly under the class `Generate draft` action. The Individual flow should show the **Personal Meeting Template** directly under the personal generate action.
+- Both template CTAs should use **Google Docs Template Copy Links**. Rushil owns and edits the source Google Docs; public users should only receive copy links that create their own copy, not edit access to the source template.
+- Google Docs template URLs should come from **Template Link Config**. If a template URL is missing, ClassLoop should say the template link is not connected yet instead of showing a broken or pretend copy link.
+- Each **Google Docs Template Copy Link** should point to an **Owner-Editable Template Source**. Rushil should be able to edit the source Google Doc content directly; users should get copies of the current source content.
+- Individual Account features in V1 are **Free Individual Mode**: paste personal meeting minutes, generate personal drafts, review/edit recaps and tasks, and track completion should all be free.
+- **Free Individual Mode** should not change Class Account billing. Class Account Free/Pro limits remain intact; only Individual V1 bypasses generation limits and Pro gating.
+- Personal Meeting tasks should use simple editable statuses plus a nearby **Personal Task Due Date** text box. Individual V1 should not add notifications, calendar reminders, or background scheduling.
 
 ## Example dialogue
 

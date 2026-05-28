@@ -605,7 +605,6 @@ select:focus-visible,
 .landing-mobile-card,
 .mobile-step,
 .landing-download-band,
-.landing-donation-panel article,
 .landing-policy-panel,
 .landing-legal-grid article,
 .landing-feedback-panel {
@@ -747,8 +746,7 @@ select:focus-visible,
 .landing-feature-band,
 .landing-feature-matrix,
 .landing-callout-grid,
-.landing-pwa-checklist,
-.landing-donation-panel {
+.landing-pwa-checklist {
   display: grid;
   gap: 16px;
   margin-top: 16px;
@@ -759,8 +757,7 @@ select:focus-visible,
 }
 
 .landing-feature-matrix,
-.landing-pwa-checklist,
-.landing-donation-panel {
+.landing-pwa-checklist {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
@@ -779,7 +776,6 @@ select:focus-visible,
 .landing-feature-matrix article,
 .landing-callout-grid article,
 .landing-pwa-checklist article,
-.landing-donation-panel article,
 .landing-legal-grid article {
   display: grid;
   align-content: start;
@@ -807,9 +803,7 @@ select:focus-visible,
 .landing-legal-grid h2,
 .landing-legal-grid p,
 .landing-feedback-panel h2,
-.landing-feedback-panel p,
-.landing-donation-panel strong,
-.landing-donation-panel span {
+.landing-feedback-panel p {
   margin: 0;
 }
 
@@ -1122,22 +1116,6 @@ select:focus-visible,
 .landing-feedback-form .landing-actions,
 .landing-feedback-form .landing-message {
   grid-column: 1 / -1;
-}
-
-.landing-donation-panel article {
-  min-height: 220px;
-}
-
-.landing-donation-panel strong {
-  color: #0f766e;
-  font-size: 2.7rem;
-  line-height: 1;
-}
-
-.landing-donation-panel span {
-  color: #506070;
-  line-height: 1.5;
-  font-weight: 800;
 }
 
 .app-shell {
@@ -6302,7 +6280,6 @@ th {
   .landing-docs-layout,
   .landing-legal-grid,
   .landing-support-layout,
-  .landing-donation-panel,
   .landing-download-band,
   .landing-feedback-panel,
   .landing-feedback-form {

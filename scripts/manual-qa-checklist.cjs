@@ -48,12 +48,12 @@ const sections = [
     "Public Landing, Hosted Demo, And PWA",
     "Browser or Chrome plugin",
     [
-      "Open `/`, `#/features`, `#/screenshots`, `#/docs`, `#/privacy`, `#/terms`, `#/eula`, `#/support`, `#/donate`, and `#/download` on desktop, tablet, and phone widths.",
+      "Open `/`, `#/features`, `#/screenshots`, `#/docs`, `#/privacy`, `#/terms`, `#/eula`, `#/support`, and `#/download` on desktop, tablet, and phone widths.",
       "Verify missing macOS, Windows, and Linux URLs say `Packaging pending` before and after click.",
       "Temporarily fail, corrupt, and Vercel-Blob-point `public/classloop-downloads.json`; verify the Download route keeps installers pending with visible recovery copy.",
       "Confirm hosted demo uses sample teacher/student choices and never exposes account creation fields in demo-only mode.",
       "Verify Add to phone/PWA controls, manifest, service worker, icon, standalone start URL, and mobile readability.",
-      "Check docs/privacy/terms/eula/support/donate/download copy for legal/support clarity and no misleading live-sync, billing, or installer claims.",
+      "Check docs/privacy/terms/eula/support/download copy for legal/support clarity and no misleading live-sync, billing, or installer claims.",
     ],
   ],
   [

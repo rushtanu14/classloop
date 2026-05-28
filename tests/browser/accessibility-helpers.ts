@@ -222,7 +222,7 @@ export async function expectReadableMobileLayout(page: Page, rootSelector: strin
     }
 
     const watched = Array.from(
-      root.querySelectorAll('h1, h2, p, .landing-primary, .landing-secondary, .landing-platform-list button, .landing-mobile-card, .mobile-step, .landing-feature-matrix article, .landing-doc-section, .landing-donation-panel article, .landing-screenshot-card, .landing-workflow-strip article, .demo-choice-card'),
+      root.querySelectorAll('h1, h2, p, .landing-primary, .landing-secondary, .landing-platform-list button, .landing-mobile-card, .mobile-step, .landing-feature-matrix article, .landing-doc-section, .landing-screenshot-card, .landing-workflow-strip article, .demo-choice-card'),
     );
     for (const element of watched) {
       const rect = element.getBoundingClientRect();

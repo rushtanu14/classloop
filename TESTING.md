@@ -97,13 +97,12 @@
 - **WCAG-Targeted Accessibility Smoke**: Browser tests cover keyboard tab order, visible focus indicators, accessible names for controls, contrast ratios on key app and landing surfaces, screen-reader status announcements, and phone-width PWA readability.
 
 ### Hosted Web Smoke Tests
-- **Landing Page**: Hosted root page loads ClassLoop marketing UI, with separate `#/features`, `#/screenshots`, `#/docs`, `#/privacy`, `#/terms`, `#/eula`, `#/support`, `#/donate`, and `#/download` routes instead of one scroll-through page.
+- **Landing Page**: Hosted root page loads ClassLoop marketing UI, with separate `#/features`, `#/screenshots`, `#/docs`, `#/privacy`, `#/terms`, `#/eula`, `#/support`, and `#/download` routes instead of one scroll-through page.
 - **Screenshots / Workflow**: `#/screenshots` shows ClassLoop teacher review, student dashboard, and analytics screenshots with readable explanations.
 - **Public Privacy / Legal Boundary**: `#/privacy`, `#/terms`, `#/eula`, and `#/support` expose local desktop storage, no-training, retention/deletion, desktop license, support contact, and sample-only hosted-demo boundary copy without revealing sign-in form fields.
 - **Installer Feedback**: `#/download` and `#/support` include a report form for clean-machine install, checksum, first-run, checkout, and sync failures. The form posts to `/api/feedback` with installer metadata and should notify the configured creator inbox when SMTP/Gmail feedback notification env vars are set.
 - **Desktop Downloads**: macOS, Windows, and Linux download controls are visible; missing installer URLs show packaging/demo fallback copy.
 - **Download Manifest Recovery**: Browser tests verify missing, malformed, or Vercel Blob-backed `public/classloop-downloads.json` manifests keep installers marked `Packaging pending` with visible recovery copy.
-- **Donation Path**: Donate route exposes support amounts and clearly reports when `VITE_CLASSLOOP_DONATE_URL` has not been connected.
 - **Mobile/PWA Access**: Hosted root and Download route expose the "Add to phone" action, standalone web app manifest, app icon, and service worker shell.
 - **Sample-Only Demo**: Hosted demo exposes teacher/student demo choices instead of editable email/password fields.
 - **Demo Walkthrough**: Teacher sample demo starts the guided walkthrough and shows the unsaved demo banner after skip.

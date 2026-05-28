@@ -112,6 +112,7 @@ function verifyDesktopAndHostedSecurity() {
   const config = readText("api/config.js");
   const profile = readText("api/profile.js");
   const cloudState = readText("api/cloud-state.js");
+  const emailRecaps = readText("api/email/send-recaps.js");
   const feedback = readText("api/feedback.js");
   const checkout = readText("api/billing/checkout.js");
   const portal = readText("api/billing/portal.js");
@@ -141,6 +142,7 @@ function verifyDesktopAndHostedSecurity() {
     ["API validators reject unexpected fields", shared, /contains unsupported field/],
     ["cloud workspace state has strict schema", validators, /validateCloudWorkspaceStatePayload/],
     ["feedback has strict schema", validators, /validateFeedbackPayload/],
+    ["email recap request has strict schema", validators, /validateEmailRecapPayload/],
     ["billing checkout has strict schema", validators, /validateCheckoutPayload/],
     ["profile patch has strict schema", validators, /validateProfilePatchPayload/],
     ["public config has rate limiting", config, /assertIpRateLimit\(request, response/],
@@ -151,6 +153,11 @@ function verifyDesktopAndHostedSecurity() {
     ["cloud state has IP rate limiting", cloudState, /assertIpRateLimit\(request, response/],
     ["cloud state has user rate limiting", cloudState, /requireUser\(request, response, \{ rateLimit: CLOUD_STATE_RATE_LIMIT \}/],
     ["cloud state validates payload before storage", cloudState, /validateCloudWorkspaceStatePayload/],
+    ["hosted recap email has IP rate limiting", emailRecaps, /assertIpRateLimit\(request, response/],
+    ["hosted recap email has user rate limiting", emailRecaps, /requireUser\(request, response, \{ rateLimit: EMAIL_USER_RATE_LIMIT \}/],
+    ["hosted recap email validates payload schema", emailRecaps, /validateEmailRecapPayload/],
+    ["hosted recap email reloads cloud state server-side", emailRecaps, /loadWorkspaceState\(supabase, user\.id\)/],
+    ["hosted recap email writes delivery state after send", emailRecaps, /markSessionEmailsSent/],
     ["Stripe client pins current SDK API version", readText("api/billing/stripe-client.js"), /apiVersion: stripeApiVersion/],
     ["anonymous feedback has IP rate limiting", feedback, /assertIpRateLimit\(request, response/],
     ["authenticated feedback has user rate limiting", feedback, /assertUserRateLimit\(request, response, user/],

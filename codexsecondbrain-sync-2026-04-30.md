@@ -501,9 +501,9 @@ All three validate with `quick_validate.py`.
 ## 2026-05-12 Prompt-Free Storage / Routed Landing Update
 
 - ClassLoop desktop state now uses a prompt-free local AES-GCM storage key file (`.classloop-storage-key`) next to `.classloop-data.json` instead of Electron `safeStorage`, avoiding OS password/Keychain prompts while keeping the data file encrypted.
-- Public landing navigation is now page-based rather than one long scroll: Home, Features, Screenshots, Docs, Privacy, Donate, and Download live at `#/features`, `#/screenshots`, `#/docs`, `#/privacy`, `#/donate`, and `#/download`.
-- The Donate path is visible and supports `VITE_CLASSLOOP_DONATE_URL`; when unset, the UI explicitly says the donation link is not connected instead of pretending payment works.
-- QA coverage should include prompt-free desktop encrypted state, routed landing pages, donation fallback messaging, platform download fallbacks, and PWA add-to-phone behavior on the Download page.
+- Public landing navigation is now page-based rather than one long scroll: Home, Features, Screenshots, Docs, Privacy, Support, and Download live at `#/features`, `#/screenshots`, `#/docs`, `#/privacy`, `#/support`, and `#/download`.
+- Public funding pages and related environment variables were removed; ClassLoop should route support/help through Support and product feedback instead.
+- QA coverage should include prompt-free desktop encrypted state, routed landing pages, platform download fallbacks, and PWA add-to-phone behavior on the Download page.
 
 ## 2026-05-18 Launch Stability Classwork Plan
 
@@ -530,7 +530,7 @@ All three validate with `quick_validate.py`.
 
 ## 2026-05-18 Public Installer / Legal / Feedback QA Update
 
-- Public landing routes now include Terms, EULA, and Support in addition to Home, Features, Screenshots, Docs, Privacy, Donate, and Download.
+- Public landing routes now include Terms, EULA, and Support in addition to Home, Features, Screenshots, Docs, Privacy, and Download.
 - Download and Support pages include an installer feedback form for clean-machine failures, OS blocking, checksum mismatch, checkout issues, and cloud sync problems. The form posts to `/api/feedback` with installer metadata and should notify the creator when feedback SMTP/Gmail env vars are configured.
 - `public/classloop-downloads.json` should point to GitHub Release URLs for macOS DMGs/ZIPs, Windows EXE/ZIPs, Linux AppImages, and `SHA256SUMS.txt`. Keep release binaries out of Vercel Blob.
 - QA prompt update: when testing public release readiness, verify `#/download`, `#/support`, `#/terms`, `#/privacy`, and `#/eula` across desktop and phone widths; submit a mocked installer feedback report; confirm Vercel Blob URLs remain blocked; confirm missing URLs stay `Packaging pending`; confirm legal copy is treated as a launch baseline pending final legal review.

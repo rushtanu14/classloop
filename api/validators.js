@@ -320,6 +320,22 @@ export function validateCheckoutPayload(payload) {
   );
 }
 
+export function validateEmailRecapPayload(payload) {
+  return validateSchema(
+    payload,
+    {
+      sessionId: requiredTrimmed(160, looseIdPattern),
+      ownerEmail: field.string({ max: 320, pattern: emailPattern }),
+      recipients: field.array(field.string({ max: 320, pattern: emailPattern }), {
+        max: 500,
+        optional: true,
+        defaultValue: undefined,
+      }),
+    },
+    { name: "email recap request" },
+  );
+}
+
 export function validateCloudWorkspaceStatePayload(payload) {
   if (!isPlainObject(payload)) {
     throw httpError(400, "Cloud workspace state must be an object.");

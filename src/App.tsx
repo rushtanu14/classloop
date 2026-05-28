@@ -148,7 +148,7 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
 };
 
-type LandingPageKey = "home" | "features" | "screenshots" | "docs" | "privacy" | "terms" | "eula" | "support" | "donate" | "download";
+type LandingPageKey = "home" | "features" | "screenshots" | "docs" | "privacy" | "terms" | "eula" | "support" | "download";
 type DesktopInstallerId = "macos" | "windows" | "linux";
 
 type ReleasePlatformManifest = {
@@ -765,7 +765,6 @@ function getLandingPage(): LandingPageKey {
     route === "terms" ||
     route === "eula" ||
     route === "support" ||
-    route === "donate" ||
     route === "download"
   ) {
     return route;
@@ -792,7 +791,6 @@ function isLandingHash() {
     route === "terms" ||
     route === "eula" ||
     route === "support" ||
-    route === "donate" ||
     route === "download" ||
     hash === "#features" ||
     hash === "#screenshots" ||
@@ -801,7 +799,6 @@ function isLandingHash() {
     hash === "#terms" ||
     hash === "#eula" ||
     hash === "#support" ||
-    hash === "#donate" ||
     hash === "#download"
   );
 }
@@ -3229,7 +3226,6 @@ function LandingPage({
 }) {
   const [downloadMessage, setDownloadMessage] = useState("");
   const [mobileMessage, setMobileMessage] = useState("");
-  const [donationMessage, setDonationMessage] = useState("");
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isStandaloneMobile, setIsStandaloneMobile] = useState(false);
   const [showDesktopInstallerChoices, setShowDesktopInstallerChoices] = useState(false);
@@ -3245,7 +3241,6 @@ function LandingPage({
     return releaseUrlIsVercelBlob(url) ? undefined : url;
   };
 
-  const donationUrl = cleanUrl(import.meta.env.VITE_CLASSLOOP_DONATE_URL as string | undefined);
   const supportEmail = cleanUrl(import.meta.env.VITE_CLASSLOOP_SUPPORT_EMAIL as string | undefined) || "rushilcpm02@gmail.com";
   const checksumUrl = cleanExternalReleaseUrl(releaseDownloads.checksumsUrl);
 
@@ -3407,7 +3402,6 @@ function LandingPage({
     { page: "docs", label: "Docs" },
     { page: "privacy", label: "Privacy" },
     { page: "support", label: "Support" },
-    { page: "donate", label: "Donate" },
     { page: "download", label: "Download" },
   ];
 
@@ -3423,20 +3417,6 @@ function LandingPage({
     }
     setDownloadMessage(
       `${option.label} packaging pending: the desktop installer has not been uploaded yet. You can try the hosted web demo now.`,
-    );
-  };
-
-  const handleDonate = (amount?: number) => {
-    if (donationUrl) {
-      const url = new URL(donationUrl, window.location.href);
-      if (amount && !url.searchParams.has("amount")) {
-        url.searchParams.set("amount", String(amount));
-      }
-      window.location.href = url.toString();
-      return;
-    }
-    setDonationMessage(
-      "The donation page is ready, but the public donation link has not been connected yet.",
     );
   };
 
@@ -3604,7 +3584,7 @@ function LandingPage({
               </article>
               <article>
                 <strong>Understand the product</strong>
-                <p>Use separate pages for features, docs, privacy, donations, and downloads instead of one crowded page.</p>
+                <p>Use separate pages for features, docs, privacy, support, and downloads instead of one crowded page.</p>
                 <button className="landing-secondary" type="button" onClick={() => goToPage("features")}>Explore features</button>
               </article>
               <article>
@@ -3978,52 +3958,6 @@ function LandingPage({
               </article>
             </section>
             <InstallerFeedbackForm supportEmail={supportEmail} defaultPlatform={detectedInstallerId ?? "web/mobile"} />
-          </>
-        )}
-
-        {page === "donate" && (
-          <>
-            <header className="landing-page-header">
-              <h1>Support ClassLoop development.</h1>
-              <p>
-                ClassLoop can stay free-first for teachers while donations help fund packaging, accessibility testing,
-                classroom pilots, and careful privacy work.
-              </p>
-            </header>
-            <section className="landing-donation-panel" aria-label="Donation options">
-              {[3, 9, 25].map((amount) => (
-                <article key={amount}>
-                  <strong>${amount}</strong>
-                  <span>
-                    {amount === 3
-                      ? "Bug-fix thank-you"
-                      : amount === 9
-                        ? "One month of ClassLoop Pro target pricing"
-                        : "Packaging and teacher pilot support"}
-                  </span>
-                  <button className="landing-primary" type="button" onClick={() => handleDonate(amount)}>
-                    Support ${amount}
-                  </button>
-                </article>
-              ))}
-            </section>
-            <section className="landing-policy-panel">
-              <h2>Other ways to help</h2>
-              <p>Try the demo, report confusing import results, share a classroom transcript format, or star the project when it is public.</p>
-              <div className="landing-actions compact">
-                <button className="landing-secondary" type="button" onClick={onOpenApp}>
-                  Open demo
-                </button>
-                <button className="landing-secondary" type="button" onClick={() => goToPage("docs")}>
-                  Read docs
-                </button>
-              </div>
-              {donationMessage && (
-                <p className="landing-message" role="status" aria-live="polite">
-                  {donationMessage}
-                </p>
-              )}
-            </section>
           </>
         )}
 
@@ -9099,10 +9033,14 @@ function PublishPreview({
     setIsSendingEmail(true);
     setDeliveryMessage("");
     try {
-      const result = await apiJson<EmailDeliveryResult>("/api/email/send-recaps", {
+      const request = {
         method: "POST",
         body: JSON.stringify({ sessionId: draft.id, ownerEmail: draft.ownerEmail, recipients: selectedEmailRecipients }),
-      });
+      };
+      const cloudSession = await getCloudSession();
+      const result = cloudSession
+        ? await cloudRequest<EmailDeliveryResult>("/api/email/send-recaps", request)
+        : await apiJson<EmailDeliveryResult>("/api/email/send-recaps", request);
       updateDraft((current) => markSessionEmailsSent(current, result));
       setDeliveryMessage(`Sent through ${result.provider} to ${result.recipients.length} students.`);
     } catch (error) {

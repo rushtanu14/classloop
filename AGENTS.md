@@ -34,9 +34,8 @@ ClassLoop is a desktop and mobile-web classroom follow-up platform (Electron + R
 - Student: `maya@classloop.demo` / `classloop-student`
 - Hosted Vercel demo should use sample accounts only. Do not enable custom account creation in the hosted demo; users create durable accounts in the downloaded desktop app.
 - Sample/demo account changes must be ephemeral and clearly bannered as unsaved demo data.
-- Public landing pages are routed at `#/features`, `#/screenshots`, `#/docs`, `#/privacy`, `#/terms`, `#/eula`, `#/support`, `#/donate`, and `#/download`; do not collapse them back into one scroll-through page.
+- Public landing pages are routed at `#/features`, `#/screenshots`, `#/docs`, `#/privacy`, `#/terms`, `#/eula`, `#/support`, and `#/download`; do not collapse them back into one scroll-through page.
 - Public landing downloads support macOS, Windows, and Linux through the tiny `public/classloop-downloads.json` manifest. Keep installer binaries outside Vercel Blob (GitHub Releases, Cloudflare R2, S3, or another large-file host instead) so Vercel only handles the web/PWA shell and APIs. If a URL is missing, the UI should say that installer is still being packaged rather than pretending the download works. macOS public downloads and `npm run package:mac` are Apple silicon arm64 only; Windows and Linux packaging may keep x64 and arm64 where Electron Builder supports it. Linux public downloads should default to AppImage; only offer `.deb` packages after building them on a Linux host with `npm run package:linux:deb` and passing release verification.
-- Public donation support uses `VITE_CLASSLOOP_DONATE_URL`. If it is missing, the Donate page should say the donation link is not connected rather than pretending payment works.
 - Hosted mobile access is through the Vercel PWA shell: keep `public/manifest.webmanifest`, `public/sw.js`, mobile meta tags, and the landing/download-page "Add to phone" flow working.
 
 ## Architecture

@@ -69,7 +69,6 @@ This keeps the first impression accessible to everyone while still making the st
 - Supabase-backed hosted account, email confirmation, and sync scaffold.
 - Stripe Checkout/Payment Link-based Pro subscription scaffold.
 - Google Classroom and Zoom workflow surfaces for roster/course and transcript-first classroom follow-up.
-
 ## Demo Accounts
 
 Teacher:
@@ -110,7 +109,6 @@ Requirements:
 
 - Node.js
 - npm
-
 Start the desktop app:
 
 ```bash
@@ -118,7 +116,6 @@ Start the desktop app:
 ```
 
 On macOS, this builds the local Swift app bundle and opens `release/swift-mac-arm64/ClassLoop.app` directly from this checkout.
-
 Start the browser dev server:
 
 ```bash
@@ -272,7 +269,6 @@ npm run release:checksums
 Use `.env.example` as the checklist for optional hosted services.
 
 For the full Stripe, Supabase, and Vercel payment setup checklist, use [docs/classloop-payment-launch-runbook.md](docs/classloop-payment-launch-runbook.md). Paid Pro promotion should stay on hold until the runbook's live checkout, webhook entitlement, cancellation, and demo-account-blocking proof is current.
-
 Common hosted variables:
 
 ```bash

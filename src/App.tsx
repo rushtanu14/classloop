@@ -10713,7 +10713,7 @@ function PublishPreview({
     setIsSendingEmail(true);
     setDeliveryMessage("");
     try {
-      const result = await apiJson<EmailDeliveryResult>("/api/email/send-recaps", {
+      const request = {
         method: "POST",
         body: JSON.stringify({
           sessionId: draft.id,
@@ -10721,7 +10721,11 @@ function PublishPreview({
           recipients: selectedEmailRecipients,
           includeAccessInstructions: magicLinksEnabled,
         }),
-      });
+      };
+      const cloudSession = await getCloudSession();
+      const result = cloudSession
+        ? await cloudRequest<EmailDeliveryResult>("/api/email/send-recaps", request)
+        : await apiJson<EmailDeliveryResult>("/api/email/send-recaps", request);
       updateDraft((current) => markSessionEmailsSent(current, result));
       setDeliveryMessage(`Sent recap emails to ${result.recipients.length} students.`);
     } catch (error) {

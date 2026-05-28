@@ -626,6 +626,49 @@ assertEqual(
   0,
   "transcript-only mode should not flag estimated speakers as unmatched before teacher confirmation",
 );
+assert(
+  transcriptOnlySession.importWarnings?.some(
+    (warning) => warning.id === "estimated-roster" && warning.severity === "blocking",
+  ) ?? false,
+  "transcript-only mode should block publish until the teacher confirms the estimated roster",
+);
+assert(
+  transcriptOnlySession.importWarnings?.some((warning) => warning.id === "missing-student-emails") ?? false,
+  "transcript-only mode should warn that student delivery is incomplete until emails are added",
+);
+
+const duplicateNameRosterSession = createGeneratedSession({
+  title: "Duplicate student names need review",
+  template: "General classroom",
+  transcript: `Jordan Lee: I can summarize the graph.
+Jordan Lee: I can also explain the second example.`,
+  notes: "",
+  roster: `Jordan Lee,jordan.one@classloop.test
+Jordan Lee,jordan.two@classloop.test
+Maya Chen,maya@classloop.test`,
+  resources: "",
+});
+assert(
+  duplicateNameRosterSession.importWarnings?.some(
+    (warning) => warning.id === "duplicate-roster-names" && warning.severity === "blocking",
+  ) ?? false,
+  "duplicate roster names should create a blocking warning before transcript speakers are attached to multiple dashboards",
+);
+
+const emptyImportSession = createGeneratedSession({
+  title: "No usable students yet",
+  template: "Study group",
+  transcript: "",
+  notes: "",
+  roster: "",
+  resources: "",
+});
+assert(
+  emptyImportSession.importWarnings?.some(
+    (warning) => warning.id === "no-students-detected" && warning.severity === "blocking",
+  ) ?? false,
+  "empty imports should create a blocking warning instead of looking ready to publish",
+);
 
 const meetingNotesMetadataSession = createGeneratedSession({
   title: "Meeting note metadata labels",

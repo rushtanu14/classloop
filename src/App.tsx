@@ -6413,6 +6413,13 @@ function ImportSession({
     transcript.trim().length > 80 && transcriptSpeakerCount === 0
       ? "No speaker labels were detected. ClassLoop can still draft from the roster, notes, and transcript text, but review matching before publishing."
       : "";
+  const hasSessionContext = Boolean(transcript.trim() || notes.trim() || Object.values(templateDetails).some((value) => value.trim()));
+  const importPreflightWarnings = [
+    !hasSessionContext ? "Add transcript text, meeting notes, or template details before generating a draft." : "",
+    !roster.trim()
+      ? "No roster is loaded yet. ClassLoop can estimate speaker names, but you will still need to confirm the roster and add student emails before publishing."
+      : "",
+  ].filter(Boolean);
   const malformedResourceLineCount = useMemo(
     () =>
       resources
@@ -6673,6 +6680,10 @@ function ImportSession({
   };
 
   const generateDraft = () => {
+    if (!hasSessionContext) {
+      setPlanMessage("Add transcript text, meeting notes, or template details before generating a draft.");
+      return;
+    }
     if (!canCreateSession) {
       setPlanMessage(
         `${planName} lets you generate 1 session per day. You have used ${Math.min(
@@ -7180,7 +7191,12 @@ function ImportSession({
                 {resourceFormatWarning}
               </p>
             )}
-            <button className="primary-button full" onClick={generateDraft} disabled={!canCreateSession}>
+            {importPreflightWarnings.map((warning) => (
+              <p key={warning} className="settings-message" role="status">
+                {warning}
+              </p>
+            ))}
+            <button className="primary-button full" onClick={generateDraft} disabled={!canCreateSession || !hasSessionContext}>
               <Wand2 size={18} />
               Generate draft
             </button>

@@ -303,6 +303,18 @@ function transcriptLineStats(text: string) {
   return { lines, parsed, rawSpeakerLines, chatLines, genericSpeakerLines, staffOrBotLines, privateLines };
 }
 
+function duplicateRosterNames(students: Student[]) {
+  const counts = new Map<string, number>();
+  students.forEach((student) => {
+    const normalized = normalizeSpeakerName(student.name);
+    if (!normalized) return;
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+  });
+  return Array.from(counts.entries())
+    .filter(([, count]) => count > 1)
+    .map(([name]) => name);
+}
+
 function isLikelyNoisyAsr(text: string) {
   const words = text.toLowerCase().match(/[a-z']+/g) ?? [];
   if (words.length < 35) return false;
@@ -314,11 +326,44 @@ function isLikelyNoisyAsr(text: string) {
   return unclearMarkers > 0 || fillerWords / words.length > 0.16 || (shortWords / words.length > 0.38 && punctuationCount < 3);
 }
 
-function importQualityWarnings(sessionText: string, hasExplicitRoster: boolean): ImportQualityWarning[] {
+function importQualityWarnings(sessionText: string, roster: Student[], hasExplicitRoster: boolean): ImportQualityWarning[] {
   const stats = transcriptLineStats(sessionText);
   const warnings: ImportQualityWarning[] = [];
   const parsedCount = stats.parsed.length;
   const chatOnly = parsedCount > 0 && stats.chatLines.length / Math.max(1, parsedCount) >= 0.75;
+  const duplicateNames = duplicateRosterNames(roster);
+  const blankEmailCount = roster.filter((student) => !student.email.trim()).length;
+
+  if (!roster.length) {
+    warnings.push({
+      id: "no-students-detected",
+      severity: "blocking",
+      title: "No students were detected yet",
+      message:
+        "ClassLoop could not find any usable student names from the roster or transcript. Paste at least one student name before publishing student dashboards.",
+      source: hasExplicitRoster ? "Roster parse returned 0 students" : "No roster and no transcript-estimated students",
+    });
+  } else if (!hasExplicitRoster) {
+    warnings.push({
+      id: "estimated-roster",
+      severity: "blocking",
+      title: "Roster still needs teacher confirmation",
+      message:
+        "These students were estimated from transcript speaker names. Add the real roster, confirm aliases, and attach student emails before publishing student dashboards.",
+      source: `${roster.length} estimated student${roster.length === 1 ? "" : "s"} from transcript speakers`,
+    });
+  }
+
+  if (duplicateNames.length > 0) {
+    warnings.push({
+      id: "duplicate-roster-names",
+      severity: "blocking",
+      title: "Duplicate student names need review",
+      message:
+        "Two or more roster rows share the same student name. Add aliases or adjust the roster before publishing so ClassLoop does not attach the same transcript speaker to multiple dashboards.",
+      source: `${duplicateNames.length} duplicate roster name${duplicateNames.length === 1 ? "" : "s"} detected`,
+    });
+  }
 
   if (stats.genericSpeakerLines.length > 0 && hasExplicitRoster) {
     warnings.push({
@@ -383,6 +428,17 @@ function importQualityWarnings(sessionText: string, hasExplicitRoster: boolean):
       message:
         "The import had speaker-like lines, but they looked like metadata, staff, bots, private messages, or unsupported labels. Review the draft as a class-level summary.",
       source: `${stats.rawSpeakerLines.length} speaker-like line${stats.rawSpeakerLines.length === 1 ? "" : "s"} skipped`,
+    });
+  }
+
+  if (blankEmailCount > 0) {
+    warnings.push({
+      id: "missing-student-emails",
+      severity: "warning",
+      title: "Some students do not have emails yet",
+      message:
+        "Student dashboards can still be reviewed, but recap delivery and account linking will stay incomplete until those roster emails are added.",
+      source: `${blankEmailCount} student${blankEmailCount === 1 ? "" : "s"} missing email`,
     });
   }
 
@@ -961,7 +1017,7 @@ export function createGeneratedSession(input: ImportDraftInput): Session {
   const roster = parseRoster(input.roster, input.transcript);
   const hasExplicitRoster = Boolean(input.roster.trim());
   const unmatchedParticipants = findUnmatchedParticipants(sessionText, roster, hasExplicitRoster);
-  const importWarnings = importQualityWarnings(sessionText, hasExplicitRoster);
+  const importWarnings = importQualityWarnings(sessionText, roster, hasExplicitRoster);
   const hasBlockingImportWarning = importWarnings.some((warning) => warning.severity === "blocking");
   const hasChatOnlyWarning = importWarnings.some((warning) => warning.id === "chat-only");
   const topics = extractTopics(sessionTitle, sessionText, input.template);

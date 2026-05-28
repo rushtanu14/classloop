@@ -1324,6 +1324,62 @@ select:focus-visible,
   place-items: center;
 }
 
+.auth-entry-page {
+  place-items: center;
+  width: 100%;
+}
+
+.auth-entry-panel {
+  display: grid;
+  justify-items: center;
+  gap: 24px;
+  width: min(680px, 100%);
+  padding: 44px;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  text-align: center;
+  background: color-mix(in srgb, var(--surface-strong) 94%, #ffffff 6%);
+  box-shadow: var(--shadow);
+}
+
+.auth-entry-mark {
+  display: grid;
+  place-items: center;
+  width: 112px;
+  height: 112px;
+  border-radius: 30px;
+  color: #0f3d39;
+  background: linear-gradient(135deg, #f0d84f 0%, #3ee3b4 100%);
+  box-shadow: 0 24px 54px rgba(15, 118, 110, 0.18);
+}
+
+.auth-entry-copy {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+
+.auth-entry-copy h1 {
+  margin: 0;
+  color: var(--heading);
+  font-size: 4.9rem;
+  line-height: 0.96;
+  letter-spacing: 0;
+}
+
+.auth-entry-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  width: min(440px, 100%);
+}
+
+.auth-entry-actions .primary-button,
+.auth-entry-actions .ghost-button {
+  justify-content: center;
+  min-height: 52px;
+}
+
 .login-panel,
 .login-side {
   display: grid;
@@ -1392,6 +1448,17 @@ select:focus-visible,
   color: #0f3d39;
   background: #e7faf6;
   font-weight: 800;
+  line-height: 1.45;
+}
+
+.auth-choice-hint {
+  margin: 0;
+  padding: 14px;
+  border: 1px dashed rgba(15, 118, 110, 0.28);
+  border-radius: 14px;
+  color: #0f3d39;
+  background: #f3fbf8;
+  font-weight: 850;
   line-height: 1.45;
 }
 
@@ -1664,6 +1731,11 @@ select:focus-visible,
   justify-self: start;
   margin-top: 2px;
   padding: 0;
+}
+
+.sample-account-actions {
+  display: grid;
+  gap: 6px;
 }
 
 .forgot-password-link {
@@ -6301,6 +6373,18 @@ th {
   .login-page {
     grid-template-columns: 1fr;
     padding: 18px;
+  }
+
+  .auth-entry-panel {
+    padding: 28px;
+  }
+
+  .auth-entry-copy h1 {
+    font-size: 3.4rem;
+  }
+
+  .auth-entry-actions {
+    grid-template-columns: 1fr;
   }
 
   .login-panel,

@@ -10,6 +10,33 @@ async function resetBrowser(page: Page) {
     sessionStorage.clear();
   });
   await page.goto("/#/dashboard");
+  await openTeacherSignInFields(page);
+}
+
+async function openSignInForm(page: Page) {
+  await page.waitForSelector(".auth-entry-actions, form.login-form", { timeout: 15_000 });
+  const entryLogin = page.locator(".auth-entry-actions").getByRole("button", { name: /^log in$/i });
+  if (await entryLogin.isVisible().catch(() => false)) {
+    await entryLogin.click();
+  }
+  await expect(page.getByText(/Sign in to ClassLoop/i)).toBeVisible();
+}
+
+async function openCreateAccountForm(page: Page) {
+  await page.waitForSelector(".auth-entry-actions, form.login-form", { timeout: 15_000 });
+  const entryCreate = page.locator(".auth-entry-actions").getByRole("button", { name: /^create account$/i });
+  if (await entryCreate.isVisible().catch(() => false)) {
+    await entryCreate.click();
+  } else {
+    await page.locator(".auth-switch").getByRole("button", { name: /^create account$/i }).click();
+  }
+  await expect(page.getByText(/Create your ClassLoop account/i)).toBeVisible();
+}
+
+async function openTeacherSignInFields(page: Page) {
+  await openSignInForm(page);
+  await page.getByRole("tab", { name: /^class$/i }).click();
+  await page.getByRole("tab", { name: /^teacher$/i }).click();
   await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
 }
 
@@ -34,31 +61,19 @@ function privateLogPattern() {
 }
 
 test.describe("user-visible error states and recovery", () => {
-  test("startup loader stays compact while shared state is pending", async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "chromium", "Runs once because it intentionally delays shared-state startup.");
-    let releaseSharedState: () => void = () => undefined;
-    const sharedStateHold = new Promise<void>((resolve) => {
-      releaseSharedState = resolve;
-    });
-    const sharedStateRequested = page.waitForRequest("**/api/state");
-
+  test("startup opens encrypted local state without probing stale shared-state API", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium", "Runs once because it verifies the startup network contract.");
+    let apiStateRequests = 0;
     await page.route("**/api/state", async (route) => {
-      await sharedStateHold;
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({}),
-      });
+      apiStateRequests += 1;
+      await route.abort();
     });
 
-    await page.goto("/#/dashboard", { waitUntil: "domcontentloaded" });
-    await sharedStateRequested;
-    await expect(page.getByRole("heading", { name: /loading classloop/i })).toBeVisible();
-    await expect(page.getByRole("status", { name: /classloop loading/i })).toContainText(/Workspace sync/);
-    await expect(page.getByLabel(/workspace data outline/i)).toHaveCount(0);
-    await expect(page.getByLabel(/startup status/i)).toHaveCount(0);
-    releaseSharedState();
-    await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
+    await page.goto("/#/dashboard");
+    await expect(page.getByRole("heading", { name: /^ClassLoop$/i })).toBeVisible();
+    await openTeacherSignInFields(page);
+    await expect(page.getByRole("status").filter({ hasText: /shared sync is unavailable/i })).toHaveCount(0);
+    expect(apiStateRequests).toBe(0);
   });
 
   test("bad transcript format and malformed resource URLs show recoverable warnings without leaking private text to logs", async ({
@@ -127,48 +142,32 @@ test.describe("user-visible error states and recovery", () => {
     await expect(page.getByRole("button", { name: /publish to students/i })).toBeEnabled();
   });
 
-  test("shared sync API outage falls back to usable local browser state with visible recovery copy", async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "chromium", "Runs once because it intentionally intercepts shared-state API calls.");
+  test("missing shared-state API does not block the local browser workspace", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium", "Runs once because it intentionally guards the removed shared-state API path.");
     const runtimeMessages: string[] = [];
     page.on("console", (message) => {
       if (["error", "warning", "info", "log", "debug"].includes(message.type())) runtimeMessages.push(message.text());
     });
+    let apiStateRequests = 0;
     await page.route("**/api/state", async (route) => {
-      await route.fulfill({
-        status: 503,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "Shared sync API unavailable for outage drill." }),
-      });
+      apiStateRequests += 1;
+      await route.abort();
     });
 
     await page.goto("/#/dashboard");
-    await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
-    await expect(page.getByRole("status").filter({ hasText: /shared sync is unavailable/i })).toBeVisible();
+    await openTeacherSignInFields(page);
+    await expect(page.getByRole("status").filter({ hasText: /shared sync is unavailable/i })).toHaveCount(0);
     await page.getByPlaceholder("name@example.com").fill(teacherEmail);
     await page.getByPlaceholder("Enter password").fill(teacherPassword);
     await page.locator("form.login-form button[type='submit']").click();
     await skipAutoWalkthrough(page);
     await expect(page.getByText("Today in ClassLoop")).toBeVisible();
-    await expect(page.getByRole("status").filter({ hasText: /shared sync is unavailable/i })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /shared sync is unavailable/i })).toHaveCount(0);
 
     await page.getByRole("button", { name: /ms\. rivera/i }).click();
     await expect(page.locator(".profile-menu")).toContainText(/Saved in this browser/i);
+    expect(apiStateRequests).toBe(0);
     expect(runtimeMessages.join("\n")).not.toMatch(privateLogPattern());
-  });
-
-  test("non-json shared sync response opens local mode with recovery copy", async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "chromium", "Runs once because it intentionally intercepts shared-state API calls.");
-    await page.route("**/api/state", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "text/html",
-        body: "<h1>temporary gateway page</h1>",
-      });
-    });
-
-    await page.goto("/#/dashboard");
-    await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
-    await expect(page.getByRole("status").filter({ hasText: /shared sync is unavailable/i })).toBeVisible();
   });
 
   test("corrupt encrypted browser state is reported before sign in", async ({ page }, testInfo) => {
@@ -176,16 +175,9 @@ test.describe("user-visible error states and recovery", () => {
     await page.addInitScript(() => {
       window.localStorage.setItem("classloop:secure:accounts:v1", "not-json");
     });
-    await page.route("**/api/state", async (route) => {
-      await route.fulfill({
-        status: 503,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "Shared sync API unavailable for storage recovery drill." }),
-      });
-    });
 
     await page.goto("/#/dashboard");
-    await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
+    await openTeacherSignInFields(page);
     await expect(page.getByRole("alert").filter({ hasText: /some browser data could not be read/i })).toBeVisible();
   });
 
@@ -200,17 +192,11 @@ test.describe("user-visible error states and recovery", () => {
         return originalSetItem.call(this, key, value);
       };
     });
-    await page.route("**/api/state", async (route) => {
-      await route.fulfill({
-        status: 503,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "Shared sync API unavailable for storage write drill." }),
-      });
-    });
 
     await page.goto("/#/dashboard");
-    await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
-    await page.locator(".auth-switch").getByRole("button", { name: /^create account$/i }).click();
+    await openCreateAccountForm(page);
+    await page.getByRole("tab", { name: /^class$/i }).click();
+    await page.getByRole("tab", { name: /^teacher$/i }).click();
     await page.getByPlaceholder("Your name").fill("Storage Drill Teacher");
     await page.getByPlaceholder("name@example.com").fill("storage-drill-teacher@classloop.test");
     await page.getByPlaceholder("Enter password", { exact: true }).fill("storage-drill-password");

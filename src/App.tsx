@@ -220,7 +220,7 @@ type WorkspaceNotice = {
   message: string;
 };
 
-type BootPhase = "sync" | "local" | "ready";
+type BootPhase = "local" | "ready";
 
 type BootStepStatus = "pending" | "active" | "complete" | "warning" | "error";
 
@@ -541,18 +541,6 @@ const loadingTips = [
   "Tip: use aliases when a Zoom display name is different from a roster name.",
 ];
 
-const sharedSyncFallbackNotice: WorkspaceNotice = {
-  severity: "warning",
-  title: "Shared sync is unavailable",
-  message: "ClassLoop opened from encrypted browser storage. You can keep working here, and shared sync can reconnect later.",
-};
-
-const sharedSaveFallbackNotice: WorkspaceNotice = {
-  severity: "warning",
-  title: "Shared sync could not save",
-  message: "Recent changes are being kept in encrypted browser storage until shared sync is reachable again.",
-};
-
 const localReadFailureNotice: WorkspaceNotice = {
   severity: "error",
   title: "Some browser data could not be read",
@@ -566,22 +554,20 @@ const localWriteFailureNotice: WorkspaceNotice = {
 };
 
 function workspaceBootSteps(phase: BootPhase, notice: WorkspaceNotice | null): BootStep[] {
-  const sharedStatus: BootStepStatus =
-    phase === "sync" ? "active" : notice ? (notice.severity === "error" ? "error" : "warning") : "complete";
   const localStatus: BootStepStatus =
-    phase === "local" ? "active" : phase === "ready" ? (notice ? "warning" : "complete") : "pending";
+    phase === "local" ? "active" : phase === "ready" ? (notice ? (notice.severity === "error" ? "error" : "warning") : "complete") : "pending";
   const readyStatus: BootStepStatus = phase === "ready" ? "complete" : "pending";
 
   return [
     {
-      label: "Workspace sync",
-      detail: "Checking shared-state API and the latest saved classroom records.",
-      status: sharedStatus,
+      label: "Encrypted local workspace",
+      detail: "Opening accounts, drafts, rosters, and settings saved on this device.",
+      status: localStatus,
     },
     {
-      label: "Encrypted browser fallback",
-      detail: "Ready to recover accounts, drafts, rosters, and settings if shared sync is offline.",
-      status: localStatus,
+      label: "Cloud sync readiness",
+      detail: "Authenticated Supabase sync is available from Plan options when a cloud account is connected.",
+      status: readyStatus,
     },
     {
       label: "Teacher and student accounts",
@@ -1935,15 +1921,12 @@ function App() {
   const [landingPage, setLandingPage] = useState<LandingPageKey>(getLandingPage);
   const [publicDemoOnly] = useState(() => isPublicHostedDemo() || isDemoOnlyOverride());
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
-  const [bootPhase, setBootPhase] = useState<BootPhase>("sync");
+  const [bootPhase, setBootPhase] = useState<BootPhase>("local");
   const [workspaceNotice, setWorkspaceNotice] = useState<WorkspaceNotice | null>(null);
   const [templateLinks, setTemplateLinks] = useState<TemplateLinkManifest>({});
   const [passwordResetCodes, setPasswordResetCodes] = useState<Record<string, PasswordResetRecord>>({});
   const [celebrationMoment, setCelebrationMoment] = useState<CelebrationMoment | null>(null);
-  const serverSyncRef = useRef(false);
   const demoSessionRef = useRef(false);
-  const isSavingRef = useRef(false);
-  const writeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSharedJsonRef = useRef(
     sharedStateJson(persistableSharedState({
       accounts: demoAccounts,
@@ -1958,7 +1941,6 @@ function App() {
       billingProfile: defaultBillingProfile,
     })),
   );
-  const lastServerUpdatedAtRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     const key = themePresets[theme.key] ? theme.key : defaultTheme.key;
@@ -1985,7 +1967,7 @@ function App() {
 
   useEffect(() => {
     let active = true;
-    setBootPhase("sync");
+    setBootPhase("local");
     setWorkspaceNotice(null);
     if (publicDemoOnly) {
       clearClassLoopLocalPersistence();
@@ -2012,7 +1994,6 @@ function App() {
         auditLog: [],
         billingProfile: defaultBillingProfile,
       }));
-      serverSyncRef.current = false;
       setSyncStatus("local");
       setBootPhase("ready");
       setSharedReady(true);
@@ -2021,37 +2002,9 @@ function App() {
       };
     }
 
-    fetch("/api/state")
-      .then(async (response) => {
-        const contentType = response.headers.get("content-type") ?? "";
-        if (!response.ok || !contentType.includes("application/json")) {
-          throw new Error("Shared state API is unavailable.");
-        }
-        return normalizeSharedState(await response.json());
-      })
-      .then((state) => {
+    readLocalStateFallback()
+      .then((localResult) => {
         if (!active) return;
-        setAccounts(state.accounts);
-        setSessions(state.sessions);
-        setPersonalMeetings(state.personalMeetings);
-        setDraft(state.draft);
-        setDemoLoaded(state.demoLoaded);
-        setClassGroups(state.classGroups);
-        setRosterTemplates(state.rosterTemplates);
-        setPrivacySettings(state.privacySettings);
-        setAuditLog(state.auditLog);
-        setBillingProfile(defaultBillingProfile);
-        lastSharedJsonRef.current = sharedStateJson(state);
-        lastServerUpdatedAtRef.current = state.updatedAt;
-        serverSyncRef.current = true;
-        setSyncStatus("shared");
-        setWorkspaceNotice(null);
-        setBootPhase("ready");
-      })
-      .catch(async () => {
-        if (!active) return;
-        setBootPhase("local");
-        const localResult = await readLocalStateFallback();
         const localState = localResult.state;
         setAccounts(localState.accounts);
         setSessions(localState.sessions);
@@ -2064,9 +2017,14 @@ function App() {
         setAuditLog(localState.auditLog);
         setBillingProfile(defaultBillingProfile);
         lastSharedJsonRef.current = sharedStateJson(localState);
-        serverSyncRef.current = false;
         setSyncStatus("local");
-        setWorkspaceNotice(localResult.failedKeys.length ? localReadFailureNotice : sharedSyncFallbackNotice);
+        setWorkspaceNotice(localResult.failedKeys.length ? localReadFailureNotice : null);
+        setBootPhase("ready");
+      })
+      .catch(() => {
+        if (!active) return;
+        setSyncStatus("local");
+        setWorkspaceNotice(localReadFailureNotice);
         setBootPhase("ready");
       })
       .finally(() => {
@@ -2098,82 +2056,20 @@ function App() {
       auditLog,
       billingProfile,
     });
-    if (!serverSyncRef.current) {
-      void writeLocalStateFallback(persistableState).catch(() => {
-        setWorkspaceNotice(localWriteFailureNotice);
-      });
-      return;
-    }
-
     const nextJson = sharedStateJson(persistableState);
     if (nextJson === lastSharedJsonRef.current) return;
 
-    if (writeTimerRef.current) clearTimeout(writeTimerRef.current);
-    writeTimerRef.current = setTimeout(() => {
-      isSavingRef.current = true;
-      fetch("/api/state", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: nextJson,
+    void writeLocalStateFallback(persistableState)
+      .then(() => {
+        lastSharedJsonRef.current = nextJson;
+        setSyncStatus("local");
+        setWorkspaceNotice((current) => (current === localWriteFailureNotice ? null : current));
       })
-        .then(async (response) => {
-          if (!response.ok) throw new Error("Unable to save shared state.");
-          const state = normalizeSharedState(await response.json());
-          lastSharedJsonRef.current = sharedStateJson(state);
-          lastServerUpdatedAtRef.current = state.updatedAt;
-          setSyncStatus("shared");
-          setWorkspaceNotice(null);
-        })
-        .catch(() => {
-          setSyncStatus("local");
-          setWorkspaceNotice(sharedSaveFallbackNotice);
-          void writeLocalStateFallback(persistableState).catch(() => {
-            setWorkspaceNotice(localWriteFailureNotice);
-          });
-        })
-        .finally(() => {
-          isSavingRef.current = false;
-          writeTimerRef.current = null;
-        });
-    }, 300);
+      .catch(() => {
+        setSyncStatus("local");
+        setWorkspaceNotice(localWriteFailureNotice);
+      });
   }, [accounts, auditLog, auth?.demo, billingProfile, classGroups, demoLoaded, draft, personalMeetings, privacySettings, publicDemoOnly, rosterTemplates, sessions, sharedReady]);
-
-  useEffect(() => {
-    if (!sharedReady || !serverSyncRef.current) return;
-    const interval = window.setInterval(() => {
-      if (isSavingRef.current) return;
-      fetch("/api/state")
-        .then(async (response) => {
-          if (!response.ok) throw new Error("Unable to refresh shared state.");
-          return normalizeSharedState(await response.json());
-        })
-        .then((state) => {
-          if (state.updatedAt === lastServerUpdatedAtRef.current) return;
-          const nextJson = sharedStateJson(state);
-          if (nextJson !== lastSharedJsonRef.current) {
-            setAccounts(state.accounts);
-            setSessions(state.sessions);
-            setPersonalMeetings(state.personalMeetings);
-            setDraft(state.draft);
-            setDemoLoaded(state.demoLoaded);
-            setClassGroups(state.classGroups);
-            setRosterTemplates(state.rosterTemplates);
-            setPrivacySettings(state.privacySettings);
-            setAuditLog(state.auditLog);
-          }
-          lastSharedJsonRef.current = nextJson;
-          lastServerUpdatedAtRef.current = state.updatedAt;
-          setSyncStatus("shared");
-          setWorkspaceNotice(null);
-        })
-        .catch(() => {
-          setSyncStatus("local");
-          setWorkspaceNotice(sharedSyncFallbackNotice);
-        });
-    }, 2500);
-
-    return () => window.clearInterval(interval);
-  }, [sharedReady]);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -4308,9 +4204,10 @@ function LoginPage({
   demoOnly: boolean;
   workspaceNotice?: WorkspaceNotice | null;
 }) {
+  const [authScreen, setAuthScreen] = useState<"entry" | "form">(demoOnly ? "form" : "entry");
   const [mode, setMode] = useState<"signin" | "create">("signin");
-  const [role, setRole] = useState<AuthRole>("teacher");
-  const [accountPath, setAccountPath] = useState<"individual" | "class">("class");
+  const [role, setRole] = useState<AuthRole | null>(null);
+  const [accountPath, setAccountPath] = useState<"individual" | "class" | null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState(demoOnly ? demoTeacherEmail : "");
   const [password, setPassword] = useState(demoOnly ? "classloop-teacher" : "");
@@ -4329,6 +4226,9 @@ function LoginPage({
   const classRole = role === "student" ? "student" : "teacher";
   const demoEmail = classRole === "teacher" ? demoTeacherEmail : demoStudentEmail;
   const demoPassword = classRole === "teacher" ? "classloop-teacher" : "classloop-student";
+  const hasChosenAccount = role !== null;
+  const selectedAccountLabel =
+    role === "individual" ? "Individual" : role === "teacher" ? "Teacher" : role === "student" ? "Student" : "Account";
 
   useEffect(() => {
     if (!demoOnly || mode !== "signin") return;
@@ -4346,7 +4246,7 @@ function LoginPage({
 
   const chooseAccountPath = (nextPath: "individual" | "class") => {
     setAccountPath(nextPath);
-    setRole((current) => (nextPath === "individual" ? "individual" : current === "student" ? "student" : "teacher"));
+    setRole(nextPath === "individual" ? "individual" : null);
     setError("");
     setNotice("");
     setResetMessage("");
@@ -4357,23 +4257,27 @@ function LoginPage({
       setError("Download the app to create your own account and save data. The web demo uses sample accounts only.");
       return;
     }
+    setAuthScreen("form");
     setMode(nextMode);
+    setRole(null);
+    setAccountPath(null);
     setError("");
     setNotice("");
     setPassword("");
     setConfirmPassword("");
     setShowPassword(false);
     setResetOpen(false);
-    if (nextMode === "create") {
-      setEmail("");
-      setName("");
-    }
+    setEmail("");
+    setName("");
   };
 
-  const fillDemo = () => {
+  const fillDemo = (nextRole: "teacher" | "student" = classRole) => {
+    setAuthScreen("form");
     setMode("signin");
-    setEmail(demoEmail);
-    setPassword(demoPassword);
+    setAccountPath("class");
+    setRole(nextRole);
+    setEmail(nextRole === "teacher" ? demoTeacherEmail : demoStudentEmail);
+    setPassword(nextRole === "teacher" ? "classloop-teacher" : "classloop-student");
     setShowPassword(false);
     setError("");
     setNotice("");
@@ -4392,6 +4296,10 @@ function LoginPage({
 
   const requestReset = async () => {
     setResetMessage("");
+    if (!role) {
+      setResetMessage("Choose an account type before requesting a reset code.");
+      return;
+    }
     const result = await onRequestPasswordReset(role, email);
     setResetMessage(result.message ?? "Reset request received.");
     if (result.ok && result.code && result.email) {
@@ -4422,6 +4330,10 @@ function LoginPage({
 
   const completeReset = async () => {
     setResetMessage("");
+    if (!role) {
+      setResetMessage("Choose an account type before resetting your password.");
+      return;
+    }
     if (resetPassword !== resetConfirmPassword) {
       setResetMessage("New passwords do not match.");
       return;
@@ -4442,6 +4354,11 @@ function LoginPage({
     setIsSubmitting(true);
     setError("");
     setNotice("");
+    if (!role) {
+      setError("Choose Individual, Teacher, or Student before continuing.");
+      setIsSubmitting(false);
+      return;
+    }
     if (mode === "create" && password !== confirmPassword) {
       setError("Passwords do not match.");
       setIsSubmitting(false);
@@ -4532,6 +4449,38 @@ function LoginPage({
     );
   }
 
+  if (authScreen === "entry") {
+    return (
+      <main className="login-page auth-entry-page">
+        <section className="auth-entry-panel" aria-labelledby="auth-entry-title">
+          <div className="auth-entry-mark" aria-hidden="true">
+            <BrainCircuit size={54} />
+          </div>
+          <div className="auth-entry-copy">
+            <span className="eyebrow">Personal and classroom continuity</span>
+            <h1 id="auth-entry-title">ClassLoop</h1>
+            {classLoopBuildMarker() && (
+              <small className="login-build-marker" title={classLoopBuildDetails()}>
+                {classLoopBuildMarker()}
+              </small>
+            )}
+          </div>
+          <div className="auth-entry-actions" aria-label="Choose how to enter ClassLoop">
+            <button type="button" className="primary-button" onClick={() => chooseMode("create")}>
+              <UserPlus size={18} />
+              Create account
+            </button>
+            <button type="button" className="ghost-button" onClick={() => chooseMode("signin")}>
+              <KeyRound size={18} />
+              Log in
+            </button>
+          </div>
+          {workspaceNotice && <WorkspaceRecoveryNotice notice={workspaceNotice} />}
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="login-page">
       <section className="login-panel">
@@ -4551,12 +4500,12 @@ function LoginPage({
         </div>
         {workspaceNotice && <WorkspaceRecoveryNotice notice={workspaceNotice} />}
         <div className="login-copy">
-          <span className="eyebrow">Welcome back</span>
-          <h1>{demoOnly ? "Try ClassLoop with sample accounts." : "Sign in to ClassLoop."}</h1>
+          <span className="eyebrow">{mode === "signin" ? "Welcome back" : "Welcome to ClassLoop"}</span>
+          <h1>{mode === "signin" ? "Sign in to ClassLoop." : "Create your ClassLoop account."}</h1>
           <p>
-            {demoOnly
-              ? "The web demo resets sample work. Download the desktop app when you are ready to create your own account and save data."
-              : "Choose personal meetings for your own follow-through, or class workflows for teacher-reviewed student updates."}
+            {mode === "signin"
+              ? "Choose your account type first, then use the email and password for that workspace."
+              : "Start with personal meetings for your own follow-through, or class workflows for teacher-reviewed student updates."}
           </p>
         </div>
         <form className="login-form" onSubmit={submit}>
@@ -4603,7 +4552,7 @@ function LoginPage({
               </button>
             </div>
           )}
-          {(demoOnly || accountPath === "class") && (
+          {accountPath === "class" && (
             <div className="role-tabs" role="tablist" aria-label="Choose class role">
               <button
                 type="button"
@@ -4632,88 +4581,105 @@ function LoginPage({
               Individual accounts are free and focused on your own pasted meeting minutes, recap, and tasks.
             </p>
           )}
-          {mode === "create" && (
-            <label className="field compact">
-              <span>Name</span>
-              <div className="input-with-icon">
-                <UserRound size={17} />
-                <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" />
-              </div>
-            </label>
+          {!hasChosenAccount && (
+            <p className="auth-choice-hint" role="status">
+              Choose Individual, Teacher, or Student to reveal the account fields.
+            </p>
           )}
-          <label className="field compact">
-            <span>Email</span>
-            <div className="input-with-icon">
-              <Mail size={17} />
-              <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" />
-            </div>
-          </label>
-          <label className="field compact">
-            <span>Password</span>
-            <div className="input-with-icon password-control">
-              <KeyRound size={17} />
-              <input
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Enter password"
-              />
-              <button type="button" onClick={() => setShowPassword((show) => !show)} aria-label={showPassword ? "Hide password" : "Show password"}>
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
-          </label>
-          {mode === "signin" && !demoOnly && (
-            <button
-              type="button"
-              className="text-button forgot-password-link"
-              onClick={() => {
-                setResetOpen(true);
-                setResetStep("request");
-                setResetMessage("");
-              }}
-            >
-              Forgot password?
-            </button>
-          )}
-          {mode === "create" && (
-            <label className="field compact">
-              <span>Confirm password</span>
-              <div className="input-with-icon password-control">
-                <KeyRound size={17} />
-                <input
-                  type={showPassword ? "text" : "password"}
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  placeholder="Re-enter password"
-                />
+          {hasChosenAccount && (
+            <>
+              {mode === "create" && (
+                <label className="field compact">
+                  <span>Name</span>
+                  <div className="input-with-icon">
+                    <UserRound size={17} />
+                    <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" />
+                  </div>
+                </label>
+              )}
+              <label className="field compact">
+                <span>Email</span>
+                <div className="input-with-icon">
+                  <Mail size={17} />
+                  <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" />
+                </div>
+              </label>
+              <label className="field compact">
+                <span>Password</span>
+                <div className="input-with-icon password-control">
+                  <KeyRound size={17} />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Enter password"
+                  />
+                  <button type="button" onClick={() => setShowPassword((show) => !show)} aria-label={showPassword ? "Hide password" : "Show password"}>
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </label>
+              {mode === "signin" && !demoOnly && (
                 <button
                   type="button"
-                  onClick={() => setShowPassword((show) => !show)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="text-button forgot-password-link"
+                  onClick={() => {
+                    setResetOpen(true);
+                    setResetStep("request");
+                    setResetMessage("");
+                  }}
                 >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  Forgot password?
                 </button>
-              </div>
-            </label>
+              )}
+              {mode === "create" && (
+                <label className="field compact">
+                  <span>Confirm password</span>
+                  <div className="input-with-icon password-control">
+                    <KeyRound size={17} />
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={confirmPassword}
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      placeholder="Re-enter password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((show) => !show)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </label>
+              )}
+            </>
           )}
           {error && <p className="login-error">{error}</p>}
           {notice && <p className="login-success">{notice}</p>}
-          <button className="primary-button full" type="submit" disabled={isSubmitting}>
-            <KeyRound size={17} />
-            {isSubmitting ? "Working..." : mode === "signin" ? "Sign in" : "Create account"}
-          </button>
+          {hasChosenAccount && (
+            <button className="primary-button full" type="submit" disabled={isSubmitting}>
+              <KeyRound size={17} />
+              {isSubmitting ? "Working..." : mode === "signin" ? "Sign in" : "Create account"}
+            </button>
+          )}
         </form>
-        <div className="login-help">
-          <strong>{demoOnly ? "Web demo accounts" : "Sample accounts"}</strong>
-          <span>Teacher: {demoTeacherEmail} / classloop-teacher</span>
-          <span>Student: {demoStudentEmail} / classloop-student</span>
-          {demoOnly && <span>Download the app to create an account and keep your own workspace.</span>}
-          <button type="button" className="text-button sample-account-button" onClick={fillDemo}>
-            Use sample {classRole} account
-            <ChevronRight size={16} />
-          </button>
-        </div>
+        {mode === "create" && (
+          <div className="login-help sample-account-panel">
+            <strong>Want to look around first?</strong>
+            <span>Sample accounts open with demo classroom data and do not replace your real account.</span>
+            <div className="sample-account-actions">
+              <button type="button" className="text-button sample-account-button" onClick={() => fillDemo("teacher")}>
+                Use sample teacher account
+                <ChevronRight size={16} />
+              </button>
+              <button type="button" className="text-button sample-account-button" onClick={() => fillDemo("student")}>
+                Use sample student account
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
       </section>
       {mode === "signin" && resetOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Reset password">
@@ -4729,7 +4695,7 @@ function LoginPage({
               </button>
             </div>
             <div className="reset-account-row">
-              <span>{role === "individual" ? "Individual" : role === "teacher" ? "Teacher" : "Student"} account</span>
+              <span>{selectedAccountLabel} account</span>
               <strong>{email || "Enter email on the sign-in form"}</strong>
             </div>
             {resetStep === "request" ? (

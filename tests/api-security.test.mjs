@@ -3,6 +3,7 @@ import { assertIpRateLimit, httpError, readJsonBody, sendApiError } from "../api
 import {
   validateCheckoutPayload,
   validateCloudWorkspaceStatePayload,
+  validateEmailRecapPayload,
   validateFeedbackPayload,
   validateProfilePatchPayload,
 } from "../api/validators.js";
@@ -60,6 +61,7 @@ function mockResponse() {
 const validWorkspaceState = {
   accounts: [],
   sessions: [],
+  personalMeetings: [],
   draft: null,
   demoLoaded: false,
   classGroups: [],
@@ -109,12 +111,25 @@ assert.deepEqual(validateProfilePatchPayload({ role: "teacher", noTrainingOnStud
   role: "teacher",
   noTrainingOnStudentData: false,
 });
+assert.deepEqual(validateProfilePatchPayload({ role: "individual" }), { role: "individual" });
 assertThrowsStatus(() => validateProfilePatchPayload({ plan_tier: "pro" }), 400, /unsupported field/i);
 assertThrowsStatus(() => validateProfilePatchPayload({ role: "owner" }), 400, /one of/i);
 
 assert.deepEqual(validateCheckoutPayload({ tier: "pro", uiMode: "embedded" }), { tier: "pro", uiMode: "embedded" });
 assertThrowsStatus(() => validateCheckoutPayload({ tier: "free" }), 400, /one of/i);
 assertThrowsStatus(() => validateCheckoutPayload({ tier: "pro", price: "price_attacker" }), 400, /unsupported field/i);
+
+assert.deepEqual(validateEmailRecapPayload({
+  sessionId: "session-1",
+  ownerEmail: "teacher@classloop.test",
+  recipients: ["maya@classloop.test"],
+}), {
+  sessionId: "session-1",
+  ownerEmail: "teacher@classloop.test",
+  recipients: ["maya@classloop.test"],
+});
+assertThrowsStatus(() => validateEmailRecapPayload({ sessionId: "session-1", ownerEmail: "teacher@classloop.test", bcc: ["attacker@classloop.test"] }), 400, /unsupported field/i);
+assertThrowsStatus(() => validateEmailRecapPayload({ sessionId: "session-1", ownerEmail: "teacher@classloop.test", recipients: ["bad-email"] }), 400, /expected format/i);
 
 assert.deepEqual(validateCloudWorkspaceStatePayload(validWorkspaceState), validWorkspaceState);
 assertThrowsStatus(

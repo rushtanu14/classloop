@@ -55,6 +55,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
 import { createPortal } from "react-dom";
 import {
+  createPersonalMeetingDraft,
   createGeneratedSession,
   extractTranscriptSpeakers,
   readTranscriptFileText,
@@ -87,6 +88,9 @@ import type {
   ImportQualityWarning,
   ParticipationEvent,
   ParticipationType,
+  PersonalMeeting,
+  PersonalTask,
+  PersonalTaskStatus,
   PublishAuditEntry,
   Resource,
   RosterTemplate,
@@ -103,6 +107,9 @@ import type {
 
 type RouteKey =
   | "dashboard"
+  | "personal-dashboard"
+  | "new-personal-meeting"
+  | "personal-meetings"
   | "new-session"
   | "processing"
   | "review"
@@ -125,7 +132,7 @@ type NavItem = {
   icon: typeof LayoutDashboard;
 };
 
-type AuthRole = "teacher" | "student";
+type AuthRole = "teacher" | "student" | "individual";
 
 type AuthSession = {
   accountId: string;
@@ -162,6 +169,7 @@ type ReleaseDownloadManifest = {
 
 type TemplateLinkManifest = {
   classTemplateCopyUrl?: string;
+  personalTemplateCopyUrl?: string;
 };
 
 type Account = {
@@ -191,6 +199,7 @@ type PasswordResetRecord = {
 type SharedState = {
   accounts: Account[];
   sessions: Session[];
+  personalMeetings: PersonalMeeting[];
   draft: Session | null;
   demoLoaded: boolean;
   classGroups: ClassGroup[];
@@ -349,6 +358,7 @@ function normalizeTemplateLinkManifest(value: unknown): TemplateLinkManifest {
   if (!isRecord(value)) return {};
   return {
     classTemplateCopyUrl: readManifestString(value.classTemplateCopyUrl),
+    personalTemplateCopyUrl: readManifestString(value.personalTemplateCopyUrl),
   };
 }
 
@@ -427,6 +437,13 @@ const navItems: NavItem[] = [
   { route: "privacy", label: "Privacy", icon: ShieldCheck },
 ];
 
+const individualNavItems: NavItem[] = [
+  { route: "personal-dashboard", label: "Personal dashboard", icon: LayoutDashboard },
+  { route: "new-personal-meeting", label: "New meeting", icon: PlusCircle },
+  { route: "personal-meetings", label: "Meeting history", icon: ClipboardCheck },
+  { route: "appearance", label: "Appearance", icon: Palette },
+];
+
 const studentNavItems: NavItem[] = [
   { route: "student", label: "My portal", icon: GraduationCap },
   { route: "tutorial", label: "How it works", icon: BookOpen },
@@ -445,7 +462,13 @@ const studentNavSections: Array<{ label: string; items: NavItem[] }> = [
   { label: "Settings", items: studentNavItems.filter((item) => item.route !== "student") },
 ];
 
+const individualNavSections: Array<{ label: string; items: NavItem[] }> = [
+  { label: "Personal meetings", items: individualNavItems.filter((item) => item.route !== "appearance") },
+  { label: "Settings", items: individualNavItems.filter((item) => item.route === "appearance") },
+];
+
 const studentRoutes = new Set<RouteKey>(["student", "student-session", "tutorial", "appearance"]);
+const individualRoutes = new Set<RouteKey>(["personal-dashboard", "new-personal-meeting", "personal-meetings", "appearance"]);
 const demoTeacherEmail = "teacher@classloop.demo";
 const demoStudentEmail = "maya@classloop.demo";
 const teacherPasswordHash = "92d96446c5fa184300fb96631d4ca0b18e536cfab5c0da5eead1edb535190e84";
@@ -632,6 +655,7 @@ function normalizeTrustedBillingProfile(profile?: Partial<BillingProfile> | null
 const secureLocalKeys = {
   accounts: "classloop:secure:accounts:v1",
   sessions: "classloop:secure:sessions:v3",
+  personalMeetings: "classloop:secure:personal-meetings:v1",
   draft: "classloop:secure:draft:v3",
   demoLoaded: "classloop:secure:demo-loaded:v1",
   classGroups: "classloop:secure:class-groups:v1",
@@ -644,6 +668,7 @@ const secureLocalKeys = {
 const legacyLocalKeys = {
   accounts: "classloop:accounts:v1",
   sessions: "classloop:sessions:v3",
+  personalMeetings: "classloop:personal-meetings:v1",
   draft: "classloop:draft:v3",
   demoLoaded: "classloop:demo-loaded:v1",
   classGroups: "classloop:class-groups:v1",
@@ -694,6 +719,9 @@ const accentOptions = ["#0f766e", "#2563eb", "#38bdf8", "#8b5cf6", "#e11d48", "#
 
 const routeLabels: Record<RouteKey, string> = {
   dashboard: "Teacher dashboard",
+  "personal-dashboard": "Personal dashboard",
+  "new-personal-meeting": "New personal meeting",
+  "personal-meetings": "Personal meetings",
   "new-session": "Import session",
   processing: "Draft processing",
   review: "Draft review",
@@ -715,6 +743,7 @@ function getRoute(): RouteKey {
   const hash = window.location.hash.replace(/^#\/?/, "");
   const route = hash.split("?")[0] as RouteKey;
   return navItems.some((item) => item.route === route) ||
+    individualNavItems.some((item) => item.route === route) ||
     route === "processing" ||
     route === "student-session" ||
     route === "publish-preview" ||
@@ -1396,6 +1425,15 @@ function statusLabel(status: TaskStatus) {
   return labels[status];
 }
 
+function personalTaskStatusLabel(status: PersonalTaskStatus) {
+  const labels: Record<PersonalTaskStatus, string> = {
+    todo: "To do",
+    in_progress: "In progress",
+    complete: "Complete",
+  };
+  return labels[status];
+}
+
 function participationLabel(type: ParticipationEvent["type"]) {
   const labels: Record<ParticipationEvent["type"], string> = {
     asked_question: "Asked question",
@@ -1530,6 +1568,7 @@ async function readLocalStateFallback(): Promise<LocalStateReadResult> {
   const [
     accounts,
     sessions,
+    personalMeetings,
     draft,
     demoLoaded,
     classGroups,
@@ -1540,6 +1579,7 @@ async function readLocalStateFallback(): Promise<LocalStateReadResult> {
   ] = await Promise.all([
     readSecureLocalJson<Account[]>(secureLocalKeys.accounts, legacyLocalKeys.accounts, []),
     readSecureLocalJson<Session[]>(secureLocalKeys.sessions, legacyLocalKeys.sessions, []),
+    readSecureLocalJson<PersonalMeeting[]>(secureLocalKeys.personalMeetings, legacyLocalKeys.personalMeetings, []),
     readSecureLocalJson<Session | null>(secureLocalKeys.draft, legacyLocalKeys.draft, null),
     readSecureLocalJson<boolean>(secureLocalKeys.demoLoaded, legacyLocalKeys.demoLoaded, false),
     readSecureLocalJson<ClassGroup[]>(secureLocalKeys.classGroups, legacyLocalKeys.classGroups, []),
@@ -1551,6 +1591,7 @@ async function readLocalStateFallback(): Promise<LocalStateReadResult> {
   const results = [
     ["accounts", accounts],
     ["sessions", sessions],
+    ["personalMeetings", personalMeetings],
     ["draft", draft],
     ["demoLoaded", demoLoaded],
     ["classGroups", classGroups],
@@ -1564,6 +1605,7 @@ async function readLocalStateFallback(): Promise<LocalStateReadResult> {
     state: normalizeSharedState({
       accounts: accounts.value,
       sessions: sessions.value,
+      personalMeetings: personalMeetings.value,
       draft: draft.value,
       demoLoaded: demoLoaded.value,
       classGroups: classGroups.value,
@@ -1583,7 +1625,7 @@ function clearClassLoopLocalPersistence() {
 }
 
 function persistableSharedState(
-  state: Pick<SharedState, "accounts" | "sessions" | "draft" | "demoLoaded" | "classGroups" | "rosterTemplates" | "privacySettings" | "auditLog" | "billingProfile">,
+  state: Pick<SharedState, "accounts" | "sessions" | "personalMeetings" | "draft" | "demoLoaded" | "classGroups" | "rosterTemplates" | "privacySettings" | "auditLog" | "billingProfile">,
 ) {
   const demoOwner = normalizeEmail(demoTeacherEmail);
   const isDemoOwnedSession = (session: Session | null) =>
@@ -1592,6 +1634,7 @@ function persistableSharedState(
   return {
     accounts: state.accounts.filter((account) => !account.demo && !isDemoEmail(account.email)),
     sessions: state.sessions.filter((session) => !isDemoOwnedSession(session)),
+    personalMeetings: state.personalMeetings.filter((meeting) => !isDemoEmail(meeting.ownerEmail)),
     draft: isDemoOwnedSession(state.draft) ? null : state.draft,
     demoLoaded: false,
     classGroups: state.classGroups.filter((group) => normalizeEmail(group.ownerEmail) !== demoOwner),
@@ -1608,6 +1651,7 @@ function hasPersistableUserData(state: ReturnType<typeof persistableSharedState>
   return Boolean(
     state.accounts.length ||
       state.sessions.length ||
+      state.personalMeetings.length ||
       state.draft ||
       state.classGroups.length ||
       state.rosterTemplates.length ||
@@ -1618,7 +1662,7 @@ function hasPersistableUserData(state: ReturnType<typeof persistableSharedState>
 }
 
 async function writeLocalStateFallback(
-  state: Pick<SharedState, "accounts" | "sessions" | "draft" | "demoLoaded" | "classGroups" | "rosterTemplates" | "privacySettings" | "auditLog" | "billingProfile">,
+  state: Pick<SharedState, "accounts" | "sessions" | "personalMeetings" | "draft" | "demoLoaded" | "classGroups" | "rosterTemplates" | "privacySettings" | "auditLog" | "billingProfile">,
 ) {
   const persistable = persistableSharedState(state);
   if (!hasPersistableUserData(persistable)) {
@@ -1628,6 +1672,7 @@ async function writeLocalStateFallback(
   await Promise.all([
     writeSecureLocalJson(secureLocalKeys.accounts, persistable.accounts),
     writeSecureLocalJson(secureLocalKeys.sessions, persistable.sessions),
+    writeSecureLocalJson(secureLocalKeys.personalMeetings, persistable.personalMeetings),
     writeSecureLocalJson(secureLocalKeys.draft, persistable.draft),
     writeSecureLocalJson(secureLocalKeys.demoLoaded, persistable.demoLoaded),
     writeSecureLocalJson(secureLocalKeys.classGroups, persistable.classGroups),
@@ -1642,6 +1687,7 @@ function normalizeSharedState(data: Partial<SharedState>): SharedState {
   const normalized = persistableSharedState({
     accounts: Array.isArray(data.accounts) ? data.accounts : [],
     sessions: Array.isArray(data.sessions) ? data.sessions : [],
+    personalMeetings: Array.isArray(data.personalMeetings) ? data.personalMeetings : [],
     draft: data.draft ?? null,
     demoLoaded: Boolean(data.demoLoaded),
     classGroups: Array.isArray(data.classGroups) ? data.classGroups : [],
@@ -1659,11 +1705,12 @@ function normalizeSharedState(data: Partial<SharedState>): SharedState {
 }
 
 function sharedStateJson(
-  state: Pick<SharedState, "accounts" | "sessions" | "draft" | "demoLoaded" | "classGroups" | "rosterTemplates" | "privacySettings" | "auditLog" | "billingProfile">,
+  state: Pick<SharedState, "accounts" | "sessions" | "personalMeetings" | "draft" | "demoLoaded" | "classGroups" | "rosterTemplates" | "privacySettings" | "auditLog" | "billingProfile">,
 ) {
   return JSON.stringify({
     accounts: state.accounts,
     sessions: state.sessions,
+    personalMeetings: state.personalMeetings,
     draft: state.draft,
     demoLoaded: state.demoLoaded,
     classGroups: state.classGroups,
@@ -1868,6 +1915,7 @@ function App() {
   const [route, setRoute] = useState<RouteKey>(getRoute);
   const [accounts, setAccounts] = useState<Account[]>(demoAccounts);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [personalMeetings, setPersonalMeetings] = useState<PersonalMeeting[]>([]);
   const [draft, setDraft] = useState<Session | null>(null);
   const [selectedStudentId, setSelectedStudentId] = useState<string>(() => localStorage.getItem("classloop:selected-student") ?? "maya");
   const [auth, setAuth] = useState<AuthSession | null>(null);
@@ -1900,6 +1948,7 @@ function App() {
     sharedStateJson(persistableSharedState({
       accounts: demoAccounts,
       sessions: [],
+      personalMeetings: [],
       draft: null,
       demoLoaded: false,
       classGroups: [],
@@ -1942,6 +1991,7 @@ function App() {
       clearClassLoopLocalPersistence();
       setAccounts(demoAccounts);
       setSessions([]);
+      setPersonalMeetings([]);
       setDraft(null);
       setDemoLoaded(false);
       setClassGroups([]);
@@ -1953,6 +2003,7 @@ function App() {
       lastSharedJsonRef.current = sharedStateJson(persistableSharedState({
         accounts: demoAccounts,
         sessions: [],
+        personalMeetings: [],
         draft: null,
         demoLoaded: false,
         classGroups: [],
@@ -1982,6 +2033,7 @@ function App() {
         if (!active) return;
         setAccounts(state.accounts);
         setSessions(state.sessions);
+        setPersonalMeetings(state.personalMeetings);
         setDraft(state.draft);
         setDemoLoaded(state.demoLoaded);
         setClassGroups(state.classGroups);
@@ -2003,6 +2055,7 @@ function App() {
         const localState = localResult.state;
         setAccounts(localState.accounts);
         setSessions(localState.sessions);
+        setPersonalMeetings(localState.personalMeetings);
         setDraft(localState.draft);
         setDemoLoaded(localState.demoLoaded);
         setClassGroups(localState.classGroups);
@@ -2036,6 +2089,7 @@ function App() {
     const persistableState = persistableSharedState({
       accounts,
       sessions,
+      personalMeetings,
       draft,
       demoLoaded,
       classGroups,
@@ -2082,7 +2136,7 @@ function App() {
           writeTimerRef.current = null;
         });
     }, 300);
-  }, [accounts, auditLog, auth?.demo, billingProfile, classGroups, demoLoaded, draft, privacySettings, publicDemoOnly, rosterTemplates, sessions, sharedReady]);
+  }, [accounts, auditLog, auth?.demo, billingProfile, classGroups, demoLoaded, draft, personalMeetings, privacySettings, publicDemoOnly, rosterTemplates, sessions, sharedReady]);
 
   useEffect(() => {
     if (!sharedReady || !serverSyncRef.current) return;
@@ -2099,6 +2153,7 @@ function App() {
           if (nextJson !== lastSharedJsonRef.current) {
             setAccounts(state.accounts);
             setSessions(state.sessions);
+            setPersonalMeetings(state.personalMeetings);
             setDraft(state.draft);
             setDemoLoaded(state.demoLoaded);
             setClassGroups(state.classGroups);
@@ -2133,6 +2188,9 @@ function App() {
   useEffect(() => {
     if (auth?.role === "student" && !studentRoutes.has(route)) {
       navigate("student");
+    }
+    if (auth?.role === "individual" && !individualRoutes.has(route)) {
+      navigate("personal-dashboard");
     }
   }, [auth, route]);
 
@@ -2173,7 +2231,7 @@ function App() {
     if (!auth || route !== "tutorial") return;
     setWalkthroughStepIndex(0);
     setWalkthroughOpen(true);
-    navigate(auth.role === "teacher" ? "dashboard" : "student");
+    navigate(auth.role === "teacher" ? "dashboard" : auth.role === "individual" ? "personal-dashboard" : "student");
   }, [auth, route]);
 
   const sortedSessions = useMemo(
@@ -2211,7 +2269,7 @@ function App() {
 
   const startWalkthrough = () => {
     setWalkthroughStepIndex(0);
-    if (auth) navigate(auth.role === "teacher" ? "dashboard" : "student");
+    if (auth) navigate(auth.role === "teacher" ? "dashboard" : auth.role === "individual" ? "personal-dashboard" : "student");
     setWalkthroughOpen(false);
     window.setTimeout(() => setWalkthroughOpen(true), 0);
   };
@@ -2235,6 +2293,7 @@ function App() {
   const currentState = (): SharedState => ({
     accounts,
     sessions,
+    personalMeetings,
     draft,
     demoLoaded,
     classGroups,
@@ -2248,6 +2307,7 @@ function App() {
     const normalized = normalizeSharedState(state);
     setAccounts(normalized.accounts);
     setSessions(normalized.sessions);
+    setPersonalMeetings(normalized.personalMeetings);
     setDraft(normalized.draft);
     setDemoLoaded(normalized.demoLoaded);
     setClassGroups(normalized.classGroups);
@@ -2281,9 +2341,23 @@ function App() {
     () => (auth?.role === "student" ? studentSessionsFor(sortedSessions, auth.email) : teacherSessions),
     [auth, sortedSessions, teacherSessions],
   );
+  const individualMeetings = useMemo(
+    () =>
+      auth?.role === "individual"
+        ? personalMeetings
+            .filter((meeting) => normalizeEmail(meeting.ownerEmail) === normalizeEmail(auth.email))
+            .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        : [],
+    [auth, personalMeetings],
+  );
   const visibleDraft = auth?.role === "teacher" && draft && sessionOwnerEmail(draft) === normalizeEmail(auth.email) ? draft : null;
   const latestPublished = teacherSessions.find((session) => session.status === "published") ?? teacherSessions[0];
-  const effectiveRoute = auth?.role === "student" && !studentRoutes.has(route) ? "student" : route;
+  const effectiveRoute =
+    auth?.role === "student" && !studentRoutes.has(route)
+      ? "student"
+      : auth?.role === "individual" && !individualRoutes.has(route)
+        ? "personal-dashboard"
+        : route;
   const hasPaidAccess = isPaidPlan(billingProfile);
   const todayKey = localDayKey();
   const freeSessionsToday =
@@ -2293,6 +2367,49 @@ function App() {
   const activeAccount = auth ? accounts.find((account) => account.id === auth.accountId) : undefined;
   const triggerCelebration = (title: string, detail: string) => {
     setCelebrationMoment({ id: Date.now(), title, detail });
+  };
+
+  const updatePersonalMeetingById = (meetingId: string, updater: (meeting: PersonalMeeting) => PersonalMeeting) => {
+    setPersonalMeetings((current) =>
+      current
+        .map((meeting) =>
+          meeting.id === meetingId
+            ? {
+                ...updater(meeting),
+                updatedAt: new Date().toISOString(),
+              }
+            : meeting,
+        )
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
+    );
+  };
+
+  const createPersonalMeeting = (title: string, minutes: string) => {
+    if (!auth || auth.role !== "individual") return;
+    const meeting = createPersonalMeetingDraft({
+      ownerEmail: auth.email,
+      title,
+      minutes,
+    });
+    setPersonalMeetings((current) => [meeting, ...current]);
+    appendAudit("create_personal_meeting", `Created personal meeting ${meeting.title}.`);
+    triggerCelebration("Personal meeting ready", `${meeting.tasks.length} tasks were drafted for your follow-through.`);
+    navigate("personal-meetings", { meeting: meeting.id });
+  };
+
+  const updatePersonalTask = (meetingId: string, taskId: string, changes: Partial<PersonalTask>) => {
+    updatePersonalMeetingById(meetingId, (meeting) => ({
+      ...meeting,
+      tasks: meeting.tasks.map((task) => (task.id === taskId ? { ...task, ...changes } : task)),
+    }));
+  };
+
+  const deletePersonalMeeting = (meetingId: string) => {
+    const meeting = personalMeetings.find((item) => item.id === meetingId);
+    if (!meeting) return;
+    if (!window.confirm(`Delete "${meeting.title}"? This removes the personal recap and tasks from this workspace.`)) return;
+    setPersonalMeetings((current) => current.filter((item) => item.id !== meetingId));
+    appendAudit("delete_personal_meeting", `Deleted personal meeting ${meeting.title}.`);
   };
 
   const updateSession = (session: Session) => {
@@ -2571,6 +2688,26 @@ function App() {
         return { ok: true };
       }
 
+      if (role === "individual") {
+        setTheme(account.theme ?? defaultTheme);
+        setAuth({
+          accountId: account.id,
+          role: "individual",
+          email: normalizedEmail,
+          name: account.name,
+          demo: account.demo,
+        });
+        appendAudit("login", "Individual signed in.", {
+          accountId: account.id,
+          role: "individual",
+          email: normalizedEmail,
+          name: account.name,
+          demo: account.demo,
+        });
+        navigate("personal-dashboard");
+        return { ok: true };
+      }
+
       const availableSessions = demoSession ? [demoSession, ...sortedSessions] : sortedSessions;
       const student = findStudentByEmail(studentSessionsFor(availableSessions, normalizedEmail), normalizedEmail);
 
@@ -2636,8 +2773,8 @@ function App() {
       setAccounts((current) => mergeAccounts([...current, account]));
       setTheme(defaultTheme);
       setAuth({ accountId: account.id, role, email: normalizedEmail, name: trimmedName });
-      navigate(role === "teacher" ? "dashboard" : "student");
-      startWalkthrough();
+      navigate(role === "teacher" ? "dashboard" : role === "individual" ? "personal-dashboard" : "student");
+      if (role !== "individual") startWalkthrough();
       return { ok: true };
     } finally {
       setAuthLoading(false);
@@ -2829,6 +2966,22 @@ function App() {
         />
         {workspaceNotice && <WorkspaceRecoveryNotice notice={workspaceNotice} />}
         {effectiveRoute === "dashboard" && <TeacherDashboard sessions={teacherSessions} draft={visibleDraft} billingProfile={billingProfile} />}
+        {effectiveRoute === "personal-dashboard" && auth.role === "individual" && (
+          <PersonalDashboard meetings={individualMeetings} />
+        )}
+        {effectiveRoute === "new-personal-meeting" && auth.role === "individual" && (
+          <NewPersonalMeeting
+            onCreate={createPersonalMeeting}
+            personalTemplateCopyUrl={templateLinks.personalTemplateCopyUrl}
+          />
+        )}
+        {effectiveRoute === "personal-meetings" && auth.role === "individual" && (
+          <PersonalMeetingsPage
+            meetings={individualMeetings}
+            onUpdateTask={updatePersonalTask}
+            onDeleteMeeting={deletePersonalMeeting}
+          />
+        )}
         {effectiveRoute === "classes" && auth.role === "teacher" && (
           <ClassGroupsPage
             groups={teacherClassGroups}
@@ -2970,6 +3123,8 @@ function App() {
         {effectiveRoute === "tutorial" &&
           (auth.role === "teacher" ? (
             <TeacherDashboard sessions={teacherSessions} draft={visibleDraft} billingProfile={billingProfile} />
+          ) : auth.role === "individual" ? (
+            <PersonalDashboard meetings={individualMeetings} />
           ) : (
             <StudentDashboard
               sessions={studentPortalSessions}
@@ -4153,8 +4308,10 @@ function LoginPage({
   demoOnly: boolean;
   workspaceNotice?: WorkspaceNotice | null;
 }) {
+  const [authScreen, setAuthScreen] = useState<"entry" | "form">(demoOnly ? "form" : "entry");
   const [mode, setMode] = useState<"signin" | "create">("signin");
-  const [role, setRole] = useState<AuthRole>("teacher");
+  const [role, setRole] = useState<AuthRole | null>(demoOnly ? "teacher" : null);
+  const [accountPath, setAccountPath] = useState<"individual" | "class" | null>(demoOnly ? "class" : null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState(demoOnly ? demoTeacherEmail : "");
   const [password, setPassword] = useState(demoOnly ? "classloop-teacher" : "");
@@ -4173,6 +4330,9 @@ function LoginPage({
   const classRole = role === "student" ? "student" : "teacher";
   const demoEmail = classRole === "teacher" ? demoTeacherEmail : demoStudentEmail;
   const demoPassword = classRole === "teacher" ? "classloop-teacher" : "classloop-student";
+  const hasChosenAccount = role !== null;
+  const selectedAccountLabel =
+    role === "individual" ? "Individual" : role === "teacher" ? "Teacher" : role === "student" ? "Student" : "Account";
 
   useEffect(() => {
     if (!demoOnly || mode !== "signin") return;
@@ -4182,6 +4342,15 @@ function LoginPage({
 
   const chooseRole = (nextRole: AuthRole) => {
     setRole(nextRole);
+    setAccountPath(nextRole === "individual" ? "individual" : "class");
+    setError("");
+    setNotice("");
+    setResetMessage("");
+  };
+
+  const chooseAccountPath = (nextPath: "individual" | "class") => {
+    setAccountPath(nextPath);
+    setRole(nextPath === "individual" ? "individual" : null);
     setError("");
     setNotice("");
     setResetMessage("");
@@ -4192,23 +4361,27 @@ function LoginPage({
       setError("Download the app to create your own account and save data. The web demo uses sample accounts only.");
       return;
     }
+    setAuthScreen("form");
     setMode(nextMode);
+    setRole(demoOnly ? "teacher" : null);
+    setAccountPath(demoOnly ? "class" : null);
     setError("");
     setNotice("");
-    setPassword("");
+    setPassword(demoOnly ? "classloop-teacher" : "");
     setConfirmPassword("");
     setShowPassword(false);
     setResetOpen(false);
-    if (nextMode === "create") {
-      setEmail("");
-      setName("");
-    }
+    setEmail(demoOnly ? demoTeacherEmail : "");
+    setName("");
   };
 
-  const fillDemo = () => {
+  const fillDemo = (nextRole: "teacher" | "student" = classRole) => {
+    setAuthScreen("form");
     setMode("signin");
-    setEmail(demoEmail);
-    setPassword(demoPassword);
+    setAccountPath("class");
+    setRole(nextRole);
+    setEmail(nextRole === "teacher" ? demoTeacherEmail : demoStudentEmail);
+    setPassword(nextRole === "teacher" ? "classloop-teacher" : "classloop-student");
     setShowPassword(false);
     setError("");
     setNotice("");
@@ -4227,6 +4400,10 @@ function LoginPage({
 
   const requestReset = async () => {
     setResetMessage("");
+    if (!role) {
+      setResetMessage("Choose an account type before requesting a reset code.");
+      return;
+    }
     const result = await onRequestPasswordReset(role, email);
     setResetMessage(result.message ?? "Reset request received.");
     if (result.ok && result.code && result.email) {
@@ -4257,6 +4434,10 @@ function LoginPage({
 
   const completeReset = async () => {
     setResetMessage("");
+    if (!role) {
+      setResetMessage("Choose an account type before resetting your password.");
+      return;
+    }
     if (resetPassword !== resetConfirmPassword) {
       setResetMessage("New passwords do not match.");
       return;
@@ -4277,6 +4458,11 @@ function LoginPage({
     setIsSubmitting(true);
     setError("");
     setNotice("");
+    if (!role) {
+      setError("Choose Individual, Teacher, or Student before continuing.");
+      setIsSubmitting(false);
+      return;
+    }
     if (mode === "create" && password !== confirmPassword) {
       setError("Passwords do not match.");
       setIsSubmitting(false);
@@ -4367,6 +4553,38 @@ function LoginPage({
     );
   }
 
+  if (authScreen === "entry") {
+    return (
+      <main className="login-page auth-entry-page">
+        <section className="auth-entry-panel" aria-labelledby="auth-entry-title">
+          <div className="auth-entry-mark" aria-hidden="true">
+            <BrainCircuit size={54} />
+          </div>
+          <div className="auth-entry-copy">
+            <span className="eyebrow">Personal and classroom continuity</span>
+            <h1 id="auth-entry-title">ClassLoop</h1>
+            {classLoopBuildMarker() && (
+              <small className="login-build-marker" title={classLoopBuildDetails()}>
+                {classLoopBuildMarker()}
+              </small>
+            )}
+          </div>
+          <div className="auth-entry-actions" aria-label="Choose how to enter ClassLoop">
+            <button type="button" className="primary-button" onClick={() => chooseMode("create")}>
+              <UserPlus size={18} />
+              Create account
+            </button>
+            <button type="button" className="ghost-button" onClick={() => chooseMode("signin")}>
+              <KeyRound size={18} />
+              Log in
+            </button>
+          </div>
+          {workspaceNotice && <WorkspaceRecoveryNotice notice={workspaceNotice} />}
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="login-page">
       <section className="login-panel">
@@ -4376,7 +4594,7 @@ function LoginPage({
           </span>
           <div>
             <strong>ClassLoop</strong>
-            <small>Classroom continuity</small>
+            <small>Personal and classroom continuity</small>
             {classLoopBuildMarker() && (
               <small className="login-build-marker" title={classLoopBuildDetails()}>
                 {classLoopBuildMarker()}
@@ -4386,12 +4604,12 @@ function LoginPage({
         </div>
         {workspaceNotice && <WorkspaceRecoveryNotice notice={workspaceNotice} />}
         <div className="login-copy">
-          <span className="eyebrow">Welcome back</span>
-          <h1>{demoOnly ? "Try ClassLoop with sample accounts." : "Sign in to ClassLoop."}</h1>
+          <span className="eyebrow">{mode === "signin" ? "Welcome back" : "Welcome to ClassLoop"}</span>
+          <h1>{mode === "signin" ? "Sign in to ClassLoop." : "Create your ClassLoop account."}</h1>
           <p>
-            {demoOnly
-              ? "The web demo resets sample work. Download the desktop app when you are ready to create your own account and save data."
-              : "Teachers create follow-up loops. Students open the recaps, tasks, and resources their teacher approved."}
+            {mode === "signin"
+              ? "Choose your account type first, then use the email and password for that workspace."
+              : "Start with personal meetings for your own follow-through, or class workflows for teacher-reviewed student updates."}
           </p>
         </div>
         <form className="login-form" onSubmit={submit}>
@@ -4414,110 +4632,158 @@ function LoginPage({
               Web demo mode uses sample credentials only. Your changes will reset and will not be saved.
             </p>
           )}
-          <div className="role-tabs" role="tablist" aria-label="Choose account type">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={role === "teacher"}
-              className={role === "teacher" ? "active" : ""}
-              onClick={() => chooseRole("teacher")}
-            >
-              <UserRound size={17} />
-              Teacher
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={role === "student"}
-              className={role === "student" ? "active" : ""}
-              onClick={() => chooseRole("student")}
-            >
-              <GraduationCap size={17} />
-              Student
-            </button>
-          </div>
-          {mode === "create" && (
-            <label className="field compact">
-              <span>Name</span>
-              <div className="input-with-icon">
+          {!demoOnly && (
+            <div className="role-tabs account-path-tabs" role="tablist" aria-label="Choose workspace type">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={accountPath === "individual"}
+                className={accountPath === "individual" ? "active" : ""}
+                onClick={() => chooseAccountPath("individual")}
+              >
                 <UserRound size={17} />
-                <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" />
-              </div>
-            </label>
-          )}
-          <label className="field compact">
-            <span>Email</span>
-            <div className="input-with-icon">
-              <Mail size={17} />
-              <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" />
-            </div>
-          </label>
-          <label className="field compact">
-            <span>Password</span>
-            <div className="input-with-icon password-control">
-              <KeyRound size={17} />
-              <input
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Enter password"
-              />
-              <button type="button" onClick={() => setShowPassword((show) => !show)} aria-label={showPassword ? "Hide password" : "Show password"}>
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                Individual
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={accountPath === "class"}
+                className={accountPath === "class" ? "active" : ""}
+                onClick={() => chooseAccountPath("class")}
+              >
+                <BookOpen size={17} />
+                Class
               </button>
             </div>
-          </label>
-          {mode === "signin" && !demoOnly && (
-            <button
-              type="button"
-              className="text-button forgot-password-link"
-              onClick={() => {
-                setResetOpen(true);
-                setResetStep("request");
-                setResetMessage("");
-              }}
-            >
-              Forgot password?
-            </button>
           )}
-          {mode === "create" && (
-            <label className="field compact">
-              <span>Confirm password</span>
-              <div className="input-with-icon password-control">
-                <KeyRound size={17} />
-                <input
-                  type={showPassword ? "text" : "password"}
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  placeholder="Re-enter password"
-                />
+          {accountPath === "class" && (
+            <div className="role-tabs" role="tablist" aria-label="Choose class role">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={role === "teacher"}
+                className={role === "teacher" ? "active" : ""}
+                onClick={() => chooseRole("teacher")}
+              >
+                <UserRound size={17} />
+                Teacher
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={role === "student"}
+                className={role === "student" ? "active" : ""}
+                onClick={() => chooseRole("student")}
+              >
+                <GraduationCap size={17} />
+                Student
+              </button>
+            </div>
+          )}
+          {accountPath === "individual" && (
+            <p className="demo-login-note">
+              Individual accounts are free and focused on your own pasted meeting minutes, recap, and tasks.
+            </p>
+          )}
+          {!hasChosenAccount && (
+            <p className="auth-choice-hint" role="status">
+              Choose Individual, Teacher, or Student to reveal the account fields.
+            </p>
+          )}
+          {hasChosenAccount && (
+            <>
+              {mode === "create" && (
+                <label className="field compact">
+                  <span>Name</span>
+                  <div className="input-with-icon">
+                    <UserRound size={17} />
+                    <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" />
+                  </div>
+                </label>
+              )}
+              <label className="field compact">
+                <span>Email</span>
+                <div className="input-with-icon">
+                  <Mail size={17} />
+                  <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" />
+                </div>
+              </label>
+              <label className="field compact">
+                <span>Password</span>
+                <div className="input-with-icon password-control">
+                  <KeyRound size={17} />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Enter password"
+                  />
+                  <button type="button" onClick={() => setShowPassword((show) => !show)} aria-label={showPassword ? "Hide password" : "Show password"}>
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </label>
+              {mode === "signin" && !demoOnly && (
                 <button
                   type="button"
-                  onClick={() => setShowPassword((show) => !show)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  className="text-button forgot-password-link"
+                  onClick={() => {
+                    setResetOpen(true);
+                    setResetStep("request");
+                    setResetMessage("");
+                  }}
                 >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  Forgot password?
                 </button>
-              </div>
-            </label>
+              )}
+              {mode === "create" && (
+                <label className="field compact">
+                  <span>Confirm password</span>
+                  <div className="input-with-icon password-control">
+                    <KeyRound size={17} />
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={confirmPassword}
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      placeholder="Re-enter password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((show) => !show)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </label>
+              )}
+            </>
           )}
           {error && <p className="login-error">{error}</p>}
           {notice && <p className="login-success">{notice}</p>}
-          <button className="primary-button full" type="submit" disabled={isSubmitting}>
-            <KeyRound size={17} />
-            {isSubmitting ? "Working..." : mode === "signin" ? "Sign in" : "Create account"}
-          </button>
+          {hasChosenAccount && (
+            <button className="primary-button full" type="submit" disabled={isSubmitting}>
+              <KeyRound size={17} />
+              {isSubmitting ? "Working..." : mode === "signin" ? "Sign in" : "Create account"}
+            </button>
+          )}
         </form>
-        <div className="login-help">
-          <strong>{demoOnly ? "Web demo accounts" : "Sample accounts"}</strong>
-          <span>Teacher: {demoTeacherEmail} / classloop-teacher</span>
-          <span>Student: {demoStudentEmail} / classloop-student</span>
-          {demoOnly && <span>Download the app to create an account and keep your own workspace.</span>}
-          <button type="button" className="text-button sample-account-button" onClick={fillDemo}>
-            Use sample {classRole} account
-            <ChevronRight size={16} />
-          </button>
-        </div>
+        {mode === "create" && (
+          <div className="login-help sample-account-panel">
+            <strong>Want to look around first?</strong>
+            <span>Sample accounts open with demo classroom data and do not replace your real account.</span>
+            <div className="sample-account-actions">
+              <button type="button" className="text-button sample-account-button" onClick={() => fillDemo("teacher")}>
+                Use sample teacher account
+                <ChevronRight size={16} />
+              </button>
+              <button type="button" className="text-button sample-account-button" onClick={() => fillDemo("student")}>
+                Use sample student account
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
       </section>
       {mode === "signin" && resetOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Reset password">
@@ -4533,7 +4799,7 @@ function LoginPage({
               </button>
             </div>
             <div className="reset-account-row">
-              <span>{role === "teacher" ? "Teacher" : "Student"} account</span>
+              <span>{selectedAccountLabel} account</span>
               <strong>{email || "Enter email on the sign-in form"}</strong>
             </div>
             {resetStep === "request" ? (
@@ -4721,7 +4987,7 @@ function GuidedWalkthroughOverlay({
   setStepIndex: (value: number | ((current: number) => number)) => void;
   onClose: () => void;
 }) {
-  const homeRoute = auth.role === "teacher" ? "dashboard" : "student";
+  const homeRoute = auth.role === "teacher" ? "dashboard" : auth.role === "individual" ? "personal-dashboard" : "student";
   const steps =
     auth.role === "teacher"
       ? [
@@ -5028,8 +5294,8 @@ function Sidebar({
   showDemoCard: boolean;
 }) {
   const visibleNavSections =
-    auth.role === "teacher" ? teacherNavSections : studentNavSections;
-  const homeRoute: RouteKey = auth.role === "teacher" ? "dashboard" : "student";
+    auth.role === "teacher" ? teacherNavSections : auth.role === "individual" ? individualNavSections : studentNavSections;
+  const homeRoute: RouteKey = auth.role === "teacher" ? "dashboard" : auth.role === "individual" ? "personal-dashboard" : "student";
   return (
     <aside className="sidebar">
       <button
@@ -5042,7 +5308,7 @@ function Sidebar({
         </span>
         <span>
           <strong>ClassLoop</strong>
-          <small>Classroom continuity</small>
+          <small>{auth.role === "individual" ? "Personal meetings" : "Classroom continuity"}</small>
         </span>
       </button>
       <nav className="nav-list" aria-label="Primary">
@@ -5124,6 +5390,10 @@ function Topbar({
         <h1>
           {auth.role === "student"
             ? "My ClassLoop"
+            : auth.role === "individual"
+              ? route === "personal-dashboard"
+                ? "Personal meetings"
+                : routeLabels[route]
             : route === "dashboard"
               ? "Today in ClassLoop"
               : routeLabels[route]}
@@ -5452,6 +5722,356 @@ function TeacherDashboard({
             ))}
           </div>
         </Panel>
+      </section>
+    </div>
+  );
+}
+
+function PersonalDashboard({ meetings }: { meetings: PersonalMeeting[] }) {
+  const openTasks = meetings.flatMap((meeting) => meeting.tasks).filter((task) => task.status !== "complete");
+  const completedTasks = meetings.flatMap((meeting) => meeting.tasks).filter((task) => task.status === "complete");
+  const latest = meetings[0];
+  const hasMeetings = meetings.length > 0;
+
+  return (
+    <div className="page-stack personal-page">
+      <section className="dashboard-hero personal-hero">
+        <div className="hero-copy">
+          <span className="eyebrow">Personal meetings</span>
+          <h2>Paste meeting minutes and turn them into your own recap and tasks.</h2>
+          <p>
+            Individual accounts stay free and focused: one paste box, one recap, and follow-through tasks only for you.
+          </p>
+          <div className="hero-actions">
+            <button className="primary-button large" onClick={() => navigate("new-personal-meeting")}>
+              <PlusCircle size={19} />
+              New personal meeting
+            </button>
+            {hasMeetings && (
+              <button className="ghost-button large" onClick={() => navigate("personal-meetings")}>
+                <ClipboardCheck size={18} />
+                View meeting history
+              </button>
+            )}
+          </div>
+        </div>
+        {hasMeetings && (
+          <div className="personal-hero-panel">
+            <span className="eyebrow">Latest recap</span>
+            <strong>{latest.title}</strong>
+            <p>{latest.recap}</p>
+          </div>
+        )}
+      </section>
+
+      <section className="metric-grid">
+        <MetricCard
+          icon={FileText}
+          label="Meetings"
+          value={meetings.length.toString()}
+          detail="Personal records"
+          accent="green"
+        />
+        <MetricCard
+          icon={ListChecks}
+          label="Open tasks"
+          value={openTasks.length.toString()}
+          detail="Still active"
+          accent="amber"
+        />
+        <MetricCard
+          icon={CheckCircle2}
+          label="Completed"
+          value={completedTasks.length.toString()}
+          detail="Closed loops"
+          accent="blue"
+        />
+        <MetricCard
+          icon={CalendarDays}
+          label="Next due"
+          value={openTasks.find((task) => task.dueDateText.trim())?.dueDateText || "None"}
+          detail="From pasted minutes"
+          accent="rose"
+        />
+      </section>
+
+      <Panel title="Recent personal meetings" icon={CalendarDays} action="Open history" onAction={() => navigate("personal-meetings")}>
+        {hasMeetings ? (
+          <div className="session-list">
+            {meetings.slice(0, 5).map((meeting) => (
+              <button
+                key={meeting.id}
+                className="session-row"
+                onClick={() => navigate("personal-meetings", { meeting: meeting.id })}
+              >
+                <span className="session-icon">
+                  <FileText size={18} />
+                </span>
+                <span>
+                  <strong>{meeting.title}</strong>
+                  <small>
+                    {formatDate(meeting.date)} · {meeting.tasks.filter((task) => task.status !== "complete").length} open tasks
+                  </small>
+                </span>
+                <span className="status-pill in_progress">Personal</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <InlineEmpty
+            icon={FileText}
+            title="No personal meetings yet"
+            detail="Paste meeting minutes to generate a recap, questions, resources, and tasks for yourself."
+            action="New personal meeting"
+            onAction={() => navigate("new-personal-meeting")}
+          />
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+function NewPersonalMeeting({
+  onCreate,
+  personalTemplateCopyUrl,
+}: {
+  onCreate: (title: string, minutes: string) => void;
+  personalTemplateCopyUrl?: string;
+}) {
+  const [title, setTitle] = useState("");
+  const [minutes, setMinutes] = useState("");
+  const [error, setError] = useState("");
+  const personalMinutePlaceholder = [
+    "Meeting title:",
+    "Date:",
+    "Context:",
+    "",
+    "Resources:",
+    "- ",
+    "",
+    "Questions:",
+    "- ",
+    "",
+    "Due dates:",
+    "- ",
+    "",
+    "Minutes:",
+    "- Paste notes, decisions, action items, and follow-ups here.",
+  ].join("\n");
+
+  const generate = () => {
+    if (minutes.trim().length < 20) {
+      setError("Paste the meeting minutes before generating your personal recap.");
+      return;
+    }
+    setError("");
+    onCreate(title, minutes);
+  };
+
+  return (
+    <div className="page-stack personal-page">
+      <section className="import-layout personal-import-layout">
+        <div className="import-main">
+          <div className="section-heading">
+            <span className="eyebrow">Personal meeting</span>
+            <h2>Paste minutes and generate your follow-through.</h2>
+            <p>Use one meeting record with title, date, context, resources, questions, and due dates.</p>
+          </div>
+
+          <div className="form-grid">
+            <label className="field wide">
+              <span>Meeting title</span>
+              <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Product sync, client check-in, team standup" />
+            </label>
+            <label className="field paste-field large-paste wide">
+              <span>Paste meeting minutes</span>
+              <textarea
+                value={minutes}
+                onChange={(event) => setMinutes(event.target.value)}
+                placeholder={personalMinutePlaceholder}
+              />
+            </label>
+          </div>
+        </div>
+
+        <aside className="import-summary">
+          <div className="summary-card">
+            <span className="summary-icon">
+              <Sparkles size={22} />
+            </span>
+            <h3>Personal draft will include</h3>
+            <ul>
+              <li>Meeting recap</li>
+              <li>Your tasks</li>
+              <li>Status controls</li>
+              <li>Due date text boxes</li>
+              <li>Questions and resources</li>
+            </ul>
+            <button className="primary-button full" type="button" onClick={generate}>
+              <Wand2 size={18} />
+              Generate draft
+            </button>
+            <TemplateLinkCard
+              title="Google Docs personal template"
+              detail="Make a copy, fill in meeting title, date, context, resources, questions, due dates, then paste it here."
+              url={personalTemplateCopyUrl}
+            />
+            {error && <p className="settings-message">{error}</p>}
+          </div>
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+function PersonalMeetingsPage({
+  meetings,
+  onUpdateTask,
+  onDeleteMeeting,
+}: {
+  meetings: PersonalMeeting[];
+  onUpdateTask: (meetingId: string, taskId: string, changes: Partial<PersonalTask>) => void;
+  onDeleteMeeting: (meetingId: string) => void;
+}) {
+  const selectedMeetingId = getParam("meeting") ?? meetings[0]?.id ?? "";
+  const selectedMeeting = meetings.find((meeting) => meeting.id === selectedMeetingId) ?? meetings[0];
+
+  if (!selectedMeeting) {
+    return (
+      <EmptyState
+        icon={FileText}
+        title="No personal meetings yet"
+        detail="Generate a personal meeting from pasted minutes to see recaps and tasks here."
+        action="New personal meeting"
+        onAction={() => navigate("new-personal-meeting")}
+      />
+    );
+  }
+
+  return (
+    <div className="page-stack personal-page">
+      <section className="review-banner personal-review-banner">
+        <div>
+          <span className="eyebrow">Personal meeting review</span>
+          <h2>{selectedMeeting.title}</h2>
+          <p>
+            {formatDate(selectedMeeting.date)} · {selectedMeeting.tasks.filter((task) => task.status !== "complete").length} open tasks
+          </p>
+        </div>
+        <div className="review-actions">
+          <button className="ghost-button" type="button" onClick={() => onDeleteMeeting(selectedMeeting.id)}>
+            <Trash2 size={17} />
+            Delete
+          </button>
+          <button className="primary-button" type="button" onClick={() => navigate("new-personal-meeting")}>
+            <PlusCircle size={17} />
+            New meeting
+          </button>
+        </div>
+      </section>
+
+      <section className="content-grid align-start">
+        <Panel title="Meeting history" icon={CalendarDays}>
+          <div className="session-list">
+            {meetings.map((meeting) => (
+              <button
+                key={meeting.id}
+                className={meeting.id === selectedMeeting.id ? "session-row active" : "session-row"}
+                onClick={() => navigate("personal-meetings", { meeting: meeting.id })}
+              >
+                <span className="session-icon">
+                  <FileText size={18} />
+                </span>
+                <span>
+                  <strong>{meeting.title}</strong>
+                  <small>
+                    {formatDate(meeting.date)} · {meeting.tasks.length} tasks
+                  </small>
+                </span>
+              </button>
+            ))}
+          </div>
+        </Panel>
+
+        <div className="page-stack">
+          <Panel title="Recap" icon={FileText}>
+            <div className="personal-recap">
+              <p>{selectedMeeting.recap}</p>
+              {selectedMeeting.context && (
+                <div>
+                  <strong>Context</strong>
+                  <span>{selectedMeeting.context}</span>
+                </div>
+              )}
+            </div>
+          </Panel>
+
+          <Panel title="Tasks" icon={ListChecks}>
+            <div className="personal-task-list">
+              {selectedMeeting.tasks.map((task) => (
+                <article key={task.id} className="personal-task-row">
+                  <div>
+                    <strong>{task.title}</strong>
+                    <small>{task.source}</small>
+                  </div>
+                  <label className="field compact">
+                    <span>Status</span>
+                    <select
+                      value={task.status}
+                      onChange={(event) =>
+                        onUpdateTask(selectedMeeting.id, task.id, {
+                          status: event.target.value as PersonalTaskStatus,
+                        })
+                      }
+                      aria-label={`Status for ${task.title}`}
+                    >
+                      <option value="todo">To do</option>
+                      <option value="in_progress">In progress</option>
+                      <option value="complete">Complete</option>
+                    </select>
+                  </label>
+                  <label className="field compact">
+                    <span>Due date</span>
+                    <input
+                      value={task.dueDateText}
+                      onChange={(event) => onUpdateTask(selectedMeeting.id, task.id, { dueDateText: event.target.value })}
+                      placeholder="Friday, 5/29, next week"
+                      aria-label={`Due date for ${task.title}`}
+                    />
+                  </label>
+                  <span className={`status-pill ${task.status}`}>{personalTaskStatusLabel(task.status)}</span>
+                </article>
+              ))}
+            </div>
+          </Panel>
+
+          <section className="content-grid two-columns">
+            <Panel title="Questions" icon={Lightbulb}>
+              {selectedMeeting.questions.length ? (
+                <div className="bullet-stack">
+                  {selectedMeeting.questions.map((question) => (
+                    <span key={question}>{question}</span>
+                  ))}
+                </div>
+              ) : (
+                <InlineEmpty icon={Lightbulb} title="No questions found" detail="Questions from pasted minutes appear here." />
+              )}
+            </Panel>
+            <Panel title="Resources" icon={LinkIcon}>
+              {selectedMeeting.resources.length ? (
+                <div className="bullet-stack">
+                  {selectedMeeting.resources.map((resource) => (
+                    <a key={resource.id} href={resource.url} target="_blank" rel="noreferrer">
+                      {resource.title}
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <InlineEmpty icon={LinkIcon} title="No resources found" detail="Links from the resources section appear here." />
+              )}
+            </Panel>
+          </section>
+        </div>
       </section>
     </div>
   );

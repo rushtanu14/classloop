@@ -2,6 +2,8 @@ import type {
   ActionItem,
   ImportQualityWarning,
   ParticipationEvent,
+  PersonalMeeting,
+  PersonalTask,
   Resource,
   Session,
   SessionCaptureMode,
@@ -690,6 +692,123 @@ function parseRoster(roster: string, transcript: string): Student[] {
     }));
 
   return studentsFromRosterEntries(estimatedEntries);
+}
+
+export type PersonalMeetingDraftInput = {
+  ownerEmail: string;
+  title: string;
+  minutes: string;
+};
+
+function extractTemplateSection(text: string, labels: string[]) {
+  const labelPattern = labels.map(escapeRegExp).join("|");
+  const match = text.match(new RegExp(`(?:^|\\n)\\s*(?:${labelPattern})\\s*:?\\s*([\\s\\S]*?)(?=\\n\\s*(?:Meeting title|Date|Context|Resources|Questions|Due dates)\\s*:?|$)`, "i"));
+  return match?.[1]?.trim() ?? "";
+}
+
+function extractPersonalTitle(inputTitle: string, minutes: string) {
+  const fromInput = inputTitle.trim();
+  if (fromInput) return fromInput;
+  const fromTemplate = extractTemplateSection(minutes, ["Meeting title", "Title"]).split(/\n+/)[0]?.trim();
+  if (fromTemplate) return fromTemplate;
+  const firstLine = minutes.split(/\n+/).map((line) => line.trim()).find(Boolean);
+  return shortText(firstLine || "Personal meeting", 72);
+}
+
+function extractPersonalDate(minutes: string) {
+  const fromTemplate = extractTemplateSection(minutes, ["Date"]).split(/\n+/)[0]?.trim();
+  if (fromTemplate) return fromTemplate;
+  const iso = minutes.match(/\b\d{4}-\d{2}-\d{2}\b/)?.[0];
+  if (iso) return iso;
+  const slashDate = minutes.match(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/)?.[0];
+  return slashDate || toDateInput(new Date());
+}
+
+function extractPersonalQuestions(minutes: string) {
+  const section = extractTemplateSection(minutes, ["Questions", "Open questions"]);
+  const source = section || minutes;
+  return unique(
+    source
+      .split(/\n+/)
+      .map(cleanLine)
+      .filter((line) => line.includes("?") || /^(question|q)\b/i.test(line))
+      .map((line) => line.replace(/^(question|q)\s*[:.-]\s*/i, "").trim()),
+  ).slice(0, 8);
+}
+
+function dueDateTextFromLine(line: string) {
+  return (
+    line.match(/\b(?:due|by|before|on)\s+([^.;,\n]+)/i)?.[1]?.trim() ??
+    line.match(/\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week)\b/i)?.[1]?.trim() ??
+    ""
+  );
+}
+
+function extractPersonalTasks(minutes: string): PersonalTask[] {
+  const lines = minutes.split(/\n+/).map(cleanLine).filter(Boolean);
+  const candidates = lines.filter((line) =>
+    /\b(i need to|i will|my task|todo|to do|action item|follow up|complete|finish|submit|send|review|prepare|draft|schedule|email|ask)\b/i.test(line),
+  );
+  const selected = (candidates.length ? candidates : lines.filter((line) => /\b(due|by|before)\b/i.test(line))).slice(0, 8);
+  if (!selected.length) {
+    return [
+      {
+        id: "personal-task-1",
+        title: "Review the meeting recap",
+        status: "todo",
+        dueDateText: extractTemplateSection(minutes, ["Due dates", "Due date"]).split(/\n+/)[0]?.trim() ?? "",
+        source: "Fallback personal follow-up",
+      },
+    ];
+  }
+
+  return selected.map((line, index) => ({
+    id: `personal-task-${index + 1}`,
+    title: shortText(line.replace(/^[-*]\s*/, "").replace(/^(todo|to do|action item|my task)\s*[:.-]\s*/i, ""), 120),
+    status: "todo",
+    dueDateText: dueDateTextFromLine(line),
+    source: line,
+  }));
+}
+
+function extractPersonalRecap(minutes: string, context: string, title: string) {
+  const discussionLines = minutes
+    .split(/\n+/)
+    .map(cleanLine)
+    .filter((line) => line.length > 20 && !/^https?:/i.test(line))
+    .filter((line) => !/^(meeting title|date|context|resources|questions|due dates)\b/i.test(line))
+    .slice(0, 3);
+  if (discussionLines.length) {
+    return [`${title} focused on ${context || "the meeting context"}.`, ...discussionLines].join(" ");
+  }
+  return `${title} focused on ${context || "the pasted meeting context"}. Review the questions, resources, and due dates before closing the loop.`;
+}
+
+export function createPersonalMeetingDraft(input: PersonalMeetingDraftInput): PersonalMeeting {
+  const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const minutes = input.minutes.trim();
+  const title = extractPersonalTitle(input.title, minutes);
+  const date = extractPersonalDate(minutes);
+  const context = extractTemplateSection(minutes, ["Context"]);
+  const resources = parseResources(extractTemplateSection(minutes, ["Resources"]), minutes, "Personal meeting");
+  const questions = extractPersonalQuestions(minutes);
+  const tasks = extractPersonalTasks(minutes);
+  const now = new Date().toISOString();
+
+  return {
+    id: `personal-meeting-${suffix}`,
+    ownerEmail: input.ownerEmail.trim().toLowerCase(),
+    title,
+    date,
+    minutes,
+    context,
+    recap: extractPersonalRecap(minutes, context, title),
+    resources,
+    questions,
+    tasks,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 function cleanLine(line: string) {

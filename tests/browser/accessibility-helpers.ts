@@ -71,7 +71,8 @@ export async function expectNoUnnamedInteractive(page: Page, rootSelector: strin
 
 export async function expectKeyboardFocusOrder(page: Page, expectedLabels: RegExp[]) {
   await page.evaluate(() => {
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    document.body.setAttribute("tabindex", "-1");
+    document.body.focus();
   });
 
   const stops: FocusStop[] = [];

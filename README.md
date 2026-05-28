@@ -1,6 +1,6 @@
 # ClassLoop
 
-ClassLoop turns class transcripts, notes, rosters, and links into teacher-reviewed student follow-ups.
+ClassLoop turns class transcripts, notes, rosters, and links into teacher-reviewed student follow-ups. It also includes a personal meeting-minutes mode for individual follow-through without class rosters or student accounts.
 
 Teachers get a clean review workflow after class. Students get a simple dashboard with the recap, tasks, resources, due dates, and completion check-ins meant for them.
 
@@ -38,6 +38,13 @@ ClassLoop helps with that after-class cleanup:
 - Mark work complete with an optional note or file link.
 - See teacher-reviewed completion status.
 - Keep follow-up work separate from teacher-only analytics.
+
+### For Individual Meeting Notes
+
+- Create an individual account for paste-only personal meeting minutes.
+- Generate a personal recap, resources, questions, and tasks from plain meeting notes.
+- Track task status and due-date text across saved personal meetings.
+- Use separate personal navigation and local persistence from teacher/student classroom data.
 
 ### For Hosted And Mobile Use
 
@@ -183,7 +190,7 @@ npm run test:release:distribution
 npm run drill:incidents
 ```
 
-The test suite covers import parsing, noisy transcripts and rosters, teacher/student workflows, workspace isolation, hosted sync states, Free/Pro boundaries, Stripe-owned entitlement updates, desktop encrypted state, mobile/PWA readability, accessibility, user-visible errors, and release checks.
+The test suite covers import parsing, noisy transcripts and rosters, teacher/student workflows, individual meeting minutes, workspace isolation, hosted sync states, Free/Pro boundaries, Stripe-owned entitlement updates, desktop encrypted state, mobile/PWA readability, accessibility, user-visible errors, and release checks.
 
 ## Desktop Packaging
 

@@ -63,6 +63,31 @@ export type StudentSubmission = {
   reviewedAt?: string;
 };
 
+export type PersonalTaskStatus = "todo" | "in_progress" | "complete";
+
+export type PersonalTask = {
+  id: string;
+  title: string;
+  status: PersonalTaskStatus;
+  dueDateText: string;
+  source: string;
+};
+
+export type PersonalMeeting = {
+  id: string;
+  ownerEmail: string;
+  title: string;
+  date: string;
+  minutes: string;
+  context: string;
+  recap: string;
+  resources: Resource[];
+  questions: string[];
+  tasks: PersonalTask[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PublishAuditEntry = {
   sessionId: string;
   studentId?: string;

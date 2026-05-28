@@ -1,4 +1,4 @@
-import { createGeneratedSession, readTranscriptFileText } from "../src/data.js";
+import { createGeneratedSession, createPersonalMeetingDraft, readTranscriptFileText } from "../src/data.js";
 
 function assert(condition: boolean, message: string) {
   if (!condition) throw new Error(message);
@@ -668,6 +668,31 @@ assert(
     (warning) => warning.id === "no-students-detected" && warning.severity === "blocking",
   ) ?? false,
   "empty imports should create a blocking warning instead of looking ready to publish",
+);
+
+const personalMeeting = createPersonalMeetingDraft({
+  ownerEmail: "rushil@classloop.test",
+  title: "",
+  minutes: `Meeting title: Product sync
+Date: 2026-05-27
+Context: Reviewing individual meeting minutes mode.
+Resources:
+- https://example.com/spec
+Questions:
+- Should statuses stay simple?
+Due dates:
+- Send template copy link by Friday
+Minutes:
+- I need to send the template copy link by Friday.
+- Review the dashboard polish next week.`,
+});
+assertEqual(personalMeeting.title, "Product sync", "personal meeting should read the template meeting title");
+assertEqual(personalMeeting.date, "2026-05-27", "personal meeting should read the template date");
+assertEqual(personalMeeting.resources.length, 1, "personal meeting should parse resource links");
+assert(personalMeeting.questions.includes("Should statuses stay simple?"), "personal meeting should collect questions");
+assert(
+  personalMeeting.tasks.some((task) => task.status === "todo" && task.dueDateText.toLowerCase().includes("friday")),
+  "personal meeting tasks should include editable status and due date text",
 );
 
 const meetingNotesMetadataSession = createGeneratedSession({

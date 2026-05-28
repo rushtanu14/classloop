@@ -41,6 +41,26 @@ async function resetBrowser(page: Page) {
     sessionStorage.clear();
   });
   await page.goto("/#/dashboard");
+  await openSignInForm(page);
+  await chooseAuthRole(page, "teacher");
+}
+
+async function openSignInForm(page: Page) {
+  const signInHeading = page.getByText(/Sign in to ClassLoop/i);
+  if (await signInHeading.isVisible().catch(() => false)) return;
+  await page.waitForSelector(".auth-entry-actions, .auth-switch", { timeout: 15_000 });
+  const entryLogin = page.locator(".auth-entry-actions").getByRole("button", { name: /^log in$/i });
+  if (await entryLogin.isVisible().catch(() => false)) {
+    await entryLogin.click();
+  } else {
+    await page.locator(".auth-switch").getByRole("button", { name: /^sign in$/i }).click();
+  }
+  await expect(signInHeading).toBeVisible();
+}
+
+async function chooseAuthRole(page: Page, role: "teacher" | "student") {
+  await page.getByRole("tab", { name: /^class$/i }).click();
+  await page.getByRole("tab", { name: role === "teacher" ? /^teacher$/i : /^student$/i }).click();
   await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
 }
 
@@ -54,9 +74,7 @@ async function skipAutoWalkthrough(page: Page) {
 
 async function signIn(page: Page, role: "teacher" | "student") {
   await resetBrowser(page);
-  if (role === "student") {
-    await page.getByRole("tab", { name: /student/i }).click();
-  }
+  await chooseAuthRole(page, role);
   await page.getByPlaceholder("name@example.com").fill(role === "teacher" ? teacherEmail : studentEmail);
   await page.getByPlaceholder("Enter password").fill(role === "teacher" ? teacherPassword : studentPassword);
   await page.locator("form.login-form button[type='submit']").click();
@@ -72,11 +90,16 @@ test.describe("WCAG-targeted accessibility checks", () => {
     await resetBrowser(page);
     await expectNoUnnamedInteractive(page, ".login-panel");
     await expect(
-      page.getByRole("tablist", { name: /choose account type/i }).getByRole("tab", { name: /teacher/i }),
+      page.getByRole("tablist", { name: /choose workspace type/i }).getByRole("tab", { name: /class/i }),
+    ).toHaveAttribute("aria-selected", "true");
+    await expect(
+      page.getByRole("tablist", { name: /choose class role/i }).getByRole("tab", { name: /teacher/i }),
     ).toHaveAttribute("aria-selected", "true");
     await expectKeyboardFocusOrder(page, [
       /^Sign in$/,
       /^Create account$/,
+      /^Individual$/,
+      /^Class$/,
       /^Teacher$/,
       /^Student$/,
       /Email name@example.com/,

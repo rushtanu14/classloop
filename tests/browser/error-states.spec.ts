@@ -10,6 +10,39 @@ async function resetBrowser(page: Page) {
     sessionStorage.clear();
   });
   await page.goto("/#/dashboard");
+  await openTeacherSignInFields(page);
+}
+
+async function openSignInForm(page: Page) {
+  const signInHeading = page.getByText(/Sign in to ClassLoop/i);
+  if (await signInHeading.isVisible().catch(() => false)) return;
+  await page.waitForSelector(".auth-entry-actions, .auth-switch", { timeout: 15_000 });
+  const entryLogin = page.locator(".auth-entry-actions").getByRole("button", { name: /^log in$/i });
+  if (await entryLogin.isVisible().catch(() => false)) {
+    await entryLogin.click();
+  } else {
+    await page.locator(".auth-switch").getByRole("button", { name: /^sign in$/i }).click();
+  }
+  await expect(signInHeading).toBeVisible();
+}
+
+async function openCreateAccountForm(page: Page) {
+  const createHeading = page.getByText(/Create your ClassLoop account/i);
+  if (await createHeading.isVisible().catch(() => false)) return;
+  await page.waitForSelector(".auth-entry-actions, .auth-switch", { timeout: 15_000 });
+  const entryCreate = page.locator(".auth-entry-actions").getByRole("button", { name: /^create account$/i });
+  if (await entryCreate.isVisible().catch(() => false)) {
+    await entryCreate.click();
+  } else {
+    await page.locator(".auth-switch").getByRole("button", { name: /^create account$/i }).click();
+  }
+  await expect(createHeading).toBeVisible();
+}
+
+async function openTeacherSignInFields(page: Page) {
+  await openSignInForm(page);
+  await page.getByRole("tab", { name: /^class$/i }).click();
+  await page.getByRole("tab", { name: /^teacher$/i }).click();
   await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
 }
 
@@ -58,7 +91,7 @@ test.describe("user-visible error states and recovery", () => {
     await expect(page.getByLabel(/workspace data outline/i)).toHaveCount(0);
     await expect(page.getByLabel(/startup status/i)).toHaveCount(0);
     releaseSharedState();
-    await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
+    await openTeacherSignInFields(page);
   });
 
   test("bad transcript format and malformed resource URLs show recoverable warnings without leaking private text to logs", async ({
@@ -142,7 +175,7 @@ test.describe("user-visible error states and recovery", () => {
     });
 
     await page.goto("/#/dashboard");
-    await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
+    await openTeacherSignInFields(page);
     await expect(page.getByRole("status").filter({ hasText: /shared sync is unavailable/i })).toBeVisible();
     await page.getByPlaceholder("name@example.com").fill(teacherEmail);
     await page.getByPlaceholder("Enter password").fill(teacherPassword);
@@ -167,7 +200,7 @@ test.describe("user-visible error states and recovery", () => {
     });
 
     await page.goto("/#/dashboard");
-    await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
+    await openTeacherSignInFields(page);
     await expect(page.getByRole("status").filter({ hasText: /shared sync is unavailable/i })).toBeVisible();
   });
 
@@ -185,7 +218,7 @@ test.describe("user-visible error states and recovery", () => {
     });
 
     await page.goto("/#/dashboard");
-    await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
+    await openTeacherSignInFields(page);
     await expect(page.getByRole("alert").filter({ hasText: /some browser data could not be read/i })).toBeVisible();
   });
 
@@ -209,8 +242,9 @@ test.describe("user-visible error states and recovery", () => {
     });
 
     await page.goto("/#/dashboard");
-    await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
-    await page.locator(".auth-switch").getByRole("button", { name: /^create account$/i }).click();
+    await openCreateAccountForm(page);
+    await page.getByRole("tab", { name: /^class$/i }).click();
+    await page.getByRole("tab", { name: /^teacher$/i }).click();
     await page.getByPlaceholder("Your name").fill("Storage Drill Teacher");
     await page.getByPlaceholder("name@example.com").fill("storage-drill-teacher@classloop.test");
     await page.getByPlaceholder("Enter password", { exact: true }).fill("storage-drill-password");

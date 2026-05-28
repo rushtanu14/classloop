@@ -15,6 +15,43 @@ async function resetBrowser(page: Page) {
   });
   await page.reload();
   await page.goto("/#/dashboard");
+  await openSignInForm(page);
+  await chooseAuthRole(page, "teacher");
+}
+
+async function openSignInForm(page: Page) {
+  const signInHeading = page.getByText(/Sign in to ClassLoop/i);
+  if (await signInHeading.isVisible().catch(() => false)) return;
+  await page.waitForSelector(".auth-entry-actions, .auth-switch", { timeout: 15_000 });
+  const entryLogin = page.locator(".auth-entry-actions").getByRole("button", { name: /^log in$/i });
+  if (await entryLogin.isVisible().catch(() => false)) {
+    await entryLogin.click();
+  } else {
+    await page.locator(".auth-switch").getByRole("button", { name: /^sign in$/i }).click();
+  }
+  await expect(signInHeading).toBeVisible();
+}
+
+async function openCreateAccountForm(page: Page) {
+  const createHeading = page.getByText(/Create your ClassLoop account/i);
+  if (await createHeading.isVisible().catch(() => false)) return;
+  await page.waitForSelector(".auth-entry-actions, .auth-switch", { timeout: 15_000 });
+  const entryCreate = page.locator(".auth-entry-actions").getByRole("button", { name: /^create account$/i });
+  if (await entryCreate.isVisible().catch(() => false)) {
+    await entryCreate.click();
+  } else {
+    await page.locator(".auth-switch").getByRole("button", { name: /^create account$/i }).click();
+  }
+  await expect(createHeading).toBeVisible();
+}
+
+async function chooseAuthRole(page: Page, role: "teacher" | "student" | "individual") {
+  if (role === "individual") {
+    await page.getByRole("tab", { name: /^individual$/i }).click();
+  } else {
+    await page.getByRole("tab", { name: /^class$/i }).click();
+    await page.getByRole("tab", { name: role === "teacher" ? /^teacher$/i : /^student$/i }).click();
+  }
   await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
 }
 
@@ -28,9 +65,7 @@ async function skipAutoWalkthrough(page: Page) {
 
 async function signIn(page: Page, role: "teacher" | "student", reset = true, closeWalkthrough = true) {
   if (reset) await resetBrowser(page);
-  if (role === "student") {
-    await page.getByRole("tab", { name: /student/i }).click();
-  }
+  await chooseAuthRole(page, role);
   await page.getByPlaceholder("name@example.com").fill(role === "teacher" ? teacherEmail : studentEmail);
   await page.getByPlaceholder("Enter password").fill(role === "teacher" ? teacherPassword : studentPassword);
   await page.locator("form.login-form button[type='submit']").click();
@@ -106,19 +141,18 @@ async function signOut(page: Page) {
   if (await signOutButton.isVisible().catch(() => false)) {
     await signOutButton.click();
   }
-  await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^ClassLoop$/i })).toBeVisible();
 }
 
 async function createAccount(
   page: Page,
-  role: "teacher" | "student",
+  role: "teacher" | "student" | "individual",
   name: string,
   email: string,
   password: string,
 ) {
-  await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
-  await page.locator(".auth-switch").getByRole("button", { name: /^create account$/i }).click();
-  await page.locator(".role-tabs").getByRole("tab", { name: role === "teacher" ? /teacher/i : /student/i }).click();
+  await openCreateAccountForm(page);
+  await chooseAuthRole(page, role);
   await page.getByPlaceholder("Your name").fill(name);
   await page.getByPlaceholder("name@example.com").fill(email);
   await page.getByPlaceholder("Enter password", { exact: true }).fill(password);
@@ -127,9 +161,9 @@ async function createAccount(
   await skipAutoWalkthrough(page);
 }
 
-async function signInAccount(page: Page, role: "teacher" | "student", email: string, password: string) {
-  await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
-  await page.locator(".role-tabs").getByRole("tab", { name: role === "teacher" ? /teacher/i : /student/i }).click();
+async function signInAccount(page: Page, role: "teacher" | "student" | "individual", email: string, password: string) {
+  await openSignInForm(page);
+  await chooseAuthRole(page, role);
   await page.getByPlaceholder("name@example.com").fill(email);
   await page.getByPlaceholder("Enter password").fill(password);
   await page.locator("form.login-form button[type='submit']").click();
@@ -150,6 +184,18 @@ async function waitForPersistedAccounts(page: Page) {
         () =>
           localStorage.getItem("classloop:secure:accounts:v1") !== null ||
           localStorage.getItem("classloop:accounts:v1") !== null,
+      ),
+    )
+    .toBe(true);
+}
+
+async function waitForPersistedPersonalMeetings(page: Page) {
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () =>
+          localStorage.getItem("classloop:secure:personal-meetings:v1") !== null ||
+          localStorage.getItem("classloop:personal-meetings:v1") !== null,
       ),
     )
     .toBe(true);
@@ -457,7 +503,8 @@ test("public root shows landing page and can enter the app demo", async ({ page 
   expect(manifestJson.start_url).toContain("source=pwa");
   expect(manifestJson.icons?.map((icon: { src: string }) => icon.src)).toContain("/classloop-app-icon-512.png");
   await page.getByRole("button", { name: /open web demo/i }).click();
-  await expect(page.getByPlaceholder("name@example.com")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^ClassLoop$/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^log in$/i })).toBeVisible();
 });
 
 test("hosted demo mode uses sample accounts only and does not persist demo workspace data", async ({ page }) => {
@@ -588,6 +635,56 @@ test("teacher can scaffold Classroom roster/resources and Zoom cloud transcript 
   expect(exported.notes).toContain("Raw Zoom cloud transcript auto-deleted after draft generation.");
   expect(exported.students.map((student) => student.email)).toContain("acarter@cs4all.nyc");
   expect(exported.resources.some((resource) => resource.url.includes("classroom.google.com/c/CS4ALL"))).toBe(true);
+});
+
+test("individual account can paste personal meeting minutes and track due-date status", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The individual workflow smoke runs once; responsive coverage comes from the main app smoke.");
+  const runId = Date.now().toString(36);
+  const email = `individual-${runId}@classloop.test`;
+  const password = `individual-pass-${runId}`;
+  await resetBrowser(page);
+  await createAccount(page, "individual", `Individual ${runId}`, email, password);
+
+  await expect(page.getByText(/Personal meetings/).first()).toBeVisible();
+  await page.getByRole("button", { name: /new personal meeting/i }).first().click();
+  await expect(page.getByText(/Session template/i)).toHaveCount(0);
+  await expect(page.getByLabel(/google docs personal template/i)).toBeVisible();
+  await expect(page.getByText(/template link is not connected yet/i)).toBeVisible();
+
+  await page.getByLabel(/meeting title/i).fill(`Personal Launch Sync ${runId}`);
+  await page.getByLabel(/paste meeting minutes/i).fill(`Meeting title: Personal Launch Sync ${runId}
+Date: 2026-05-27
+Context: Reviewing the public individual meeting mode.
+Resources:
+- https://example.com/personal-template
+Questions:
+- Should the personal dashboard stay paste only?
+Due dates:
+- Send the Google Docs copy link by Friday
+Minutes:
+- I need to send the Google Docs copy link by Friday.
+- Review personal dashboard polish next week.`);
+  await page.getByRole("button", { name: /generate draft/i }).click();
+
+  await expect(page.getByText(/Personal meeting review/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: `Personal Launch Sync ${runId}` })).toBeVisible();
+  await expect(page.getByText(/Should the personal dashboard stay paste only/i)).toBeVisible();
+  await expect(page.getByText(/example.com\/personal-template/i)).toBeVisible();
+
+  const taskRow = page.locator(".personal-task-row").filter({ hasText: /send the google docs copy link/i }).first();
+  await taskRow.locator("select").selectOption("complete");
+  await taskRow.getByLabel(/due date/i).fill("Friday 5/29");
+  await expect(taskRow.locator(".status-pill")).toHaveText(/complete/i);
+  await waitForPersistedPersonalMeetings(page);
+  await page.waitForTimeout(600);
+
+  await signOut(page);
+  await signInAccount(page, "individual", email, password);
+  await page.getByRole("button", { name: /meeting history/i }).first().click();
+  await expect(page.getByRole("heading", { name: `Personal Launch Sync ${runId}` })).toBeVisible();
+  const persistedTaskRow = page.locator(".personal-task-row").filter({ hasText: /send the google docs copy link/i }).first();
+  await expect(persistedTaskRow.locator("select")).toHaveValue("complete");
+  await expect(persistedTaskRow.getByLabel(/due date/i)).toHaveValue("Friday 5/29");
 });
 
 test("teacher and student end-to-end flows work across three realistic session types without cross-user state leaks", async ({
@@ -810,6 +907,7 @@ test("account creation, settings, and password reset work", async ({ page }) => 
   await page.getByRole("button", { name: /show password/i }).click();
   await expect(page.locator('input[placeholder="Enter password"]')).toHaveAttribute("type", "text");
   await page.getByRole("button", { name: /create account/i }).click();
+  await chooseAuthRole(page, "teacher");
   await expect(page.locator('input[placeholder="Enter password"]')).toHaveAttribute("type", "password");
   await expect(page.locator('input[placeholder="Re-enter password"]')).toHaveAttribute("type", "password");
   await page.locator(".password-control").first().getByRole("button", { name: /show password/i }).click();
@@ -835,6 +933,8 @@ test("account creation, settings, and password reset work", async ({ page }) => 
   await expect(page.getByRole("button", { name: /test teacher updated/i })).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: /sign out/i }).click();
 
+  await openSignInForm(page);
+  await chooseAuthRole(page, "teacher");
   await page.getByPlaceholder("name@example.com").fill(uniqueEmail);
   await page.getByRole("button", { name: /forgot password/i }).click();
   await page.getByRole("button", { name: /get reset code/i }).click();
@@ -1191,10 +1291,11 @@ test("students cannot access analytics but can save appearance while logged in, 
   expect(customBackdrop).toContain("https://example.com/classloop-backdrop.png");
 
   await page.getByRole("button", { name: /sign out/i }).click();
-  await expect(page.getByText(/Sign in to ClassLoop/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^ClassLoop$/i })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "classroom");
 
-  await page.getByRole("tab", { name: /student/i }).click();
+  await openSignInForm(page);
+  await chooseAuthRole(page, "student");
   await page.getByPlaceholder("name@example.com").fill("maya@classloop.demo");
   await page.getByPlaceholder("Enter password").fill("classloop-student");
   await page.locator("form.login-form button[type='submit']").click();

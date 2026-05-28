@@ -220,7 +220,7 @@ type WorkspaceNotice = {
   message: string;
 };
 
-type BootPhase = "sync" | "local" | "ready";
+type BootPhase = "local" | "ready";
 
 type BootStepStatus = "pending" | "active" | "complete" | "warning" | "error";
 
@@ -541,18 +541,6 @@ const loadingTips = [
   "Tip: use aliases when a Zoom display name is different from a roster name.",
 ];
 
-const sharedSyncFallbackNotice: WorkspaceNotice = {
-  severity: "warning",
-  title: "Shared sync is unavailable",
-  message: "ClassLoop opened from encrypted browser storage. You can keep working here, and shared sync can reconnect later.",
-};
-
-const sharedSaveFallbackNotice: WorkspaceNotice = {
-  severity: "warning",
-  title: "Shared sync could not save",
-  message: "Recent changes are being kept in encrypted browser storage until shared sync is reachable again.",
-};
-
 const localReadFailureNotice: WorkspaceNotice = {
   severity: "error",
   title: "Some browser data could not be read",
@@ -566,22 +554,20 @@ const localWriteFailureNotice: WorkspaceNotice = {
 };
 
 function workspaceBootSteps(phase: BootPhase, notice: WorkspaceNotice | null): BootStep[] {
-  const sharedStatus: BootStepStatus =
-    phase === "sync" ? "active" : notice ? (notice.severity === "error" ? "error" : "warning") : "complete";
   const localStatus: BootStepStatus =
     phase === "local" ? "active" : phase === "ready" ? (notice ? "warning" : "complete") : "pending";
   const readyStatus: BootStepStatus = phase === "ready" ? "complete" : "pending";
 
   return [
     {
-      label: "Workspace sync",
-      detail: "Checking shared-state API and the latest saved classroom records.",
-      status: sharedStatus,
+      label: "Encrypted local workspace",
+      detail: "Opening accounts, drafts, rosters, and settings saved on this device.",
+      status: localStatus,
     },
     {
-      label: "Encrypted browser fallback",
-      detail: "Ready to recover accounts, drafts, rosters, and settings if shared sync is offline.",
-      status: localStatus,
+      label: "Cloud sync readiness",
+      detail: "Authenticated Supabase sync is available from Plan options when a cloud account is connected.",
+      status: phase === "ready" ? "complete" : "pending",
     },
     {
       label: "Teacher and student accounts",
@@ -1935,15 +1921,12 @@ function App() {
   const [landingPage, setLandingPage] = useState<LandingPageKey>(getLandingPage);
   const [publicDemoOnly] = useState(() => isPublicHostedDemo() || isDemoOnlyOverride());
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
-  const [bootPhase, setBootPhase] = useState<BootPhase>("sync");
+  const [bootPhase, setBootPhase] = useState<BootPhase>("local");
   const [workspaceNotice, setWorkspaceNotice] = useState<WorkspaceNotice | null>(null);
   const [templateLinks, setTemplateLinks] = useState<TemplateLinkManifest>({});
   const [passwordResetCodes, setPasswordResetCodes] = useState<Record<string, PasswordResetRecord>>({});
   const [celebrationMoment, setCelebrationMoment] = useState<CelebrationMoment | null>(null);
-  const serverSyncRef = useRef(false);
   const demoSessionRef = useRef(false);
-  const isSavingRef = useRef(false);
-  const writeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSharedJsonRef = useRef(
     sharedStateJson(persistableSharedState({
       accounts: demoAccounts,
@@ -1958,7 +1941,6 @@ function App() {
       billingProfile: defaultBillingProfile,
     })),
   );
-  const lastServerUpdatedAtRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     const key = themePresets[theme.key] ? theme.key : defaultTheme.key;
@@ -1985,7 +1967,7 @@ function App() {
 
   useEffect(() => {
     let active = true;
-    setBootPhase("sync");
+    setBootPhase("local");
     setWorkspaceNotice(null);
     if (publicDemoOnly) {
       clearClassLoopLocalPersistence();
@@ -2012,7 +1994,6 @@ function App() {
         auditLog: [],
         billingProfile: defaultBillingProfile,
       }));
-      serverSyncRef.current = false;
       setSyncStatus("local");
       setBootPhase("ready");
       setSharedReady(true);
@@ -2021,37 +2002,9 @@ function App() {
       };
     }
 
-    fetch("/api/state")
-      .then(async (response) => {
-        const contentType = response.headers.get("content-type") ?? "";
-        if (!response.ok || !contentType.includes("application/json")) {
-          throw new Error("Shared state API is unavailable.");
-        }
-        return normalizeSharedState(await response.json());
-      })
-      .then((state) => {
+    readLocalStateFallback()
+      .then((localResult) => {
         if (!active) return;
-        setAccounts(state.accounts);
-        setSessions(state.sessions);
-        setPersonalMeetings(state.personalMeetings);
-        setDraft(state.draft);
-        setDemoLoaded(state.demoLoaded);
-        setClassGroups(state.classGroups);
-        setRosterTemplates(state.rosterTemplates);
-        setPrivacySettings(state.privacySettings);
-        setAuditLog(state.auditLog);
-        setBillingProfile(defaultBillingProfile);
-        lastSharedJsonRef.current = sharedStateJson(state);
-        lastServerUpdatedAtRef.current = state.updatedAt;
-        serverSyncRef.current = true;
-        setSyncStatus("shared");
-        setWorkspaceNotice(null);
-        setBootPhase("ready");
-      })
-      .catch(async () => {
-        if (!active) return;
-        setBootPhase("local");
-        const localResult = await readLocalStateFallback();
         const localState = localResult.state;
         setAccounts(localState.accounts);
         setSessions(localState.sessions);
@@ -2064,9 +2017,36 @@ function App() {
         setAuditLog(localState.auditLog);
         setBillingProfile(defaultBillingProfile);
         lastSharedJsonRef.current = sharedStateJson(localState);
-        serverSyncRef.current = false;
         setSyncStatus("local");
-        setWorkspaceNotice(localResult.failedKeys.length ? localReadFailureNotice : sharedSyncFallbackNotice);
+        setWorkspaceNotice(localResult.failedKeys.length ? localReadFailureNotice : null);
+        setBootPhase("ready");
+      })
+      .catch(() => {
+        if (!active) return;
+        setAccounts(demoAccounts);
+        setSessions([]);
+        setPersonalMeetings([]);
+        setDraft(null);
+        setDemoLoaded(false);
+        setClassGroups([]);
+        setRosterTemplates([]);
+        setPrivacySettings(defaultPrivacySettings);
+        setAuditLog([]);
+        setBillingProfile(defaultBillingProfile);
+        lastSharedJsonRef.current = sharedStateJson(persistableSharedState({
+          accounts: demoAccounts,
+          sessions: [],
+          personalMeetings: [],
+          draft: null,
+          demoLoaded: false,
+          classGroups: [],
+          rosterTemplates: [],
+          privacySettings: defaultPrivacySettings,
+          auditLog: [],
+          billingProfile: defaultBillingProfile,
+        }));
+        setSyncStatus("local");
+        setWorkspaceNotice(localReadFailureNotice);
         setBootPhase("ready");
       })
       .finally(() => {
@@ -2098,82 +2078,19 @@ function App() {
       auditLog,
       billingProfile,
     });
-    if (!serverSyncRef.current) {
-      void writeLocalStateFallback(persistableState).catch(() => {
-        setWorkspaceNotice(localWriteFailureNotice);
-      });
-      return;
-    }
-
     const nextJson = sharedStateJson(persistableState);
     if (nextJson === lastSharedJsonRef.current) return;
 
-    if (writeTimerRef.current) clearTimeout(writeTimerRef.current);
-    writeTimerRef.current = setTimeout(() => {
-      isSavingRef.current = true;
-      fetch("/api/state", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: nextJson,
+    void writeLocalStateFallback(persistableState)
+      .then(() => {
+        lastSharedJsonRef.current = nextJson;
+        setSyncStatus("local");
+        setWorkspaceNotice((notice) => (notice === localWriteFailureNotice ? null : notice));
       })
-        .then(async (response) => {
-          if (!response.ok) throw new Error("Unable to save shared state.");
-          const state = normalizeSharedState(await response.json());
-          lastSharedJsonRef.current = sharedStateJson(state);
-          lastServerUpdatedAtRef.current = state.updatedAt;
-          setSyncStatus("shared");
-          setWorkspaceNotice(null);
-        })
-        .catch(() => {
-          setSyncStatus("local");
-          setWorkspaceNotice(sharedSaveFallbackNotice);
-          void writeLocalStateFallback(persistableState).catch(() => {
-            setWorkspaceNotice(localWriteFailureNotice);
-          });
-        })
-        .finally(() => {
-          isSavingRef.current = false;
-          writeTimerRef.current = null;
-        });
-    }, 300);
+      .catch(() => {
+        setWorkspaceNotice(localWriteFailureNotice);
+      });
   }, [accounts, auditLog, auth?.demo, billingProfile, classGroups, demoLoaded, draft, personalMeetings, privacySettings, publicDemoOnly, rosterTemplates, sessions, sharedReady]);
-
-  useEffect(() => {
-    if (!sharedReady || !serverSyncRef.current) return;
-    const interval = window.setInterval(() => {
-      if (isSavingRef.current) return;
-      fetch("/api/state")
-        .then(async (response) => {
-          if (!response.ok) throw new Error("Unable to refresh shared state.");
-          return normalizeSharedState(await response.json());
-        })
-        .then((state) => {
-          if (state.updatedAt === lastServerUpdatedAtRef.current) return;
-          const nextJson = sharedStateJson(state);
-          if (nextJson !== lastSharedJsonRef.current) {
-            setAccounts(state.accounts);
-            setSessions(state.sessions);
-            setPersonalMeetings(state.personalMeetings);
-            setDraft(state.draft);
-            setDemoLoaded(state.demoLoaded);
-            setClassGroups(state.classGroups);
-            setRosterTemplates(state.rosterTemplates);
-            setPrivacySettings(state.privacySettings);
-            setAuditLog(state.auditLog);
-          }
-          lastSharedJsonRef.current = nextJson;
-          lastServerUpdatedAtRef.current = state.updatedAt;
-          setSyncStatus("shared");
-          setWorkspaceNotice(null);
-        })
-        .catch(() => {
-          setSyncStatus("local");
-          setWorkspaceNotice(sharedSyncFallbackNotice);
-        });
-    }, 2500);
-
-    return () => window.clearInterval(interval);
-  }, [sharedReady]);
 
   useEffect(() => {
     const onHashChange = () => {

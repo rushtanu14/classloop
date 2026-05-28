@@ -67,31 +67,18 @@ function privateLogPattern() {
 }
 
 test.describe("user-visible error states and recovery", () => {
-  test("startup loader stays compact while shared state is pending", async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "chromium", "Runs once because it intentionally delays shared-state startup.");
-    let releaseSharedState: () => void = () => undefined;
-    const sharedStateHold = new Promise<void>((resolve) => {
-      releaseSharedState = resolve;
-    });
-    const sharedStateRequested = page.waitForRequest("**/api/state");
-
+  test("startup opens encrypted local state without probing stale shared-state API", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium", "Runs once because it intentionally guards the removed shared-state API path.");
+    let apiStateRequests = 0;
     await page.route("**/api/state", async (route) => {
-      await sharedStateHold;
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({}),
-      });
+      apiStateRequests += 1;
+      await route.abort();
     });
 
     await page.goto("/#/dashboard", { waitUntil: "domcontentloaded" });
-    await sharedStateRequested;
-    await expect(page.getByRole("heading", { name: /loading classloop/i })).toBeVisible();
-    await expect(page.getByRole("status", { name: /classloop loading/i })).toContainText(/Workspace sync/);
-    await expect(page.getByLabel(/workspace data outline/i)).toHaveCount(0);
-    await expect(page.getByLabel(/startup status/i)).toHaveCount(0);
-    releaseSharedState();
     await openTeacherSignInFields(page);
+    await expect(page.getByRole("status").filter({ hasText: /shared sync is unavailable/i })).toHaveCount(0);
+    expect(apiStateRequests).toBe(0);
   });
 
   test("bad transcript format and malformed resource URLs show recoverable warnings without leaking private text to logs", async ({
@@ -160,61 +147,38 @@ test.describe("user-visible error states and recovery", () => {
     await expect(page.getByRole("button", { name: /publish to students/i })).toBeEnabled();
   });
 
-  test("shared sync API outage falls back to usable local browser state with visible recovery copy", async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "chromium", "Runs once because it intentionally intercepts shared-state API calls.");
+  test("missing shared-state API does not block the local browser workspace", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "chromium", "Runs once because it intentionally guards the removed shared-state API path.");
     const runtimeMessages: string[] = [];
     page.on("console", (message) => {
       if (["error", "warning", "info", "log", "debug"].includes(message.type())) runtimeMessages.push(message.text());
     });
+    let apiStateRequests = 0;
     await page.route("**/api/state", async (route) => {
-      await route.fulfill({
-        status: 503,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "Shared sync API unavailable for outage drill." }),
-      });
+      apiStateRequests += 1;
+      await route.abort();
     });
 
     await page.goto("/#/dashboard");
     await openTeacherSignInFields(page);
-    await expect(page.getByRole("status").filter({ hasText: /shared sync is unavailable/i })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /shared sync is unavailable/i })).toHaveCount(0);
     await page.getByPlaceholder("name@example.com").fill(teacherEmail);
     await page.getByPlaceholder("Enter password").fill(teacherPassword);
     await page.locator("form.login-form button[type='submit']").click();
     await skipAutoWalkthrough(page);
     await expect(page.getByText("Today in ClassLoop")).toBeVisible();
-    await expect(page.getByRole("status").filter({ hasText: /shared sync is unavailable/i })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /shared sync is unavailable/i })).toHaveCount(0);
 
     await page.getByRole("button", { name: /ms\. rivera/i }).click();
     await expect(page.locator(".profile-menu")).toContainText(/Saved in this browser/i);
+    expect(apiStateRequests).toBe(0);
     expect(runtimeMessages.join("\n")).not.toMatch(privateLogPattern());
-  });
-
-  test("non-json shared sync response opens local mode with recovery copy", async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "chromium", "Runs once because it intentionally intercepts shared-state API calls.");
-    await page.route("**/api/state", async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "text/html",
-        body: "<h1>temporary gateway page</h1>",
-      });
-    });
-
-    await page.goto("/#/dashboard");
-    await openTeacherSignInFields(page);
-    await expect(page.getByRole("status").filter({ hasText: /shared sync is unavailable/i })).toBeVisible();
   });
 
   test("corrupt encrypted browser state is reported before sign in", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "chromium", "Runs once because it intentionally corrupts browser storage.");
     await page.addInitScript(() => {
       window.localStorage.setItem("classloop:secure:accounts:v1", "not-json");
-    });
-    await page.route("**/api/state", async (route) => {
-      await route.fulfill({
-        status: 503,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "Shared sync API unavailable for storage recovery drill." }),
-      });
     });
 
     await page.goto("/#/dashboard");
@@ -232,13 +196,6 @@ test.describe("user-visible error states and recovery", () => {
         }
         return originalSetItem.call(this, key, value);
       };
-    });
-    await page.route("**/api/state", async (route) => {
-      await route.fulfill({
-        status: 503,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "Shared sync API unavailable for storage write drill." }),
-      });
     });
 
     await page.goto("/#/dashboard");

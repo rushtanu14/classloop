@@ -81,6 +81,10 @@ classloop-student
 6. Switch to the student view and mark a task complete.
 7. Return to the teacher view to review completion and analytics.
 
+## Public Beta Packet
+
+Use [docs/public-beta-packet.md](docs/public-beta-packet.md) for teacher onboarding, the alpha script, release notes, support FAQ, download links and fallbacks, the short launch announcement, and the verification checklist before inviting a real teacher.
+
 ## Run Locally
 
 Requirements:

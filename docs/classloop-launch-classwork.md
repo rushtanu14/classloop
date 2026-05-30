@@ -29,8 +29,8 @@ Purpose: give Rushil a daily, due-date-driven path to get ClassLoop fully live, 
 | 2026-05-26 | Entitlements and billing | Verify free/paid boundaries, locked unpaid UI, upgrade/downgrade flows, and webhook-owned entitlement updates. |
 | 2026-05-27 | State resilience | Re-run encrypted local state, crash recovery, backup/restore, repeated imports, 100+ student roster, and no cross-user/project leakage checks. |
 | 2026-05-28 | Accessibility finish | Run keyboard navigation, focus order, contrast, labels/announcements, and phone-width readability checks. Fix anything that blocks classroom use. |
-| 2026-05-29 | Ops runbooks | Run rollback and incident drills; confirm support triage, bad release quarantine, sync/auth/billing outage behavior, and parser regression response. |
-| 2026-05-30 | Public beta packet | Prepare teacher onboarding, alpha script, release notes, support FAQ, download links/fallbacks, and a short launch announcement. |
+| 2026-05-29 | Ops runbooks | Done: `npm run drill:ops` passed rollback and incident drills, including bad-release quarantine, sync/auth/billing outage behavior, parser regression response, and support triage coverage. |
+| 2026-05-30 | Public beta packet | Done: prepared `docs/public-beta-packet.md`, updated the teacher alpha script, and included teacher onboarding, release notes, support FAQ, download links/fallbacks, launch announcement, verification checklist, and blocker list. |
 | 2026-05-31 | Low-babysitting review | Confirm green gates, known limits, support loop, weekly maintenance cadence, and what still needs a human before broader public signups. |
 | 2026-06-01 | Ship or hold | If hosted smoke, package checks, legal gate, support loop, and alpha trust criteria are green, ship the public beta. Otherwise hold with a one-page blocker list. |
 
@@ -108,13 +108,13 @@ Today: run keyboard, focus order, contrast, screen-reader label/status, and phon
 
 Subject: ClassLoop launch work due today - ops runbooks
 
-Today: run rollback and incident drills. Confirm bad release quarantine, sync/auth/billing outage behavior, parser regression response, and support triage.
+Today: `npm run drill:ops` passed rollback and incident drills. Rerun before ship if release artifacts, hosted APIs, parser behavior, billing, or sync code changes.
 
 ### 2026-05-30
 
 Subject: ClassLoop launch work due today - public beta packet
 
-Today: prepare teacher onboarding, alpha script, release notes, support FAQ, download links/fallbacks, and a short launch announcement.
+Today: public beta packet is prepared in `docs/public-beta-packet.md`. Verification passed for hosted smoke, release distribution, ops drills, and link checks against the current hosted/demo state, installer links, support path, and legal/public-signup gate.
 
 ### 2026-05-31
 

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ClassLoop mark">
+  <defs>
+    <linearGradient id="classloopMarkGradient" x1="78" y1="76" x2="430" y2="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e7f37a"/>
+      <stop offset="0.52" stop-color="#5ee0bc"/>
+      <stop offset="1" stop-color="#6cc4ff"/>
+    </linearGradient>
+    <filter id="classloopMarkShadow" x="28" y="28" width="456" height="456" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#0f172a" flood-opacity=".16"/>
+    </filter>
+  </defs>
+  <g filter="url(#classloopMarkShadow)">
+    <path d="M256 62c-90 0-164 74-164 164 0 68 43 126 102 151v53c0 12 10 22 22 22s22-10 22-22v-41c6 1 12 1 18 1s12 0 18-1v41c0 12 10 22 22 22s22-10 22-22v-53c59-25 102-83 102-151 0-90-74-164-164-164Z" fill="url(#classloopMarkGradient)"/>
+    <path d="M256 132c-40 0-72 31-74 70-26 10-44 36-44 66 0 39 31 70 70 70h96c42 0 76-34 76-76 0-39-29-72-67-75-9-32-34-55-57-55Zm0 42c23 0 36 15 40 47l3 22h22c10 0 18 3 25 10 7 6 11 15 11 26 0 20-16 37-37 37H208c-15 0-27-12-27-27 0-13 9-24 22-27l20-4v-49c0-20 14-35 33-35Z" fill="#10202d"/>
+    <path d="M158 158h-28v-28c0-10-8-18-18-18s-18 8-18 18v28H66c-10 0-18 8-18 18s8 18 18 18h28v28c0 10 8 18 18 18s18-8 18-18v-28h28c10 0 18-8 18-18s-8-18-18-18Zm288 178h-28v-28c0-10-8-18-18-18s-18 8-18 18v28h-28c-10 0-18 8-18 18s8 18 18 18h28v28c0 10 8 18 18 18s18-8 18-18v-28h28c10 0 18-8 18-18s-8-18-18-18Z" fill="#10202d" opacity=".86"/>
+  </g>
+</svg>

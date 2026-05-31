@@ -1,0 +1,331 @@
+{
+  "id": "session-generated-mpnhjwa8-n7ahun",
+  "title": "CS4All Intro to Computational Thinking - Period 4",
+  "type": "General classroom",
+  "date": "2026-05-27",
+  "status": "published",
+  "students": [
+    {
+      "id": "aaliyah-carter",
+      "name": "Aaliyah Carter",
+      "email": "acarter@cs4all.nyc",
+      "avatarColor": "#f59e0b"
+    },
+    {
+      "id": "danny-reyes",
+      "name": "Danny Reyes",
+      "email": "dreyes@cs4all.nyc",
+      "avatarColor": "#0ea5e9"
+    },
+    {
+      "id": "jalen-thompson",
+      "name": "Jalen Thompson",
+      "email": "jthompson@cs4all.nyc",
+      "avatarColor": "#8b5cf6"
+    },
+    {
+      "id": "priya-mehta",
+      "name": "Priya Mehta",
+      "email": "pmehta@cs4all.nyc",
+      "avatarColor": "#10b981"
+    },
+    {
+      "id": "keisha-brown",
+      "name": "Keisha Brown",
+      "email": "kbrown@cs4all.nyc",
+      "avatarColor": "#ef4444"
+    },
+    {
+      "id": "leo-fernandez",
+      "name": "Leo Fernandez",
+      "email": "lfernandez@cs4all.nyc",
+      "avatarColor": "#14b8a6"
+    }
+  ],
+  "transcript": "",
+  "notes": "Google Classroom course: CS4All Intro to Computational Thinking Section/period: Period 4 Course code: CS4ALL-P4 Imported Classroom items are suggestions; teacher confirms what attaches to the recap.\nZoom cloud meeting: CS4All Intro to Computational Thinking (Apr 28, 2026). Raw Zoom transcript should be deleted after recap generation; structured recap, tasks, resources, participation, and follow-ups remain.\nRaw Zoom cloud transcript auto-deleted after draft generation.",
+  "capture": {
+    "mode": "transcript",
+    "sourceLabel": "Transcript import",
+    "capturedAt": "2026-05-27T03:09:32.339Z",
+    "transcriptSource": "zoom_cloud_transcript"
+  },
+  "recap": "This general classroom session focused on CS4All Intro to Computational Thinking - Period 4. We connected that work to problem decomposition by breaking the task into smaller steps that can become functions. Homework for Thursday: complete the algorithm design worksheet on Google Classroom. Shared 2 video resources in chat for extra review.",
+  "essentialQuestions": [
+    "What were the most important takeaways about CS4All Intro to Computational Thinking - Period 4?",
+    "How can you break a complex task into smaller, more manageable steps?",
+    "What follow-up work should be completed by 2026-05-30?"
+  ],
+  "attendance": {
+    "aaliyah-carter": "present",
+    "danny-reyes": "present",
+    "jalen-thompson": "present",
+    "priya-mehta": "present",
+    "keisha-brown": "present",
+    "leo-fernandez": "present"
+  },
+  "resources": [
+    {
+      "id": "res-1",
+      "title": "classroom.google.com",
+      "url": "https://classroom.google.com/c/CS4ALL/a/algorithm-worksheet",
+      "type": "link",
+      "relatedTopic": "CS4All Intro to Computational Thinking - Period 4"
+    },
+    {
+      "id": "res-2",
+      "title": "classroom.google.com",
+      "url": "https://classroom.google.com/c/CS4ALL/m/decomposition-video",
+      "type": "video",
+      "relatedTopic": "CS4All Intro to Computational Thinking - Period 4"
+    }
+  ],
+  "actionItems": [
+    {
+      "id": "task-class-mpnhjwa8-n7ahun",
+      "title": "Complete algorithm design worksheet",
+      "description": "Class-level follow-up generated from the imported general classroom record. Assignment: Homework for Thursday: complete the algorithm design worksheet on Google Classroom.",
+      "dueDate": "2026-05-30",
+      "status": "todo",
+      "source": "Detected from transcript, notes, or your session details."
+    },
+    {
+      "id": "task-student-0-mpnhjwa8-n7ahun",
+      "title": "Aaliyah Carter support check",
+      "description": "Review CS4All Intro to Computational Thinking - Period 4 and complete the assigned follow-up.",
+      "ownerId": "aaliyah-carter",
+      "dueDate": "2026-05-30",
+      "status": "submitted",
+      "source": "Generated from attendance and participation signals."
+    },
+    {
+      "id": "task-student-1-mpnhjwa8-n7ahun",
+      "title": "Danny Reyes support check",
+      "description": "Review CS4All Intro to Computational Thinking - Period 4 and complete the assigned follow-up.",
+      "ownerId": "danny-reyes",
+      "dueDate": "2026-05-30",
+      "status": "todo",
+      "source": "Generated from attendance and participation signals."
+    },
+    {
+      "id": "task-student-2-mpnhjwa8-n7ahun",
+      "title": "Leo Fernandez support check",
+      "description": "Review CS4All Intro to Computational Thinking - Period 4 and complete the assigned follow-up.",
+      "ownerId": "leo-fernandez",
+      "dueDate": "2026-05-30",
+      "status": "todo",
+      "source": "Generated from attendance and participation signals."
+    }
+  ],
+  "participationEvents": [
+    {
+      "id": "p-jalen-thompson-0-mpnhjwa8-n7ahun",
+      "studentId": "jalen-thompson",
+      "type": "chat",
+      "text": "Shared: [Chat] TikTok algorithm lol",
+      "confidence": 0.86,
+      "approved": true,
+      "reviewRequired": false,
+      "sourceLine": "[00:01:14] Student (Jalen Thompson): [Chat] TikTok algorithm lol"
+    },
+    {
+      "id": "p-priya-mehta-0-mpnhjwa8-n7ahun",
+      "studentId": "priya-mehta",
+      "type": "asked_question",
+      "text": "Asked: Is it like a set of steps to solve a problem?",
+      "confidence": 0.86,
+      "approved": true,
+      "reviewRequired": false,
+      "sourceLine": "[00:00:57] Student (Priya Mehta): Is it like a set of steps to solve a problem?"
+    },
+    {
+      "id": "p-priya-mehta-1-mpnhjwa8-n7ahun",
+      "studentId": "priya-mehta",
+      "type": "asked_question",
+      "text": "Asked: Break it into smaller parts?",
+      "confidence": 0.86,
+      "approved": true,
+      "reviewRequired": false,
+      "sourceLine": "[00:11:48] Student (Priya Mehta): Break it into smaller parts?"
+    },
+    {
+      "id": "p-keisha-brown-0-mpnhjwa8-n7ahun",
+      "studentId": "keisha-brown",
+      "type": "chat",
+      "text": "Shared: Step 1, pick up the bread bag and put two slices on the plate.",
+      "confidence": 0.86,
+      "approved": true,
+      "reviewRequired": false,
+      "sourceLine": "[00:10:31] Student (Keisha Brown): Step 1, pick up the bread bag and put two slices on the plate."
+    }
+  ],
+  "followUps": [
+    {
+      "studentId": "aaliyah-carter",
+      "reminder": "Review CS4All Intro to Computational Thinking - Period 4 and complete the assigned follow-up.",
+      "catchUp": "You were marked present. Use the recap and resources to confirm the main takeaways.",
+      "tasks": [
+        "Homework for Thursday: complete the algorithm design worksheet on Google Classroom."
+      ],
+      "dueDate": "2026-05-30",
+      "status": "reviewed",
+      "score": 100
+    },
+    {
+      "studentId": "danny-reyes",
+      "reminder": "Review CS4All Intro to Computational Thinking - Period 4 and complete the assigned follow-up.",
+      "catchUp": "You were marked present. Use the recap and resources to confirm the main takeaways.",
+      "tasks": [
+        "Homework for Thursday: complete the algorithm design worksheet on Google Classroom."
+      ],
+      "dueDate": "2026-05-30",
+      "status": "todo",
+      "score": 52
+    },
+    {
+      "studentId": "jalen-thompson",
+      "reminder": "Review CS4All Intro to Computational Thinking - Period 4 and complete the assigned follow-up.",
+      "catchUp": "Your dashboard connects your class participation to the follow-up work.",
+      "tasks": [
+        "Homework for Thursday: complete the algorithm design worksheet on Google Classroom."
+      ],
+      "dueDate": "2026-05-30",
+      "status": "todo",
+      "score": 58
+    },
+    {
+      "studentId": "priya-mehta",
+      "reminder": "Start with the answer to your question, then complete the shared class follow-up.",
+      "catchUp": "Your dashboard includes the shared class recap plus a review task tied to the question you asked.",
+      "tasks": [
+        "Homework for Thursday: complete the algorithm design worksheet on Google Classroom.",
+        "Review the answer to your question: Is it like a set of steps to solve a problem?"
+      ],
+      "dueDate": "2026-05-30",
+      "status": "todo",
+      "score": 59
+    },
+    {
+      "studentId": "keisha-brown",
+      "reminder": "Review CS4All Intro to Computational Thinking - Period 4 and complete the assigned follow-up.",
+      "catchUp": "Your dashboard connects your class participation to the follow-up work.",
+      "tasks": [
+        "Homework for Thursday: complete the algorithm design worksheet on Google Classroom."
+      ],
+      "dueDate": "2026-05-30",
+      "status": "todo",
+      "score": 58
+    },
+    {
+      "studentId": "leo-fernandez",
+      "reminder": "Review CS4All Intro to Computational Thinking - Period 4 and complete the assigned follow-up.",
+      "catchUp": "You were marked present. Use the recap and resources to confirm the main takeaways.",
+      "tasks": [
+        "Homework for Thursday: complete the algorithm design worksheet on Google Classroom."
+      ],
+      "dueDate": "2026-05-30",
+      "status": "todo",
+      "score": 52
+    }
+  ],
+  "submissions": [
+    {
+      "studentId": "aaliyah-carter",
+      "sessionId": "session-generated-mpnhjwa8-n7ahun",
+      "status": "reviewed",
+      "note": "Finished the worksheet draft; link attached.",
+      "attachmentUrl": "https://docs.google.com/document/d/test-edit",
+      "submittedAt": "2026-05-27T03:11:10.794Z",
+      "reviewedAt": "2026-05-27T03:11:17.028Z"
+    },
+    {
+      "studentId": "danny-reyes",
+      "sessionId": "session-generated-mpnhjwa8-n7ahun",
+      "status": "todo",
+      "note": ""
+    },
+    {
+      "studentId": "jalen-thompson",
+      "sessionId": "session-generated-mpnhjwa8-n7ahun",
+      "status": "todo",
+      "note": ""
+    },
+    {
+      "studentId": "priya-mehta",
+      "sessionId": "session-generated-mpnhjwa8-n7ahun",
+      "status": "todo",
+      "note": ""
+    },
+    {
+      "studentId": "keisha-brown",
+      "sessionId": "session-generated-mpnhjwa8-n7ahun",
+      "status": "todo",
+      "note": ""
+    },
+    {
+      "studentId": "leo-fernandez",
+      "sessionId": "session-generated-mpnhjwa8-n7ahun",
+      "status": "todo",
+      "note": ""
+    }
+  ],
+  "unmatchedParticipants": [],
+  "importWarnings": [],
+  "transcriptAliases": {},
+  "emailDelivery": {
+    "status": "not_sent",
+    "recipients": [],
+    "skipped": []
+  },
+  "ownerEmail": "teacher@classloop.demo",
+  "publishAudit": [
+    {
+      "sessionId": "session-generated-mpnhjwa8-n7ahun",
+      "type": "class_recap",
+      "message": "Class recap, 4 action items, and 2 resources will be published.",
+      "createdAt": "2026-05-27T03:10:30.161Z"
+    },
+    {
+      "sessionId": "session-generated-mpnhjwa8-n7ahun",
+      "studentId": "aaliyah-carter",
+      "type": "student_followup",
+      "message": "Aaliyah Carter: Individual action item; 1 shared tasks, 0 personalized tasks.",
+      "createdAt": "2026-05-27T03:10:30.161Z"
+    },
+    {
+      "sessionId": "session-generated-mpnhjwa8-n7ahun",
+      "studentId": "danny-reyes",
+      "type": "student_followup",
+      "message": "Danny Reyes: Individual action item; 1 shared tasks, 0 personalized tasks.",
+      "createdAt": "2026-05-27T03:10:30.161Z"
+    },
+    {
+      "sessionId": "session-generated-mpnhjwa8-n7ahun",
+      "studentId": "jalen-thompson",
+      "type": "student_followup",
+      "message": "Jalen Thompson: Useful chat; 1 shared tasks, 0 personalized tasks.",
+      "createdAt": "2026-05-27T03:10:30.161Z"
+    },
+    {
+      "sessionId": "session-generated-mpnhjwa8-n7ahun",
+      "studentId": "priya-mehta",
+      "type": "student_followup",
+      "message": "Priya Mehta: Asked question; 1 shared tasks, 1 personalized tasks.",
+      "createdAt": "2026-05-27T03:10:30.161Z"
+    },
+    {
+      "sessionId": "session-generated-mpnhjwa8-n7ahun",
+      "studentId": "keisha-brown",
+      "type": "student_followup",
+      "message": "Keisha Brown: Useful chat; 1 shared tasks, 0 personalized tasks.",
+      "createdAt": "2026-05-27T03:10:30.161Z"
+    },
+    {
+      "sessionId": "session-generated-mpnhjwa8-n7ahun",
+      "studentId": "leo-fernandez",
+      "type": "student_followup",
+      "message": "Leo Fernandez: Individual action item; 1 shared tasks, 0 personalized tasks.",
+      "createdAt": "2026-05-27T03:10:30.161Z"
+    }
+  ]
+}

@@ -4227,8 +4227,8 @@ function LoginPage({
 }) {
   const [authScreen, setAuthScreen] = useState<"entry" | "form">(demoOnly ? "form" : "entry");
   const [mode, setMode] = useState<"signin" | "create">("signin");
-  const [role, setRole] = useState<AuthRole | null>(demoOnly ? "teacher" : null);
-  const [accountPath, setAccountPath] = useState<"individual" | "class" | null>(demoOnly ? "class" : null);
+  const [role, setRole] = useState<AuthRole | null>("teacher");
+  const [accountPath, setAccountPath] = useState<"individual" | "class" | null>("class");
   const [name, setName] = useState("");
   const [email, setEmail] = useState(demoOnly ? demoTeacherEmail : "");
   const [password, setPassword] = useState(demoOnly ? "classloop-teacher" : "");
@@ -4267,7 +4267,7 @@ function LoginPage({
 
   const chooseAccountPath = (nextPath: "individual" | "class") => {
     setAccountPath(nextPath);
-    setRole(nextPath === "individual" ? "individual" : null);
+    setRole(nextPath === "individual" ? "individual" : "teacher");
     setError("");
     setNotice("");
     setResetMessage("");
@@ -4280,8 +4280,8 @@ function LoginPage({
     }
     setAuthScreen("form");
     setMode(nextMode);
-    setRole(demoOnly ? "teacher" : null);
-    setAccountPath(demoOnly ? "class" : null);
+    setRole("teacher");
+    setAccountPath("class");
     setError("");
     setNotice("");
     setPassword(demoOnly ? "classloop-teacher" : "");
@@ -4600,11 +4600,6 @@ function LoginPage({
           {accountPath === "individual" && (
             <p className="demo-login-note">
               Individual accounts are free and focused on your own pasted meeting minutes, recap, and tasks.
-            </p>
-          )}
-          {!hasChosenAccount && (
-            <p className="auth-choice-hint" role="status">
-              Choose Individual, Teacher, or Student to reveal the account fields.
             </p>
           )}
           {hasChosenAccount && (

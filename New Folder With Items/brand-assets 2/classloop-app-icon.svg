@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ClassLoop app icon">
+  <defs>
+    <linearGradient id="classloopIconGradient" x1="64" y1="56" x2="448" y2="456" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e7f37a"/>
+      <stop offset="0.52" stop-color="#5ee0bc"/>
+      <stop offset="1" stop-color="#6cc4ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="118" fill="#0f172a"/>
+  <rect x="54" y="54" width="404" height="404" rx="96" fill="url(#classloopIconGradient)"/>
+  <path d="M252 139c-39 0-69 30-69 68v4c-23 9-39 31-39 57 0 34 27 62 61 62h7v36c0 11 9 20 20 20s20-9 20-20v-36h38v36c0 11 9 20 20 20s20-9 20-20v-37c35-5 62-35 62-71 0-36-26-66-60-71-8-28-34-48-80-48Zm0 40c27 0 42 12 42 36v12h25c19 0 33 14 33 31s-14 31-31 31H205c-12 0-21-9-21-21 0-10 7-19 18-21l21-4v-36c0-16 13-28 29-28Z" fill="#10202d"/>
+  <path d="M164 157h-33v-33c0-10-8-18-18-18s-18 8-18 18v33H62c-10 0-18 8-18 18s8 18 18 18h33v33c0 10 8 18 18 18s18-8 18-18v-33h33c10 0 18-8 18-18s-8-18-18-18Zm280 196h-33v-33c0-10-8-18-18-18s-18 8-18 18v33h-33c-10 0-18 8-18 18s8 18 18 18h33v33c0 10 8 18 18 18s18-8 18-18v-33h33c10 0 18-8 18-18s-8-18-18-18Z" fill="#10202d" opacity=".86"/>
+</svg>

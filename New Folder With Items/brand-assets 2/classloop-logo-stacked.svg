@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 768 768" role="img" aria-label="ClassLoop stacked logo">
+  <defs>
+    <linearGradient id="classloopStackedGradient" x1="248" y1="112" x2="520" y2="392" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e7f37a"/>
+      <stop offset="0.52" stop-color="#5ee0bc"/>
+      <stop offset="1" stop-color="#6cc4ff"/>
+    </linearGradient>
+  </defs>
+  <rect x="234" y="96" width="300" height="300" rx="76" fill="#0f172a"/>
+  <rect x="264" y="126" width="240" height="240" rx="58" fill="url(#classloopStackedGradient)"/>
+  <path d="M384 173c-40 0-70 31-70 69v4c-24 9-40 31-40 58 0 34 28 62 62 62h7v37c0 11 9 20 20 20s20-9 20-20v-36h38v36c0 11 9 20 20 20s20-9 20-20v-37c35-5 62-35 62-72 0-36-26-66-61-71-8-29-35-50-78-50Zm0 41c27 0 42 12 42 36v12h25c19 0 33 14 33 32 0 17-14 31-31 31H336c-12 0-21-9-21-21 0-10 8-19 18-21l22-4v-37c0-16 13-28 29-28Z" fill="#10202d"/>
+  <path d="M306 196h-24v-24c0-9-7-16-16-16s-16 7-16 16v24h-24c-9 0-16 7-16 16s7 16 16 16h24v24c0 9 7 16 16 16s16-7 16-16v-24h24c9 0 16-7 16-16s-7-16-16-16Zm236 159h-24v-24c0-9-7-16-16-16s-16 7-16 16v24h-24c-9 0-16 7-16 16s7 16 16 16h24v24c0 9 7 16 16 16s16-7 16-16v-24h24c9 0 16-7 16-16s-7-16-16-16Z" fill="#10202d" opacity=".86"/>
+  <text x="384" y="535" text-anchor="middle" fill="#0f172a" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="92" font-weight="850" letter-spacing="0">ClassLoop</text>
+  <text x="384" y="590" text-anchor="middle" fill="#475569" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="28" font-weight="700" letter-spacing="2">CLASSROOM FOLLOW-THROUGH</text>
+</svg>

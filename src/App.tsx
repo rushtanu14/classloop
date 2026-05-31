@@ -4250,6 +4250,9 @@ function LoginPage({
   const hasChosenAccount = role !== null;
   const selectedAccountLabel =
     role === "individual" ? "Individual" : role === "teacher" ? "Teacher" : role === "student" ? "Student" : "Account";
+  const alternateMode = mode === "signin" ? "create" : "signin";
+  const alternateModeLabel = mode === "signin" ? "Create account" : "Sign in";
+  const alternateModePrompt = mode === "signin" ? "New to ClassLoop?" : "Already have an account?";
 
   useEffect(() => {
     if (!demoOnly || mode !== "signin") return;
@@ -4505,19 +4508,30 @@ function LoginPage({
   return (
     <main className="login-page">
       <section className="login-panel">
-        <div className="login-brand">
-          <span className="brand-mark">
-            <BrainCircuit size={26} />
-          </span>
-          <div>
-            <strong>ClassLoop</strong>
-            <small>Personal and classroom continuity</small>
-            {classLoopBuildMarker() && (
-              <small className="login-build-marker" title={classLoopBuildDetails()}>
-                {classLoopBuildMarker()}
-              </small>
-            )}
+        <div className="login-header">
+          <div className="login-brand">
+            <span className="brand-mark">
+              <BrainCircuit size={26} />
+            </span>
+            <div>
+              <strong>ClassLoop</strong>
+              <small>Personal and classroom continuity</small>
+              {classLoopBuildMarker() && (
+                <small className="login-build-marker" title={classLoopBuildDetails()}>
+                  {classLoopBuildMarker()}
+                </small>
+              )}
+            </div>
           </div>
+          <button
+            type="button"
+            className="auth-mode-link"
+            aria-label={`${alternateModePrompt} ${alternateModeLabel}`}
+            onClick={() => chooseMode(alternateMode)}
+          >
+            <span>{alternateModePrompt}</span>
+            {alternateModeLabel}
+          </button>
         </div>
         {workspaceNotice && <WorkspaceRecoveryNotice notice={workspaceNotice} />}
         <div className="login-copy">
@@ -4530,20 +4544,6 @@ function LoginPage({
           </p>
         </div>
         <form className="login-form" onSubmit={submit}>
-          <div className="auth-switch" aria-label="Sign in or create an account">
-            <button type="button" className={mode === "signin" ? "active" : ""} onClick={() => chooseMode("signin")}>
-              Sign in
-            </button>
-            <button
-              type="button"
-              className={mode === "create" ? "active" : ""}
-              onClick={() => chooseMode("create")}
-              disabled={demoOnly}
-              title={demoOnly ? "Create your own account in the downloaded desktop app." : undefined}
-            >
-              Create account
-            </button>
-          </div>
           {demoOnly && (
             <p className="demo-login-note">
               Web demo mode uses sample credentials only. Your changes will reset and will not be saved.

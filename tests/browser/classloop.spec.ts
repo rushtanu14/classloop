@@ -22,12 +22,12 @@ async function resetBrowser(page: Page) {
 async function openSignInForm(page: Page) {
   const signInHeading = page.getByText(/Sign in to ClassLoop/i);
   if (await signInHeading.isVisible().catch(() => false)) return;
-  await page.waitForSelector(".auth-entry-actions, .auth-switch", { timeout: 15_000 });
+  await page.waitForSelector(".auth-entry-actions, .auth-mode-link", { timeout: 15_000 });
   const entryLogin = page.locator(".auth-entry-actions").getByRole("button", { name: /^log in$/i });
   if (await entryLogin.isVisible().catch(() => false)) {
     await entryLogin.click();
   } else {
-    await page.locator(".auth-switch").getByRole("button", { name: /^sign in$/i }).click();
+    await page.locator(".auth-mode-link").click();
   }
   await expect(signInHeading).toBeVisible();
 }
@@ -35,12 +35,12 @@ async function openSignInForm(page: Page) {
 async function openCreateAccountForm(page: Page) {
   const createHeading = page.getByText(/Create your ClassLoop account/i);
   if (await createHeading.isVisible().catch(() => false)) return;
-  await page.waitForSelector(".auth-entry-actions, .auth-switch", { timeout: 15_000 });
+  await page.waitForSelector(".auth-entry-actions, .auth-mode-link", { timeout: 15_000 });
   const entryCreate = page.locator(".auth-entry-actions").getByRole("button", { name: /^create account$/i });
   if (await entryCreate.isVisible().catch(() => false)) {
     await entryCreate.click();
   } else {
-    await page.locator(".auth-switch").getByRole("button", { name: /^create account$/i }).click();
+    await page.locator(".auth-mode-link").click();
   }
   await expect(createHeading).toBeVisible();
 }

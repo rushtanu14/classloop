@@ -1399,11 +1399,23 @@ select:focus-visible,
   box-shadow: var(--shadow);
 }
 
-.login-brand {
+.login-header {
   grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.login-brand {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+}
+
+.login-brand > div {
+  min-width: 0;
 }
 
 .login-brand strong,
@@ -1414,6 +1426,7 @@ select:focus-visible,
 .login-brand small {
   margin-top: 2px;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .login-build-marker {
@@ -1421,6 +1434,38 @@ select:focus-visible,
   font-size: 0.85rem;
   color: rgba(10, 19, 33, 0.62);
   letter-spacing: 0.01em;
+}
+
+.auth-mode-link {
+  display: inline-grid;
+  justify-items: end;
+  gap: 2px;
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 3px 0;
+  border: 0;
+  border-radius: 10px;
+  color: #0f766e;
+  background: transparent;
+  text-align: right;
+  font-weight: 900;
+}
+
+.auth-mode-link span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.auth-mode-link:hover {
+  color: #0f3d39;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.auth-mode-link:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.9);
+  outline-offset: 4px;
 }
 
 .login-copy h1 {
@@ -1536,41 +1581,6 @@ select:focus-visible,
 
 .login-side {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.auth-switch {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px;
-  padding: 5px;
-  border: 1px solid rgba(119, 134, 153, 0.24);
-  border-radius: 999px;
-  background: #fffefa;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.58);
-}
-
-.auth-switch button {
-  min-height: 38px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: 999px;
-  color: var(--muted);
-  background: transparent;
-  font-weight: 900;
-  font-size: clamp(0.92rem, 3.2vw, 1rem);
-  white-space: nowrap;
-}
-
-.auth-switch button.active {
-  color: var(--heading);
-  background: var(--primary-soft);
-  box-shadow: 0 8px 18px rgba(15, 118, 110, 0.1);
-}
-
-.auth-switch button:disabled {
-  color: #8a94a3;
-  background: transparent;
-  opacity: 0.75;
 }
 
 .role-tabs {
@@ -4900,7 +4910,6 @@ th {
 }
 
 :root[data-theme="abyssal"] .role-tabs,
-:root[data-theme="abyssal"] .auth-switch,
 :root[data-theme="abyssal"] .student-picker-item {
   border-color: rgba(186, 230, 253, 0.18);
   background: rgba(5, 18, 35, 0.58);
@@ -5134,6 +5143,7 @@ th {
 
 :root[data-theme="abyssal"] :is(
   .login-brand small,
+  .auth-mode-link span,
   .login-copy p,
   .modal-header p,
   .login-help span,
@@ -5188,6 +5198,7 @@ th {
 ),
 :root[data-theme="graphite"] :is(
   .login-brand small,
+  .auth-mode-link span,
   .login-copy p,
   .modal-header p,
   .login-help span,
@@ -5285,7 +5296,6 @@ th {
 }
 
 :root[data-theme="abyssal"] :is(
-  .auth-switch,
   .role-tabs,
   .ghost-button,
   .account-pill,
@@ -5299,7 +5309,6 @@ th {
   .snapshot-row div
 ),
 :root[data-theme="graphite"] :is(
-  .auth-switch,
   .role-tabs,
   .ghost-button,
   .account-pill,
@@ -5317,13 +5326,18 @@ th {
   background: var(--readable-card-soft);
 }
 
-:root[data-theme="abyssal"] :is(.auth-switch button, .role-tabs button, .password-control button),
-:root[data-theme="graphite"] :is(.auth-switch button, .role-tabs button, .password-control button) {
+:root[data-theme="abyssal"] .auth-mode-link,
+:root[data-theme="graphite"] .auth-mode-link {
+  color: #7dd3fc;
+}
+
+:root[data-theme="abyssal"] :is(.role-tabs button, .password-control button),
+:root[data-theme="graphite"] :is(.role-tabs button, .password-control button) {
   color: var(--readable-muted);
 }
 
-:root[data-theme="abyssal"] :is(.auth-switch button.active, .role-tabs button.active),
-:root[data-theme="graphite"] :is(.auth-switch button.active, .role-tabs button.active) {
+:root[data-theme="abyssal"] :is(.role-tabs button.active),
+:root[data-theme="graphite"] :is(.role-tabs button.active) {
   color: #06111f;
   background: linear-gradient(135deg, #bae6fd, #38bdf8);
 }
@@ -6475,7 +6489,7 @@ th {
     grid-template-columns: 1fr;
   }
 
-  .login-brand,
+  .login-header,
   .login-help,
   .password-reset-panel {
     grid-column: auto;
@@ -6655,6 +6669,14 @@ th {
 
   .login-panel {
     padding: 20px;
+  }
+
+  .login-header {
+    gap: 10px;
+  }
+
+  .auth-mode-link span {
+    display: none;
   }
 
   .loader-card {

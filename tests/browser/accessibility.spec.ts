@@ -48,12 +48,12 @@ async function resetBrowser(page: Page) {
 async function openSignInForm(page: Page) {
   const signInHeading = page.getByText(/Sign in to ClassLoop/i);
   if (await signInHeading.isVisible().catch(() => false)) return;
-  await page.waitForSelector(".auth-entry-actions, .auth-switch", { timeout: 15_000 });
+  await page.waitForSelector(".auth-entry-actions, .auth-mode-link", { timeout: 15_000 });
   const entryLogin = page.locator(".auth-entry-actions").getByRole("button", { name: /^log in$/i });
   if (await entryLogin.isVisible().catch(() => false)) {
     await entryLogin.click();
   } else {
-    await page.locator(".auth-switch").getByRole("button", { name: /^sign in$/i }).click();
+    await page.locator(".auth-mode-link").click();
   }
   await expect(signInHeading).toBeVisible();
 }
@@ -96,8 +96,7 @@ test.describe("WCAG-targeted accessibility checks", () => {
       page.getByRole("tablist", { name: /choose class role/i }).getByRole("tab", { name: /teacher/i }),
     ).toHaveAttribute("aria-selected", "true");
     await expectKeyboardFocusOrder(page, [
-      /^Sign in$/,
-      /^Create account$/,
+      /Create account$/,
       /^Individual$/,
       /^Class$/,
       /^Teacher$/,

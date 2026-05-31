@@ -491,6 +491,10 @@ test("public root shows landing page and can enter the app demo", async ({ page 
     await expect(appleSiliconDmg).toBeVisible();
     await expect(appleSiliconDmg).toContainText(/Recommended default/i);
     await expect(appleSiliconDmg).toContainText(/M-series Macs arm64 installer/i);
+    const swiftPreview = platformDownloads.getByRole("button", { name: /macOS Swift preview/i });
+    await expect(swiftPreview).toBeVisible();
+    await expect(swiftPreview).toContainText(/Source ready/i);
+    await expect(swiftPreview).toContainText(/npm run swift:mac:build/i);
     await expect(platformDownloads.getByRole("button", { name: /macOS \(Intel/i })).toHaveCount(0);
   }
   await expect(page.locator(".landing-mobile-band").getByRole("button", { name: /add .*to phone/i })).toBeVisible();

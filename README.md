@@ -198,10 +198,24 @@ The test suite covers import parsing, noisy transcripts and rosters, teacher/stu
 
 ## Desktop Packaging
 
+All desktop packaging commands run `npm run package:prepare` first. That rebuilds the shared Vite `dist/` output and verifies that macOS, Windows, Linux, and the Swift macOS preview are wired to that same local build, so local changes are not left behind in one platform version.
+
 Build the Apple silicon macOS package:
 
 ```bash
 npm run package:mac
+```
+
+Build the native Swift macOS preview:
+
+```bash
+npm run swift:mac:build
+```
+
+Run the Swift preview against the local web build:
+
+```bash
+npm run swift:mac:run
 ```
 
 Build Windows or Linux packages:
@@ -209,6 +223,12 @@ Build Windows or Linux packages:
 ```bash
 npm run package:win
 npm run package:linux
+```
+
+Build every desktop target from the same prepared local source when the host has the required platform tooling:
+
+```bash
+npm run package:all
 ```
 
 Generate checksums:

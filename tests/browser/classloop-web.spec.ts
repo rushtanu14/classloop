@@ -115,6 +115,10 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
     await expect(appleSiliconDmg).toBeVisible();
     await expect(appleSiliconDmg).toContainText(/Recommended default/i);
     await expect(appleSiliconDmg).toContainText(/M-series Macs arm64 installer/i);
+    const swiftPreview = platformDownloads.getByRole("button", { name: /macOS Swift preview/i });
+    await expect(swiftPreview).toBeVisible();
+    await expect(swiftPreview).toContainText(/Source ready/i);
+    await expect(swiftPreview).toContainText(/npm run swift:mac:build/i);
     await expect(platformDownloads.getByRole("button", { name: /macOS \(Intel/i })).toHaveCount(0);
   }
 

@@ -1,4 +1,5 @@
 node_modules
+.build
 .test-build
 .env.local
 .env.*.local

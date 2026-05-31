@@ -19,6 +19,10 @@ Usage:
   ./run.sh --check-env        Validate launcher env loading without starting app
   ./run.sh --packaged [path]  Launch a packaged app build
   ./run.sh --package-mac      Build the Apple silicon macOS DMG/ZIP
+  ./run.sh --package-win      Build Windows x64/arm64 packages
+  ./run.sh --package-linux    Build Linux x64/arm64 AppImages
+  ./run.sh --package-swift-mac Build the native Swift macOS preview
+  ./run.sh --package-all      Build all desktop variants from the current local source
   ./run.sh --help             Show this help
 
 Environment:
@@ -200,6 +204,26 @@ package_macos() {
   npm run package:mac
 }
 
+package_windows() {
+  npm run package:win
+}
+
+package_linux() {
+  npm run package:linux
+}
+
+package_swift_macos() {
+  if [ "$(uname -s)" != "Darwin" ]; then
+    echo "Swift macOS preview builds must run on macOS." >&2
+    exit 1
+  fi
+  npm run swift:mac:build
+}
+
+package_all_desktops() {
+  npm run package:all
+}
+
 case "$mode" in
   --help)
     usage
@@ -229,6 +253,30 @@ case "$mode" in
     load_local_env
     ensure_dependencies
     package_macos
+    ;;
+  --package-win)
+    require_local_toolchain
+    load_local_env
+    ensure_dependencies
+    package_windows
+    ;;
+  --package-linux)
+    require_local_toolchain
+    load_local_env
+    ensure_dependencies
+    package_linux
+    ;;
+  --package-swift-mac)
+    require_local_toolchain
+    load_local_env
+    ensure_dependencies
+    package_swift_macos
+    ;;
+  --package-all)
+    require_local_toolchain
+    load_local_env
+    ensure_dependencies
+    package_all_desktops
     ;;
   *)
     echo "Unknown ClassLoop launcher option: $mode" >&2

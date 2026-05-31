@@ -158,6 +158,7 @@ type ReleasePlatformManifest = {
   zipUrl?: string;
   x64ZipUrl?: string;
   arm64ZipUrl?: string;
+  sourceUrl?: string;
 };
 
 type ReleaseDownloadManifest = {
@@ -341,6 +342,7 @@ function normalizeReleasePlatformManifest(value: unknown): ReleasePlatformManife
     zipUrl: readManifestString(value.zipUrl),
     x64ZipUrl: readManifestString(value.x64ZipUrl),
     arm64ZipUrl: readManifestString(value.arm64ZipUrl),
+    sourceUrl: readManifestString(value.sourceUrl),
   };
 }
 
@@ -380,6 +382,7 @@ function releaseManifestHasBlockedUrls(manifest: ReleaseDownloadManifest) {
     manifest.macos?.zipUrl,
     manifest.macos?.x64ZipUrl,
     manifest.macos?.arm64ZipUrl,
+    manifest.macos?.sourceUrl,
     manifest.windows?.url,
     manifest.windows?.x64Url,
     manifest.windows?.arm64Url,
@@ -3167,12 +3170,14 @@ function LandingPage({
     helper: string;
     badge?: string;
     url?: string;
+    kind?: "installer" | "source";
   };
 
   const macArm64Url = cleanExternalReleaseUrl(releaseDownloads.macos?.arm64Url);
   const macUrl = cleanExternalReleaseUrl(releaseDownloads.macos?.url);
   const macArm64ZipUrl = cleanExternalReleaseUrl(releaseDownloads.macos?.arm64ZipUrl);
   const macZipUrl = cleanExternalReleaseUrl(releaseDownloads.macos?.zipUrl);
+  const macSwiftSourceUrl = cleanExternalReleaseUrl(releaseDownloads.macos?.sourceUrl);
   const macOptions: DesktopDownloadOption[] = [];
   if (macArm64Url) {
     macOptions.push({
@@ -3205,6 +3210,16 @@ function LandingPage({
       label: "macOS",
       helper: "Apple silicon Macs",
       url: macUrl,
+    });
+  }
+  if (macSwiftSourceUrl) {
+    macOptions.push({
+      id: "macos",
+      label: "macOS Swift preview",
+      helper: "Native Swift/WKWebView source; build locally with npm run swift:mac:build.",
+      badge: "Preview source",
+      url: macSwiftSourceUrl,
+      kind: "source",
     });
   }
 
@@ -3298,7 +3313,11 @@ function LandingPage({
   const detectedDownload = downloadOptions.find((option) => option.id === detectedInstallerId) ?? null;
   const fallbackDownload = detectedDownload ?? downloadOptions[0];
   const downloadButtonLabel = (option: (typeof downloadOptions)[number]) =>
-    option.url ? `Download ${option.label}` : `${option.label} packaging pending`;
+    option.url
+      ? option.kind === "source"
+        ? `Open ${option.label}`
+        : `Download ${option.label}`
+      : `${option.label} packaging pending`;
   const releaseManifestMessage: string | null =
     releaseManifestStatus === "unavailable"
       ? "Desktop installer manifest is unavailable, so installers stay Packaging pending until the tiny download manifest can be fetched."
@@ -3986,7 +4005,7 @@ function LandingPage({
                       <Download size={16} />
                       <span>
                         <strong>{option.label}</strong>
-                        <small>{option.url ? "Download ready" : "Packaging pending"}</small>
+                        <small>{option.url ? (option.kind === "source" ? "Source ready" : "Download ready") : "Packaging pending"}</small>
                         <em>{option.badge ? `${option.badge} - ${option.helper}` : option.helper}</em>
                       </span>
                     </button>

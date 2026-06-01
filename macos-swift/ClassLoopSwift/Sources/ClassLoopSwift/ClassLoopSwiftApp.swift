@@ -376,7 +376,16 @@ struct ClassLoopWebView: NSViewRepresentable {
       coordinator.localLoadGeneration += 1
       let loadGeneration = coordinator.localLoadGeneration
 
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak webView, weak coordinator] in
+      if !coordinator.startupRecoveryScheduled {
+        coordinator.startupRecoveryScheduled = true
+        for delay in [0.75, 1.75] {
+          DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak webView] in
+            webView?.load(request)
+          }
+        }
+      }
+
+      DispatchQueue.main.asyncAfter(deadline: .now() + 2.75) { [weak webView, weak coordinator] in
         guard
           let webView,
           let coordinator,
@@ -402,6 +411,7 @@ struct ClassLoopWebView: NSViewRepresentable {
   final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
     var reloadRequested = false
     var localLoadGeneration = 0
+    var startupRecoveryScheduled = false
 
     func webView(
       _ webView: WKWebView,

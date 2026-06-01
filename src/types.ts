@@ -73,6 +73,53 @@ export type PersonalTask = {
   source: string;
 };
 
+export type PersonalNextMeeting = {
+  title: string;
+  date: string;
+  time: string;
+  durationMinutes: number;
+  description: string;
+};
+
+export type PersonalDocsSummary = {
+  title: string;
+  body: string;
+};
+
+export type PersonalEmailDraft = {
+  subject: string;
+  body: string;
+  recipients: string[];
+};
+
+export type TranscriptSource =
+  | "paste"
+  | "file"
+  | "zoom_cloud_transcript"
+  | "live_transcription"
+  | "audio_recording"
+  | "screen_recording"
+  | "whisper_transcription";
+
+export type TranscriptSegment = {
+  id: string;
+  speaker: string;
+  text: string;
+  startSeconds?: number;
+  endSeconds?: number;
+};
+
+export type StructuredTranscript = {
+  title: string;
+  source: TranscriptSource;
+  model?: string;
+  language?: string;
+  durationSeconds?: number;
+  generatedAt: string;
+  text: string;
+  segments: TranscriptSegment[];
+};
+
 export type PersonalMeeting = {
   id: string;
   ownerEmail: string;
@@ -84,6 +131,10 @@ export type PersonalMeeting = {
   resources: Resource[];
   questions: string[];
   tasks: PersonalTask[];
+  nextMeeting?: PersonalNextMeeting;
+  docsSummary?: PersonalDocsSummary;
+  emailDraft?: PersonalEmailDraft;
+  structuredTranscript?: StructuredTranscript;
   createdAt: string;
   updatedAt: string;
 };
@@ -149,7 +200,7 @@ export type SessionCapture = {
   sourceLabel: string;
   capturedAt: string;
   durationSeconds?: number;
-  transcriptSource: "file" | "paste" | "zoom_cloud_transcript" | "live_transcription" | "audio_recording";
+  transcriptSource: TranscriptSource;
 };
 
 export type SessionEmailDelivery = {
@@ -192,6 +243,7 @@ export type Session = {
   transcript: string;
   notes: string;
   capture?: SessionCapture;
+  structuredTranscript?: StructuredTranscript;
   recap: string;
   essentialQuestions: string[];
   attendance: Record<string, AttendanceStatus>;

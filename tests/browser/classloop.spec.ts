@@ -620,6 +620,9 @@ test("teacher can scaffold Classroom roster/resources and Zoom cloud transcript 
   await expect(page.getByText(/Imported Audio transcript VTT from CS4All Intro to Computational Thinking/i)).toBeVisible();
   await page.getByRole("button", { name: /generate draft/i }).click();
   await expect(page.getByText(/edit the draft before publishing/i)).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("tab", { name: /^transcript$/i }).click();
+  await expect(page.getByText(/CS4All Intro to Computational Thinking transcript/i)).toBeVisible();
+  await expect(page.getByText(/Priya Mehta/i).first()).toBeVisible();
   await page.getByRole("tab", { name: /roster & matching/i }).click();
   await expect
     .poll(async () =>
@@ -672,8 +675,15 @@ Minutes:
 
   await expect(page.getByText(/Personal meeting review/i)).toBeVisible();
   await expect(page.getByRole("heading", { name: `Personal Launch Sync ${runId}` })).toBeVisible();
-  await expect(page.getByText(/Should the personal dashboard stay paste only/i)).toBeVisible();
-  await expect(page.getByText(/example.com\/personal-template/i)).toBeVisible();
+  await expect(page.getByText(/Should the personal dashboard stay paste only/i).first()).toBeVisible();
+  await expect(page.getByText(/example.com\/personal-template/i).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Transcript/i })).toBeVisible();
+  await expect(page.getByText(/Personal Launch Sync.*transcript/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Follow-through automations/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /add to calendar/i })).toBeEnabled();
+  await expect(page.getByRole("button", { name: /open email draft/i })).toBeDisabled();
+  await page.getByLabel(/I reviewed and approve opening this email draft/i).check();
+  await expect(page.getByRole("button", { name: /open email draft/i })).toBeEnabled();
 
   const taskRow = page.locator(".personal-task-row").filter({ hasText: /send the google docs copy link/i }).first();
   await taskRow.locator("select").selectOption("complete");

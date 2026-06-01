@@ -2,17 +2,23 @@ import type {
   ActionItem,
   ImportQualityWarning,
   ParticipationEvent,
+  PersonalDocsSummary,
+  PersonalEmailDraft,
   PersonalMeeting,
+  PersonalNextMeeting,
   PersonalTask,
   Resource,
   Session,
   SessionCaptureMode,
   SessionType,
+  StructuredTranscript,
   Student,
   StudentFollowUp,
   StudentSubmission,
+  TranscriptSource,
   UnmatchedParticipant,
 } from "./types";
+import { createStructuredTranscriptFromText } from "./transcript.js";
 
 export const sampleTranscript = `Teacher: Today we are reviewing similar triangles and how AA similarity lets us prove triangles are similar when two angle pairs match.
 Teacher: We will use proportions to find missing side lengths. Remember, corresponding sides need to be matched in the same order.
@@ -55,7 +61,8 @@ export type ImportDraftInput = {
   captureMode?: SessionCaptureMode;
   captureSourceLabel?: string;
   captureDurationSeconds?: number;
-  transcriptSource?: "file" | "paste" | "zoom_cloud_transcript" | "live_transcription" | "audio_recording";
+  transcriptSource?: TranscriptSource;
+  structuredTranscript?: StructuredTranscript;
 };
 
 export type TranscriptTextFile = {
@@ -698,6 +705,7 @@ export type PersonalMeetingDraftInput = {
   ownerEmail: string;
   title: string;
   minutes: string;
+  structuredTranscript?: StructuredTranscript;
 };
 
 function extractTemplateSection(text: string, labels: string[]) {
@@ -784,6 +792,110 @@ function extractPersonalRecap(minutes: string, context: string, title: string) {
   return `${title} focused on ${context || "the pasted meeting context"}. Review the questions, resources, and due dates before closing the loop.`;
 }
 
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function dateInputFromDate(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function inferNextMeetingDate(meetingDate: string) {
+  const parsed = new Date(meetingDate);
+  const base = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  return dateInputFromDate(addDays(base, 7));
+}
+
+function extractEmailAddresses(text: string) {
+  return unique((text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,24}/gi) ?? []).map((email) => email.toLowerCase()));
+}
+
+function createPersonalNextMeeting(title: string, date: string, recap: string, questions: string[], tasks: PersonalTask[]): PersonalNextMeeting {
+  const taskSummary = tasks.slice(0, 4).map((task) => `- ${task.title}${task.dueDateText ? ` (${task.dueDateText})` : ""}`);
+  const questionSummary = questions.slice(0, 4).map((question) => `- ${question}`);
+  return {
+    title: `Follow-up: ${title}`,
+    date: inferNextMeetingDate(date),
+    time: "09:00",
+    durationMinutes: 30,
+    description: [
+      recap,
+      taskSummary.length ? `\nOpen tasks:\n${taskSummary.join("\n")}` : "",
+      questionSummary.length ? `\nQuestions to resolve:\n${questionSummary.join("\n")}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  };
+}
+
+function createPersonalDocsSummary(
+  title: string,
+  date: string,
+  context: string,
+  recap: string,
+  tasks: PersonalTask[],
+  questions: string[],
+  resources: Resource[],
+  transcript?: StructuredTranscript,
+): PersonalDocsSummary {
+  const taskLines = tasks.length ? tasks.map((task) => `- ${task.title}${task.dueDateText ? ` - ${task.dueDateText}` : ""}`) : ["- Review recap"];
+  const questionLines = questions.length ? questions.map((question) => `- ${question}`) : ["- No open questions captured"];
+  const resourceLines = resources.length ? resources.map((resource) => `- ${resource.title}: ${resource.url}`) : ["- No resources captured"];
+  const transcriptLines = transcript?.segments.length
+    ? transcript.segments.slice(0, 20).map((segment) => `- ${segment.speaker}: ${segment.text}`)
+    : ["- No structured transcript saved"];
+  return {
+    title: `${title} summary`,
+    body: [
+      `# ${title}`,
+      `Date: ${date}`,
+      context ? `Context: ${context}` : "",
+      "",
+      "## Recap",
+      recap,
+      "",
+      "## Tasks",
+      taskLines.join("\n"),
+      "",
+      "## Questions",
+      questionLines.join("\n"),
+      "",
+      "## Resources",
+      resourceLines.join("\n"),
+      "",
+      "## Transcript Highlights",
+      transcriptLines.join("\n"),
+    ]
+      .filter((line) => line !== "")
+      .join("\n"),
+  };
+}
+
+function createPersonalEmailDraft(title: string, recap: string, tasks: PersonalTask[], questions: string[], recipients: string[]): PersonalEmailDraft {
+  const taskLines = tasks.slice(0, 6).map((task) => `- ${task.title}${task.dueDateText ? ` (${task.dueDateText})` : ""}`);
+  const questionLines = questions.slice(0, 4).map((question) => `- ${question}`);
+  return {
+    subject: `Follow-up: ${title}`,
+    recipients,
+    body: [
+      "Hi,",
+      "",
+      `Here is the follow-up from ${title}:`,
+      "",
+      recap,
+      "",
+      taskLines.length ? `Tasks:\n${taskLines.join("\n")}` : "",
+      questionLines.length ? `Questions:\n${questionLines.join("\n")}` : "",
+      "",
+      "Thanks!",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  };
+}
+
 export function createPersonalMeetingDraft(input: PersonalMeetingDraftInput): PersonalMeeting {
   const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const minutes = input.minutes.trim();
@@ -793,6 +905,16 @@ export function createPersonalMeetingDraft(input: PersonalMeetingDraftInput): Pe
   const resources = parseResources(extractTemplateSection(minutes, ["Resources"]), minutes, "Personal meeting");
   const questions = extractPersonalQuestions(minutes);
   const tasks = extractPersonalTasks(minutes);
+  const structuredTranscript =
+    input.structuredTranscript ??
+    createStructuredTranscriptFromText(minutes, {
+      title: `${title} transcript`,
+      source: "paste",
+    });
+  const recap = extractPersonalRecap(minutes, context, title);
+  const nextMeeting = createPersonalNextMeeting(title, date, recap, questions, tasks);
+  const docsSummary = createPersonalDocsSummary(title, date, context, recap, tasks, questions, resources, structuredTranscript);
+  const emailDraft = createPersonalEmailDraft(title, recap, tasks, questions, extractEmailAddresses(minutes));
   const now = new Date().toISOString();
 
   return {
@@ -802,10 +924,14 @@ export function createPersonalMeetingDraft(input: PersonalMeetingDraftInput): Pe
     date,
     minutes,
     context,
-    recap: extractPersonalRecap(minutes, context, title),
+    recap,
     resources,
     questions,
     tasks,
+    nextMeeting,
+    docsSummary,
+    emailDraft,
+    structuredTranscript,
     createdAt: now,
     updatedAt: now,
   };
@@ -1316,6 +1442,13 @@ export function createGeneratedSession(input: ImportDraftInput): Session {
       durationSeconds: input.captureDurationSeconds,
       transcriptSource: input.transcriptSource ?? (input.transcript.trim() ? "paste" : "audio_recording"),
     },
+    structuredTranscript:
+      input.structuredTranscript ??
+      createStructuredTranscriptFromText(input.transcript, {
+        title: `${sessionTitle} transcript`,
+        source: input.transcriptSource ?? (input.transcript.trim() ? "paste" : "audio_recording"),
+        durationSeconds: input.captureDurationSeconds,
+      }),
     recap,
     essentialQuestions,
     attendance,

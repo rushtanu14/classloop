@@ -307,7 +307,7 @@ Feature checks:
 10. Teacher appearance settings remain teacher-account scoped.
 11. Image backdrop URL updates the live preview and app background when a safe HTTPS image URL is used.
 12. Live capture modes require consent confirmation when privacy settings require it.
-13. Paid/API-key/external-platform features do not pretend to be live: no OpenAI transcription, custom transcription endpoint, LMS posting, or live Zoom bot. Google Classroom and Zoom cloud surfaces are allowed only as honest scaffolds until OAuth/API credentials are connected.
+13. Paid/API-key/external-platform features do not pretend to be live: Whisper upload transcription only works through the hosted `/api/transcribe` endpoint when `OPENAI_API_KEY` is configured; Google Classroom posting and fully automatic Google Calendar/Docs/Gmail actions remain OAuth/API setup work. Google Classroom and Zoom cloud surfaces are allowed only as honest scaffolds until OAuth/API credentials are connected.
 14. Publish preview shows delivery logs after email send actions, supports teacher toggles for email recipients, and includes an editable class-wide Google Classroom post composer.
 15. Privacy page is accessible to teachers and exposes retention settings, export, delete class data, consent settings, and audit log.
 16. After students mark a follow-up complete, student follow-up pages can include a student note/file link and then show a bottom-right ClassLoop usefulness feedback popup; low ratings ask what would make ClassLoop better, post product feedback to the creator feedback endpoint without student names/emails, and do not appear in teacher Analytics or action queues.
@@ -316,6 +316,9 @@ Feature checks:
 19. WCAG-targeted checks pass for keyboard navigation, focus order, visible focus indicators, accessible control names, live status announcements, contrast on key text/buttons, and mobile PWA/add-to-home-screen readability.
 20. Error-state recovery checks pass for boot loading/data-outline delay, bad transcript format, malformed URLs, sync API outage/local fallback, non-JSON sync responses, browser storage read/write failures, download-manifest outages/malformed/Vercel Blob URLs, package init failures, desktop storage corruption, and privacy-safe actionable logging.
 21. Public signup legal gate remains set: durable hosted signups stay sample-only until reviewed public Terms of Use, Privacy Policy, desktop EULA, hosted retention/deletion SLAs, support contact, and child-safety expectations are published.
+22. Individual meetings can paste minutes or upload text/audio/video, then show a cleaned Transcript panel with speaker labels or unknown-speaker segments.
+23. Individual follow-through automations generate a next Google Calendar draft, a Docs-ready summary for Drive, and an email draft that remains disabled until the user checks the explicit approval box.
+24. Class transcription mode preserves a cleaned Transcript review tab for pasted/uploaded/Zoom/Whisper transcripts without claiming biometric speaker identification.
 22. Frontend formatting pass: no unreadable low-contrast text, overlapping form labels, clipped buttons, blank teacher-only panels, or unnecessary implementation details exposed to users.
 
 Import regression checks:

@@ -63,6 +63,7 @@ import {
   sampleRoster,
   sampleTranscript,
 } from "./data";
+import { createStructuredTranscriptFromSegments, createStructuredTranscriptFromText, formatTranscriptTime } from "./transcript";
 import {
   cloudRequest,
   createBillingPortalSession,
@@ -97,6 +98,8 @@ import type {
   Session,
   SessionCaptureMode,
   SessionType,
+  StructuredTranscript,
+  TranscriptSource,
   Student,
   StudentFollowUp,
   StudentSubmission,
@@ -984,6 +987,41 @@ function appendCapturedText(current: string, text: string) {
   return [current.trim(), clean].filter(Boolean).join("\n");
 }
 
+function isTextTranscriptFile(file: File) {
+  return /\.(txt|vtt|srt)$/i.test(file.name) || /^text\//i.test(file.type);
+}
+
+function transcriptSourceForFile(file: File): TranscriptSource {
+  return /^video\//i.test(file.type) || /\.(mp4|mov|webm)$/i.test(file.name) ? "screen_recording" : "whisper_transcription";
+}
+
+async function transcribeRecordingWithWhisper(file: Blob, options: { filename: string; source: TranscriptSource; title: string }) {
+  const response = await fetch("/api/transcribe", {
+    method: "POST",
+    headers: {
+      "Content-Type": file.type || "application/octet-stream",
+      "X-ClassLoop-Filename": options.filename,
+    },
+    body: file,
+  });
+  const isJson = response.headers.get("content-type")?.includes("application/json");
+  const payload = isJson ? await response.json().catch(() => ({})) : {};
+  if (!response.ok) {
+    throw new Error(
+      payload.error ||
+        "Whisper transcription endpoint is not available. Deploy the hosted API with OPENAI_API_KEY before using recording uploads.",
+    );
+  }
+  const segments = Array.isArray(payload.segments) ? payload.segments : [];
+  return createStructuredTranscriptFromSegments(segments, {
+    title: options.title,
+    source: options.source,
+    model: payload.model || "whisper-1",
+    language: payload.language,
+    durationSeconds: payload.durationSeconds,
+  });
+}
+
 function liveCaptureSpeakerLabel(mode: SessionCaptureMode, segmentNumber: number) {
   if (mode === "online_meeting") return `Unknown meeting voice ${segmentNumber}`;
   return `Unknown in-person voice ${segmentNumber}`;
@@ -1815,6 +1853,33 @@ function downloadTextFile(filename: string, contents: string, type = "text/plain
   }, 0);
 }
 
+function googleCalendarTimestamp(value: string) {
+  return value.replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function personalCalendarUrl(meeting: PersonalMeeting) {
+  if (!meeting.nextMeeting) return "";
+  const { nextMeeting } = meeting;
+  const start = new Date(`${nextMeeting.date}T${nextMeeting.time || "09:00"}:00`);
+  if (Number.isNaN(start.getTime())) return "";
+  const end = new Date(start.getTime() + nextMeeting.durationMinutes * 60_000);
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: nextMeeting.title,
+    details: nextMeeting.description,
+    dates: `${googleCalendarTimestamp(start.toISOString())}/${googleCalendarTimestamp(end.toISOString())}`,
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function personalMailtoUrl(meeting: PersonalMeeting) {
+  if (!meeting.emailDraft) return "";
+  const recipients = meeting.emailDraft.recipients.join(",");
+  const subject = encodeURIComponent(meeting.emailDraft.subject);
+  const body = encodeURIComponent(meeting.emailDraft.body);
+  return `mailto:${recipients}?subject=${subject}&body=${body}`;
+}
+
 function setStudentSubmission(
   session: Session,
   studentId: string,
@@ -2304,12 +2369,13 @@ function App() {
     );
   };
 
-  const createPersonalMeeting = (title: string, minutes: string) => {
+  const createPersonalMeeting = (title: string, minutes: string, structuredTranscript?: StructuredTranscript) => {
     if (!auth || auth.role !== "individual") return;
     const meeting = createPersonalMeetingDraft({
       ownerEmail: auth.email,
       title,
       minutes,
+      structuredTranscript,
     });
     setPersonalMeetings((current) => [meeting, ...current]);
     appendAudit("create_personal_meeting", `Created personal meeting ${meeting.title}.`);
@@ -5766,12 +5832,15 @@ function NewPersonalMeeting({
   onCreate,
   personalTemplateCopyUrl,
 }: {
-  onCreate: (title: string, minutes: string) => void;
+  onCreate: (title: string, minutes: string, structuredTranscript?: StructuredTranscript) => void;
   personalTemplateCopyUrl?: string;
 }) {
   const [title, setTitle] = useState("");
   const [minutes, setMinutes] = useState("");
   const [error, setError] = useState("");
+  const [structuredTranscript, setStructuredTranscript] = useState<StructuredTranscript | undefined>();
+  const [uploadedRecordingName, setUploadedRecordingName] = useState("");
+  const [whisperStatus, setWhisperStatus] = useState("");
   const personalMinutePlaceholder = [
     "Meeting title:",
     "Date:",
@@ -5796,7 +5865,47 @@ function NewPersonalMeeting({
       return;
     }
     setError("");
-    onCreate(title, minutes);
+    onCreate(
+      title,
+      minutes,
+      structuredTranscript ??
+        createStructuredTranscriptFromText(minutes, {
+          title: `${title || "Personal meeting"} transcript`,
+          source: "paste",
+        }),
+    );
+  };
+
+  const handlePersonalRecordingFile = async (file?: File) => {
+    if (!file) return;
+    setUploadedRecordingName(file.name);
+    setError("");
+    if (isTextTranscriptFile(file)) {
+      const text = await readTranscriptFileText(file);
+      setMinutes(text);
+      setStructuredTranscript(
+        createStructuredTranscriptFromText(text, {
+          title: `${title || file.name} transcript`,
+          source: "file",
+        }),
+      );
+      setWhisperStatus(`Loaded ${file.name}.`);
+      return;
+    }
+
+    try {
+      setWhisperStatus(`Transcribing ${file.name} with Whisper...`);
+      const nextTranscript = await transcribeRecordingWithWhisper(file, {
+        filename: file.name,
+        source: transcriptSourceForFile(file),
+        title: `${title || file.name} transcript`,
+      });
+      setMinutes(nextTranscript.text);
+      setStructuredTranscript(nextTranscript);
+      setWhisperStatus("Whisper transcript ready. Review speaker labels before generating.");
+    } catch (error) {
+      setWhisperStatus(error instanceof Error ? error.message : "Whisper transcription failed.");
+    }
   };
 
   return (
@@ -5814,14 +5923,28 @@ function NewPersonalMeeting({
               <span>Meeting title</span>
               <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Product sync, client check-in, team standup" />
             </label>
+            <label className="upload-zone wide">
+              <UploadCloud size={24} />
+              <strong>{uploadedRecordingName || "Upload meeting audio, screen recording, or transcript"}</strong>
+              <small>Audio and video are transcribed with Whisper when the hosted API is configured.</small>
+              <input
+                type="file"
+                accept=".txt,.vtt,.srt,audio/*,video/*,.mp3,.mp4,.m4a,.wav,.webm,.mov"
+                onChange={(event) => handlePersonalRecordingFile(event.target.files?.[0])}
+              />
+            </label>
             <label className="field paste-field large-paste wide">
               <span>Paste meeting minutes</span>
               <textarea
                 value={minutes}
-                onChange={(event) => setMinutes(event.target.value)}
+                onChange={(event) => {
+                  setMinutes(event.target.value);
+                  setStructuredTranscript(undefined);
+                }}
                 placeholder={personalMinutePlaceholder}
               />
             </label>
+            {whisperStatus && <p className="capture-message wide">{whisperStatus}</p>}
           </div>
         </div>
 
@@ -5937,6 +6060,13 @@ function PersonalMeetingsPage({
             </div>
           </Panel>
 
+          <StructuredTranscriptPanel
+            transcript={selectedMeeting.structuredTranscript}
+            emptyDetail="Paste minutes or upload a recording to keep a cleaned, speaker-labeled transcript with this meeting."
+          />
+
+          <PersonalFollowThroughPanel meeting={selectedMeeting} />
+
           <Panel title="Tasks" icon={ListChecks}>
             <div className="personal-task-list">
               {selectedMeeting.tasks.map((task) => (
@@ -6005,6 +6135,161 @@ function PersonalMeetingsPage({
         </div>
       </section>
     </div>
+  );
+}
+
+function StructuredTranscriptPanel({
+  transcript,
+  emptyDetail,
+}: {
+  transcript?: StructuredTranscript;
+  emptyDetail: string;
+}) {
+  const segments = transcript?.segments ?? [];
+  return (
+    <Panel title="Transcript" icon={MessageSquare}>
+      {transcript && segments.length ? (
+        <div className="structured-transcript">
+          <div className="structured-transcript-header">
+            <div>
+              <strong>{transcript.title}</strong>
+              <small>
+                {[transcript.model, transcript.language, transcript.durationSeconds ? `${Math.round(transcript.durationSeconds)}s` : ""]
+                  .filter(Boolean)
+                  .join(" · ") || transcript.source.replace(/_/g, " ")}
+              </small>
+            </div>
+            <span className="status-pill in_progress">{segments.length} segments</span>
+          </div>
+          <div className="structured-transcript-list">
+            {segments.map((segment, index) => {
+              const timeLabel = formatTranscriptTime(segment.startSeconds) || `#${index + 1}`;
+              return (
+                <article key={segment.id} className="transcript-segment-row">
+                  <div className="transcript-segment-meta">
+                    <span className="transcript-time">{timeLabel}</span>
+                    <strong className="transcript-speaker">{segment.speaker}</strong>
+                  </div>
+                  <p>{segment.text}</p>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <InlineEmpty icon={MessageSquare} title="No transcript saved" detail={emptyDetail} />
+      )}
+    </Panel>
+  );
+}
+
+function PersonalFollowThroughPanel({ meeting }: { meeting: PersonalMeeting }) {
+  const [emailPermissionGranted, setEmailPermissionGranted] = useState(false);
+  const [message, setMessage] = useState("");
+  const calendarUrl = personalCalendarUrl(meeting);
+  const mailtoUrl = personalMailtoUrl(meeting);
+  const docsSummary = meeting.docsSummary;
+
+  const copyDocsSummary = async () => {
+    if (!docsSummary) return;
+    try {
+      await navigator.clipboard.writeText(docsSummary.body);
+      setMessage("Docs summary copied. Open Google Docs and paste it into the new Drive document.");
+    } catch {
+      setMessage("Copy failed. Download the summary and upload it to Drive.");
+    }
+  };
+
+  const openEmailDraft = () => {
+    if (!emailPermissionGranted) {
+      setMessage("Approve the email draft before opening your mail app.");
+      return;
+    }
+    if (!mailtoUrl) {
+      setMessage("No email draft is available for this meeting.");
+      return;
+    }
+    window.location.href = mailtoUrl;
+  };
+
+  return (
+    <Panel title="Follow-through automations" icon={Sparkles}>
+      <div className="personal-automation-grid">
+        <article className="personal-automation-card">
+          <div>
+            <CalendarDays size={18} />
+            <strong>Next Google Calendar meeting</strong>
+            <small>
+              {meeting.nextMeeting
+                ? `${meeting.nextMeeting.title} · ${meeting.nextMeeting.date} at ${meeting.nextMeeting.time}`
+                : "No next meeting suggestion yet."}
+            </small>
+          </div>
+          <button className="ghost-button" type="button" disabled={!calendarUrl} onClick={() => window.open(calendarUrl, "_blank", "noopener,noreferrer")}>
+            <CalendarDays size={17} />
+            Add to Calendar
+          </button>
+        </article>
+
+        <article className="personal-automation-card">
+          <div>
+            <FileText size={18} />
+            <strong>Google Drive Docs summary</strong>
+            <small>{docsSummary ? docsSummary.title : "No Docs summary generated yet."}</small>
+          </div>
+          <div className="inline-button-row">
+            <button className="ghost-button" type="button" disabled={!docsSummary} onClick={copyDocsSummary}>
+              <ClipboardCheck size={17} />
+              Copy summary
+            </button>
+            <button className="ghost-button" type="button" disabled={!docsSummary} onClick={() => window.open("https://docs.new", "_blank", "noopener,noreferrer")}>
+              <ArrowUpRight size={17} />
+              Open Docs
+            </button>
+            <button
+              className="ghost-button"
+              type="button"
+              disabled={!docsSummary}
+              onClick={() =>
+                docsSummary &&
+                downloadTextFile(`${slugify(docsSummary.title, "meeting-summary")}.md`, docsSummary.body, "text/markdown")
+              }
+            >
+              <Download size={17} />
+              Download
+            </button>
+          </div>
+        </article>
+
+        <article className="personal-automation-card">
+          <div>
+            <Mail size={18} />
+            <strong>Email follow-up draft</strong>
+            <small>
+              {meeting.emailDraft?.recipients.length
+                ? `${meeting.emailDraft.recipients.length} recipient${meeting.emailDraft.recipients.length === 1 ? "" : "s"} detected`
+                : "No recipients detected. You can add recipients in the mail draft."}
+            </small>
+          </div>
+          <label className="switch-row">
+            <input
+              type="checkbox"
+              checked={emailPermissionGranted}
+              onChange={(event) => setEmailPermissionGranted(event.target.checked)}
+            />
+            <span>
+              <strong>I reviewed and approve opening this email draft</strong>
+              <small>ClassLoop will never send this individual email without this permission step.</small>
+            </span>
+          </label>
+          <button className="primary-button" type="button" onClick={openEmailDraft} disabled={!emailPermissionGranted || !meeting.emailDraft}>
+            <Send size={17} />
+            Open email draft
+          </button>
+        </article>
+      </div>
+      {message && <p className="settings-message">{message}</p>}
+    </Panel>
   );
 }
 
@@ -6918,7 +7203,10 @@ function ImportSession({
   const [planMessage, setPlanMessage] = useState("");
   const [recordedSeconds, setRecordedSeconds] = useState(0);
   const [recordedAudioUrl, setRecordedAudioUrl] = useState("");
+  const [recordedAudioBlob, setRecordedAudioBlob] = useState<Blob | null>(null);
   const [recordedAudioLabel, setRecordedAudioLabel] = useState("");
+  const [structuredTranscript, setStructuredTranscript] = useState<StructuredTranscript | undefined>();
+  const [whisperStatus, setWhisperStatus] = useState("");
   const [showMeetingHelp, setShowMeetingHelp] = useState(false);
   const [transcriptionAvailable, setTranscriptionAvailable] = useState(true);
   const [recordingConsent, setRecordingConsent] = useState(!recordingConsentRequired);
@@ -7082,6 +7370,7 @@ function ImportSession({
     if (captureStatus === "recording") stopCapture();
     setCaptureMode(mode);
     setCaptureMessage("");
+    setStructuredTranscript(undefined);
     liveSegmentCountRef.current = 0;
 
     try {
@@ -7110,6 +7399,7 @@ function ImportSession({
       if (recordedAudioUrl) {
         URL.revokeObjectURL(recordedAudioUrl);
         setRecordedAudioUrl("");
+        setRecordedAudioBlob(null);
         setRecordedAudioLabel("");
       }
       recordedChunksRef.current = [];
@@ -7125,6 +7415,7 @@ function ImportSession({
           if (!recordedChunksRef.current.length) return;
           const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || "audio/webm" });
           const nextUrl = URL.createObjectURL(blob);
+          setRecordedAudioBlob(blob);
           setRecordedAudioUrl(nextUrl);
           setRecordedAudioLabel(`${captureModeLabels[mode]} · ${Math.max(1, recordedSeconds || 1)}s`);
         };
@@ -7170,6 +7461,12 @@ function ImportSession({
     setZoomCloudImported(false);
     setRosterSource("manual");
     setTranscript(sampleTranscript);
+    setStructuredTranscript(
+      createStructuredTranscriptFromText(sampleTranscript, {
+        title: "Geometry Review transcript",
+        source: "paste",
+      }),
+    );
     setNotes(sampleNotes);
     setRoster(sampleRoster);
     setResources("https://example.com/similar-triangles-review");
@@ -7210,6 +7507,12 @@ function ImportSession({
     setCaptureMode("transcript");
     setZoomCloudImported(true);
     setTranscript(selectedZoomTranscriptFile.transcript);
+    setStructuredTranscript(
+      createStructuredTranscriptFromText(selectedZoomTranscriptFile.transcript, {
+        title: `${selectedZoomMeeting.title} transcript`,
+        source: "zoom_cloud_transcript",
+      }),
+    );
     setFileName(`Zoom cloud: ${selectedZoomTranscriptFile.label}`);
     if (!title.trim()) setTitle(selectedZoomMeeting.title);
     setNotes((current) =>
@@ -7226,8 +7529,46 @@ function ImportSession({
     setFileName(file.name);
     setCaptureMode("transcript");
     setZoomCloudImported(false);
-    setCaptureMessage(`Loaded ${file.name}.`);
-    setTranscript(await readTranscriptFileText(file));
+    if (isTextTranscriptFile(file)) {
+      const text = await readTranscriptFileText(file);
+      setStructuredTranscript(createStructuredTranscriptFromText(text, { title: `${title || file.name} transcript`, source: "file" }));
+      setCaptureMessage(`Loaded ${file.name}.`);
+      setWhisperStatus("");
+      setTranscript(text);
+      return;
+    }
+
+    try {
+      setWhisperStatus(`Transcribing ${file.name} with Whisper...`);
+      const nextTranscript = await transcribeRecordingWithWhisper(file, {
+        filename: file.name,
+        source: transcriptSourceForFile(file),
+        title: `${title || file.name} transcript`,
+      });
+      setStructuredTranscript(nextTranscript);
+      setTranscript(nextTranscript.text);
+      setWhisperStatus("Whisper transcript ready. Review speakers before generating.");
+      setCaptureMessage(`Transcribed ${file.name}.`);
+    } catch (error) {
+      setWhisperStatus(error instanceof Error ? error.message : "Whisper transcription failed.");
+    }
+  };
+
+  const transcribeRecordedCapture = async () => {
+    if (!recordedAudioBlob) return;
+    try {
+      setWhisperStatus("Transcribing captured audio with Whisper...");
+      const nextTranscript = await transcribeRecordingWithWhisper(recordedAudioBlob, {
+        filename: `${captureMode}-${Date.now().toString(36)}.webm`,
+        source: "whisper_transcription",
+        title: `${title || captureModeLabels[captureMode]} transcript`,
+      });
+      setStructuredTranscript(nextTranscript);
+      setTranscript((current) => appendCapturedText(current, nextTranscript.text));
+      setWhisperStatus("Whisper transcript added. Review unknown speakers before publishing.");
+    } catch (error) {
+      setWhisperStatus(error instanceof Error ? error.message : "Whisper transcription failed.");
+    }
   };
 
   const generateDraft = () => {
@@ -7270,7 +7611,9 @@ function ImportSession({
             .filter(Boolean)
             .join("\n");
     const transcriptSource =
-      captureMode !== "transcript"
+      structuredTranscript?.source === "whisper_transcription" || structuredTranscript?.source === "screen_recording"
+        ? structuredTranscript.source
+        : captureMode !== "transcript"
         ? transcript.trim()
           ? "live_transcription"
           : "audio_recording"
@@ -7290,6 +7633,13 @@ function ImportSession({
       captureSourceLabel: captureModeLabels[captureMode],
       captureDurationSeconds: recordedSeconds || undefined,
       transcriptSource,
+      structuredTranscript:
+        structuredTranscript ??
+        createStructuredTranscriptFromText(transcript, {
+          title: `${title || "Class session"} transcript`,
+          source: transcriptSource,
+          durationSeconds: recordedSeconds || undefined,
+        }),
     });
     const privacyAdjustedSession =
       zoomCloudImported && session.capture?.transcriptSource === "zoom_cloud_transcript"
@@ -7620,6 +7970,10 @@ function ImportSession({
                     <small>{recordedAudioLabel || `${captureModeLabels[captureMode]} captured`}</small>
                   </div>
                   <audio controls src={recordedAudioUrl} />
+                  <button className="ghost-button" type="button" onClick={transcribeRecordedCapture} disabled={!recordedAudioBlob}>
+                    <Sparkles size={17} />
+                    Transcribe with Whisper
+                  </button>
                 </div>
               )}
               {captureMode !== "transcript" && (
@@ -7635,6 +7989,7 @@ function ImportSession({
                 </div>
               )}
               {captureMessage && <p className="capture-message">{captureMessage}</p>}
+              {whisperStatus && <p className="capture-message">{whisperStatus}</p>}
             </div>
             {captureMode === "transcript" && (
               <>
@@ -7694,11 +8049,11 @@ function ImportSession({
                 </div>
                 <label className="upload-zone wide">
                   <UploadCloud size={24} />
-                  <strong>{fileName || "Upload transcript file"}</strong>
-                  <small>Zoom, Meet, text, VTT, or SRT file.</small>
+                  <strong>{fileName || "Upload transcript, audio, or screen recording"}</strong>
+                  <small>Text files load directly. Audio and video recordings are transcribed with Whisper.</small>
                   <input
                     type="file"
-                    accept=".txt,.vtt,.srt"
+                    accept=".txt,.vtt,.srt,audio/*,video/*,.mp3,.mp4,.m4a,.wav,.webm,.mov"
                     onChange={(event) => handleTranscriptFile(event.target.files?.[0])}
                   />
                 </label>
@@ -7706,7 +8061,10 @@ function ImportSession({
                   <span>Paste transcript text</span>
                   <textarea
                     value={transcript}
-                    onChange={(event) => setTranscript(event.target.value)}
+                    onChange={(event) => {
+                      setTranscript(event.target.value);
+                      setStructuredTranscript(undefined);
+                    }}
                     placeholder="Paste the raw transcript here..."
                   />
                 </label>
@@ -7863,7 +8221,7 @@ function ReviewDraft({
   studentAccountEmails: string[];
 }) {
   const [saveMessage, setSaveMessage] = useState("");
-  const [activeReviewTab, setActiveReviewTab] = useState<"roster" | "recap" | "followup">("roster");
+  const [activeReviewTab, setActiveReviewTab] = useState<"roster" | "recap" | "transcript" | "followup">("roster");
 
   if (!draft) {
     return (
@@ -7967,6 +8325,15 @@ function ReviewDraft({
           <button
             type="button"
             role="tab"
+            aria-selected={activeReviewTab === "transcript"}
+            className={activeReviewTab === "transcript" ? "ghost-button active" : "ghost-button"}
+            onClick={() => setActiveReviewTab("transcript")}
+          >
+            Transcript
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={activeReviewTab === "followup"}
             className={activeReviewTab === "followup" ? "ghost-button active" : "ghost-button"}
             onClick={() => setActiveReviewTab("followup")}
@@ -8019,6 +8386,15 @@ function ReviewDraft({
               ))}
             </div>
           </Panel>
+        </section>
+      )}
+
+      {activeReviewTab === "transcript" && (
+        <section className="content-grid align-start">
+          <StructuredTranscriptPanel
+            transcript={draft.structuredTranscript}
+            emptyDetail="Paste a transcript or transcribe a recording with Whisper to keep a cleaned, speaker-labeled meeting transcript."
+          />
         </section>
       )}
 

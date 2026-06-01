@@ -1,4 +1,5 @@
 import { createGeneratedSession, createPersonalMeetingDraft, readTranscriptFileText } from "../src/data.js";
+import { createStructuredTranscriptFromText } from "../src/transcript.js";
 
 function assert(condition: boolean, message: string) {
   if (!condition) throw new Error(message);
@@ -907,3 +908,53 @@ assertEqual(fileTranscript, zoomTranscript, "transcript file text should load un
 assertEqual(fileSession.students.length, 18, "file transcript path should preserve roster parsing");
 assert(fileSession.participationEvents.length > 0, "file transcript path should generate participation events");
 assertEqual(fileSession.resources.length, 2, "file transcript path should preserve resource extraction");
+
+const whisperStructuredTranscript = createStructuredTranscriptFromText(
+  `Unknown speaker: We should schedule a follow-up sync next week.
+Rushil: I will send the product notes to teammate@classloop.test by Friday.`,
+  {
+    title: "Whisper recording transcript",
+    source: "whisper_transcription",
+    model: "whisper-1",
+    durationSeconds: 124,
+  },
+);
+const whisperSession = createGeneratedSession({
+  title: "Whisper class recording",
+  template: "General classroom",
+  transcript: whisperStructuredTranscript.text,
+  notes: "",
+  roster: "Rushil Agrawal, rushil@classloop.test",
+  resources: "",
+  transcriptSource: "whisper_transcription",
+  structuredTranscript: whisperStructuredTranscript,
+});
+assertEqual(whisperSession.structuredTranscript?.source, "whisper_transcription", "class sessions should preserve Whisper transcript source");
+assertEqual(whisperSession.structuredTranscript?.model, "whisper-1", "class sessions should preserve Whisper model metadata");
+assert(
+  whisperSession.structuredTranscript?.segments.some((segment) => segment.speaker === "Rushil") ?? false,
+  "class sessions should keep cleaned speaker labels for the transcript panel",
+);
+
+const personalStructuredTranscript = createStructuredTranscriptFromText(
+  `Rushil: We need a next planning call with teammate@classloop.test.
+Alex: Please create the docs summary and send the follow-up email after review.`,
+  {
+    title: "Individual meeting transcript",
+    source: "screen_recording",
+    model: "whisper-1",
+  },
+);
+const personalWhisperMeeting = createPersonalMeetingDraft({
+  ownerEmail: "individual@classloop.test",
+  title: "Individual launch sync",
+  minutes: personalStructuredTranscript.text,
+  structuredTranscript: personalStructuredTranscript,
+});
+assertEqual(personalWhisperMeeting.structuredTranscript?.source, "screen_recording", "individual meetings should preserve recording transcript source");
+assert(personalWhisperMeeting.nextMeeting?.title.includes("Individual launch sync") ?? false, "individual meetings should suggest a next meeting");
+assert(personalWhisperMeeting.docsSummary?.body.includes("## Transcript Highlights") ?? false, "individual meetings should create a Docs-ready summary");
+assert(
+  personalWhisperMeeting.emailDraft?.recipients.includes("teammate@classloop.test") ?? false,
+  "individual email drafts should extract recipients but still wait for UI permission",
+);

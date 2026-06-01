@@ -7,6 +7,15 @@ const looseIdPattern = /^[A-Za-z0-9._:@/-]{1,160}$/;
 const sessionTypes = ["Math review", "CS workshop", "General classroom", "Club meeting", "Study group"];
 const taskStatuses = ["todo", "in_progress", "submitted", "reviewed", "complete", "overdue"];
 const personalTaskStatuses = ["todo", "in_progress", "complete"];
+const transcriptSources = [
+  "paste",
+  "file",
+  "zoom_cloud_transcript",
+  "live_transcription",
+  "audio_recording",
+  "screen_recording",
+  "whisper_transcription",
+];
 const participationTypes = ["asked_question", "answered_question", "chat", "quiet", "absent"];
 const attendanceStatuses = ["present", "absent", "late"];
 const studentSubmissionStatuses = ["todo", "working", "submitted", "reviewed"];
@@ -102,7 +111,7 @@ const captureSchema = {
   sourceLabel: requiredTrimmed(220),
   capturedAt: requiredIsoDate,
   durationSeconds: field.number({ min: 0, max: 24 * 60 * 60, optional: true }),
-  transcriptSource: field.enum(["file", "paste", "zoom_cloud_transcript", "live_transcription", "audio_recording"]),
+  transcriptSource: field.enum(transcriptSources),
 };
 
 const emailDeliverySchema = {
@@ -143,6 +152,25 @@ const submissionSchema = {
   reviewedAt: optionalIsoDate,
 };
 
+const transcriptSegmentSchema = {
+  id: requiredTrimmed(160, looseIdPattern),
+  speaker: requiredTrimmed(160),
+  text: requiredText(4_000),
+  startSeconds: field.number({ min: 0, max: 24 * 60 * 60, optional: true }),
+  endSeconds: field.number({ min: 0, max: 24 * 60 * 60, optional: true }),
+};
+
+const structuredTranscriptSchema = {
+  title: requiredTrimmed(220),
+  source: field.enum(transcriptSources),
+  model: optionalTrimmed(120),
+  language: optionalTrimmed(40),
+  durationSeconds: field.number({ min: 0, max: 24 * 60 * 60, optional: true }),
+  generatedAt: requiredIsoDate,
+  text: optionalText(300_000, ""),
+  segments: field.array(field.object(transcriptSegmentSchema), { max: 5_000 }),
+};
+
 const sessionSchema = {
   id: requiredTrimmed(160, looseIdPattern),
   ownerEmail: optionalEmail,
@@ -157,6 +185,7 @@ const sessionSchema = {
   transcript: requiredText(300_000),
   notes: optionalText(100_000, ""),
   capture: field.object(captureSchema, { optional: true }),
+  structuredTranscript: field.object(structuredTranscriptSchema, { optional: true }),
   recap: optionalText(60_000, ""),
   essentialQuestions: field.array(requiredTrimmed(300), { max: 20 }),
   attendance: field.record(field.enum(attendanceStatuses), { maxKeys: 500, keyMax: 160 }),
@@ -199,6 +228,25 @@ const personalTaskSchema = {
   source: optionalText(1_000, ""),
 };
 
+const personalNextMeetingSchema = {
+  title: requiredTrimmed(220),
+  date: field.string({ max: 40 }),
+  time: field.string({ max: 20 }),
+  durationMinutes: field.number({ min: 5, max: 480 }),
+  description: optionalText(20_000, ""),
+};
+
+const personalDocsSummarySchema = {
+  title: requiredTrimmed(220),
+  body: requiredText(100_000),
+};
+
+const personalEmailDraftSchema = {
+  subject: requiredTrimmed(300),
+  body: requiredText(100_000),
+  recipients: field.array(field.string({ max: 320, pattern: emailPattern }), { max: 100 }),
+};
+
 const personalMeetingSchema = {
   id: requiredTrimmed(160, looseIdPattern),
   ownerEmail: field.string({ max: 320, pattern: emailPattern }),
@@ -210,6 +258,10 @@ const personalMeetingSchema = {
   resources: field.array(field.object(resourceSchema), { max: 100 }),
   questions: field.array(requiredTrimmed(300), { max: 50 }),
   tasks: field.array(field.object(personalTaskSchema), { max: 200 }),
+  nextMeeting: field.object(personalNextMeetingSchema, { optional: true }),
+  docsSummary: field.object(personalDocsSummarySchema, { optional: true }),
+  emailDraft: field.object(personalEmailDraftSchema, { optional: true }),
+  structuredTranscript: field.object(structuredTranscriptSchema, { optional: true }),
   createdAt: requiredIsoDate,
   updatedAt: requiredIsoDate,
 };

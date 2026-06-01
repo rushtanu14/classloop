@@ -51,6 +51,20 @@ async function close(app) {
   }
 }
 
+async function waitForSignInForm(page, timeoutMs) {
+  const emailInput = page.getByPlaceholder("name@example.com");
+  try {
+    await emailInput.waitFor({ timeout: Math.min(5_000, timeoutMs) });
+    return;
+  } catch {
+    const loginButton = page.getByRole("button", { name: /^log in$/i }).first();
+    if (await loginButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await loginButton.click();
+    }
+    await emailInput.waitFor({ timeout: timeoutMs });
+  }
+}
+
 async function launchClassLoop(userDataDir) {
   const launchTimeoutMs = positiveIntegerEnv("CLASSLOOP_DESKTOP_LAUNCH_TIMEOUT_MS", 60_000);
   const firstWindowTimeoutMs = positiveIntegerEnv("CLASSLOOP_DESKTOP_FIRST_WINDOW_TIMEOUT_MS", 60_000);
@@ -75,7 +89,7 @@ async function launchClassLoop(userDataDir) {
     );
     page.setDefaultTimeout(loginReadyTimeoutMs);
     try {
-      await page.getByPlaceholder("name@example.com").waitFor({ timeout: loginReadyTimeoutMs });
+      await waitForSignInForm(page, loginReadyTimeoutMs);
     } catch (error) {
       const title = await page.title().catch(() => "unknown");
       const url = page.url();

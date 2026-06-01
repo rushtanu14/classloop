@@ -2,9 +2,9 @@
   "note": "Desktop installer binaries are hosted outside Vercel Blob so Vercel only serves the web/PWA shell and API routes.",
   "checksumsUrl": "https://github.com/rushtanu14/classloop/releases/download/v0.1.0/SHA256SUMS.txt?download=1",
   "macos": {
-    "url": "https://github.com/rushtanu14/classloop/releases/download/v0.1.0/ClassLoop-0.1.0-arm64.dmg",
-    "arm64Url": "https://github.com/rushtanu14/classloop/releases/download/v0.1.0/ClassLoop-0.1.0-arm64.dmg",
-    "arm64ZipUrl": "https://github.com/rushtanu14/classloop/releases/download/v0.1.0/ClassLoop-0.1.0-arm64-mac.zip",
+    "url": "https://github.com/rushtanu14/classloop/releases/download/v0.1.0/ClassLoop-Swift-0.1.0-arm64.dmg",
+    "arm64Url": "https://github.com/rushtanu14/classloop/releases/download/v0.1.0/ClassLoop-Swift-0.1.0-arm64.dmg",
+    "arm64ZipUrl": "https://github.com/rushtanu14/classloop/releases/download/v0.1.0/ClassLoop-Swift-0.1.0-arm64-mac.zip",
     "sourceUrl": "https://github.com/rushtanu14/classloop/tree/main/macos-swift/ClassLoopSwift"
   },
   "windows": {

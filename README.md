@@ -194,11 +194,11 @@ npm run test:release:distribution
 npm run drill:incidents
 ```
 
-The test suite covers import parsing, noisy transcripts and rosters, teacher/student workflows, individual meeting minutes, workspace isolation, hosted sync states, Free/Pro boundaries, Stripe-owned entitlement updates, desktop encrypted state, mobile/PWA readability, accessibility, user-visible errors, and release checks.
+The test suite covers import parsing, noisy transcripts and rosters, teacher/student workflows, individual meeting minutes, workspace isolation, hosted sync states, Free/Pro boundaries, Stripe-owned entitlement updates, desktop encrypted state, mobile/PWA readability, accessibility, user-visible errors, Swift macOS packaging, and release checks.
 
 ## Desktop Packaging
 
-All desktop packaging commands run `npm run package:prepare` first. That rebuilds the shared Vite `dist/` output and verifies that macOS, Windows, Linux, and the Swift macOS preview are wired to that same local build, so local changes are not left behind in one platform version.
+All desktop packaging commands run `npm run package:prepare` first. That rebuilds the shared Vite `dist/` output and verifies that macOS, Windows, Linux, and the Swift macOS app are wired to that same local build, so local changes are not left behind in one platform version.
 
 Build the Apple silicon macOS package:
 
@@ -206,13 +206,13 @@ Build the Apple silicon macOS package:
 npm run package:mac
 ```
 
-Build the native Swift macOS preview:
+`npm run package:mac` now builds the native Swift macOS app bundle, DMG, and ZIP. The legacy Electron macOS fallback is still available when needed:
 
 ```bash
-npm run swift:mac:build
+npm run package:mac:electron
 ```
 
-Run the Swift preview against the local web build:
+Run the Swift macOS app against the local web build:
 
 ```bash
 npm run swift:mac:run

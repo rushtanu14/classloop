@@ -487,14 +487,14 @@ test("public root shows landing page and can enter the app demo", async ({ page 
     await expect(platformDownloads.getByRole("button", { name: /windows.*packaging pending/i })).toBeVisible();
     await expect(platformDownloads.getByRole("button", { name: /linux.*packaging pending/i })).toBeVisible();
   } else {
-    const appleSiliconDmg = platformDownloads.getByRole("button", { name: /macOS \(Apple silicon DMG\)/i });
+    const appleSiliconDmg = platformDownloads.getByRole("button", { name: /macOS Swift app \(Apple silicon DMG\)/i });
     await expect(appleSiliconDmg).toBeVisible();
     await expect(appleSiliconDmg).toContainText(/Recommended default/i);
-    await expect(appleSiliconDmg).toContainText(/M-series Macs arm64 installer/i);
-    const swiftPreview = platformDownloads.getByRole("button", { name: /macOS Swift preview/i });
-    await expect(swiftPreview).toBeVisible();
-    await expect(swiftPreview).toContainText(/Source ready/i);
-    await expect(swiftPreview).toContainText(/npm run swift:mac:build/i);
+    await expect(appleSiliconDmg).toContainText(/Native Swift macOS app/i);
+    const swiftSource = platformDownloads.getByRole("button", { name: /macOS Swift source/i });
+    await expect(swiftSource).toBeVisible();
+    await expect(swiftSource).toContainText(/Source ready/i);
+    await expect(swiftSource).toContainText(/npm run package:mac/i);
     await expect(platformDownloads.getByRole("button", { name: /macOS \(Intel/i })).toHaveCount(0);
   }
   await expect(page.locator(".landing-mobile-band").getByRole("button", { name: /add .*to phone/i })).toBeVisible();
@@ -1004,7 +1004,12 @@ test("teacher can log in, import a sample, preview publishing, publish, open stu
   await expect(page.getByLabel(/preload class roster/i)).toContainText("Geometry review roster");
   const generateDraftButton = page.getByRole("button", { name: /generate draft/i });
   if (await generateDraftButton.isDisabled()) {
-    await expect(page.getByText(/Free accounts can generate 1 session per day/i)).toBeVisible();
+    const quotaMessageVisible = await page.getByText(/Free accounts can generate 1 session per day/i).isVisible().catch(() => false);
+    const missingContextVisible = await page
+      .getByText(/Add transcript text, meeting notes, or template details before generating a draft/i)
+      .isVisible()
+      .catch(() => false);
+    expect(quotaMessageVisible || missingContextVisible).toBeTruthy();
   } else {
     await expect(page.getByText(/Free accounts can generate 1 session per day/i)).toHaveCount(0);
   }

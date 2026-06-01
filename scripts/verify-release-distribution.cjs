@@ -31,9 +31,9 @@ function buildTargets(productName) {
   return [
     {
       id: "macos-arm64",
-      label: "macOS arm64",
-      appPath: `release/mac-arm64/${productName}.app`,
-      artifacts: [`release/${productName}-${version}-arm64.dmg`, `release/${productName}-${version}-arm64-mac.zip`],
+      label: "Swift macOS arm64",
+      appPath: `release/swift-mac-arm64/${productName}.app`,
+      artifacts: [`release/${productName}-Swift-${version}-arm64.dmg`, `release/${productName}-Swift-${version}-arm64-mac.zip`],
     },
     {
       id: "windows-x64",
@@ -94,6 +94,7 @@ function targetIsPackaged(target) {
 }
 
 function minimumBytesForArtifact(relPath) {
+  if (relPath.includes("-Swift-")) return 250 * 1024;
   const extension = Object.keys(minimumReleaseArtifactBytes).find((suffix) => relPath.endsWith(suffix));
   return extension ? minimumReleaseArtifactBytes[extension] : 1;
 }
@@ -274,6 +275,9 @@ function main() {
   }
   if (!packagedTargets.length) {
     fail("No packaged release artifacts found. Run the package scripts before distribution verification.");
+  }
+  if (!packagedTargets.some((target) => target.id === "macos-arm64")) {
+    fail("Missing Swift macOS arm64 release artifacts. Run npm run package:mac before distribution verification.");
   }
 
   console.log(`Checking ${selectedProductName} ${version} release artifacts.`);

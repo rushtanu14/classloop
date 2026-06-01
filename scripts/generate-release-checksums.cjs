@@ -38,7 +38,7 @@ if (!files.length) {
 files.forEach((name) => {
   const fullPath = path.join(releaseDir, name);
   const extension = path.extname(name).toLowerCase();
-  const minimumBytes = minimumArtifactBytes[extension] ?? 1;
+  const minimumBytes = name.includes("-Swift-") ? 250 * 1024 : minimumArtifactBytes[extension] ?? 1;
   const size = fs.statSync(fullPath).size;
   if (size < minimumBytes) {
     fail(

@@ -3182,8 +3182,8 @@ function LandingPage({
   if (macArm64Url) {
     macOptions.push({
       id: "macos",
-      label: "macOS (Apple silicon DMG)",
-      helper: "M-series Macs arm64 installer",
+      label: "macOS Swift app (Apple silicon DMG)",
+      helper: "Native Swift macOS app for M-series Macs",
       badge: "Recommended default",
       url: macArm64Url,
     });
@@ -3191,8 +3191,8 @@ function LandingPage({
   if (macArm64ZipUrl) {
     macOptions.push({
       id: "macos",
-      label: "macOS (Apple silicon ZIP)",
-      helper: "M-series Macs arm64 archive",
+      label: "macOS Swift app (Apple silicon ZIP)",
+      helper: "Native Swift macOS app archive",
       url: macArm64ZipUrl,
     });
   }
@@ -3215,8 +3215,8 @@ function LandingPage({
   if (macSwiftSourceUrl) {
     macOptions.push({
       id: "macos",
-      label: "macOS Swift preview",
-      helper: "Native Swift/WKWebView source; build locally with npm run swift:mac:build.",
+      label: "macOS Swift source",
+      helper: "Native Swift macOS source; build locally with npm run package:mac.",
       badge: "Preview source",
       url: macSwiftSourceUrl,
       kind: "source",
@@ -3328,7 +3328,7 @@ function LandingPage({
           : null;
   const detectedInstallerCopy = detectedDownload
     ? detectedDownload.id === "macos" && macArm64Url
-      ? "ClassLoop detected macOS. The Apple silicon arm64 DMG is the available Mac installer for M-series Macs."
+      ? "ClassLoop detected macOS. The Swift Apple silicon DMG is the default Mac app for M-series Macs."
       : `ClassLoop detected ${detectedDownload.label} from browser hints. Use the detected installer or reveal the full desktop list.`
     : "This device looks best for the web/PWA path. You can still open desktop installers when downloading ClassLoop for another computer.";
   const publicNav: Array<{ page: LandingPageKey; label: string }> = [
@@ -3903,7 +3903,7 @@ function LandingPage({
               <h1>Download ClassLoop.</h1>
               <p>
                 Start with the hosted PWA for the sample workflow, add it to a phone, then move real daily classroom
-                work to the desktop app or a reviewed cloud pilot.
+                work to the Swift macOS app, desktop app, or a reviewed cloud pilot.
               </p>
             </header>
             <section className="landing-mobile-band" aria-label="ClassLoop on mobile">
@@ -4015,7 +4015,7 @@ function LandingPage({
             </section>
             <section className="landing-policy-panel">
               <h2>Free desktop install notes</h2>
-              <p>ClassLoop's free desktop builds may be unsigned or ad-hoc signed. Verify the checksum, then use the normal OS trust prompt only when the file came from the official ClassLoop download page.</p>
+              <p>ClassLoop's free macOS build is the Swift app and may be unsigned or ad-hoc signed. Verify the checksum, then use the normal OS trust prompt only when the file came from the official ClassLoop download page.</p>
               <div className="mobile-step-grid">
                 <article className="mobile-step">
                   <strong>1</strong>

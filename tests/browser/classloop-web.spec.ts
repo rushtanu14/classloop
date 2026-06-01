@@ -111,14 +111,14 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
     await expect(platformDownloads.getByRole("button", { name: /linux.*packaging pending/i })).toBeVisible();
   } else {
     await expect(platformDownloads.getByText(/download ready/i).first()).toBeVisible();
-    const appleSiliconDmg = platformDownloads.getByRole("button", { name: /macOS \(Apple silicon DMG\)/i });
+    const appleSiliconDmg = platformDownloads.getByRole("button", { name: /macOS Swift app \(Apple silicon DMG\)/i });
     await expect(appleSiliconDmg).toBeVisible();
     await expect(appleSiliconDmg).toContainText(/Recommended default/i);
-    await expect(appleSiliconDmg).toContainText(/M-series Macs arm64 installer/i);
-    const swiftPreview = platformDownloads.getByRole("button", { name: /macOS Swift preview/i });
-    await expect(swiftPreview).toBeVisible();
-    await expect(swiftPreview).toContainText(/Source ready/i);
-    await expect(swiftPreview).toContainText(/npm run swift:mac:build/i);
+    await expect(appleSiliconDmg).toContainText(/Native Swift macOS app/i);
+    const swiftSource = platformDownloads.getByRole("button", { name: /macOS Swift source/i });
+    await expect(swiftSource).toBeVisible();
+    await expect(swiftSource).toContainText(/Source ready/i);
+    await expect(swiftSource).toContainText(/npm run package:mac/i);
     await expect(platformDownloads.getByRole("button", { name: /macOS \(Intel/i })).toHaveCount(0);
   }
 

@@ -147,9 +147,9 @@ Installer manifest: [public/classloop-downloads.json](../public/classloop-downlo
 Current configured public assets:
 
 - Checksums: `https://github.com/rushtanu14/classloop/releases/download/v0.1.0/SHA256SUMS.txt?download=1`
-- macOS Apple silicon DMG: `https://github.com/rushtanu14/classloop/releases/download/v0.1.0/ClassLoop-0.1.0-arm64.dmg`
-- macOS Apple silicon ZIP: `https://github.com/rushtanu14/classloop/releases/download/v0.1.0/ClassLoop-0.1.0-arm64-mac.zip`
-- macOS Swift preview source: `https://github.com/rushtanu14/classloop/tree/main/macos-swift/ClassLoopSwift`
+- macOS Swift Apple silicon DMG: `https://github.com/rushtanu14/classloop/releases/download/v0.1.0/ClassLoop-Swift-0.1.0-arm64.dmg`
+- macOS Swift Apple silicon ZIP: `https://github.com/rushtanu14/classloop/releases/download/v0.1.0/ClassLoop-Swift-0.1.0-arm64-mac.zip`
+- macOS Swift app source: `https://github.com/rushtanu14/classloop/tree/main/macos-swift/ClassLoopSwift`
 - Windows x64 EXE: `https://github.com/rushtanu14/classloop/releases/download/v0.1.0/ClassLoop.Setup.0.1.0.exe`
 - Windows x64 ZIP: `https://github.com/rushtanu14/classloop/releases/download/v0.1.0/ClassLoop-0.1.0-win.zip`
 - Windows arm64 ZIP: `https://github.com/rushtanu14/classloop/releases/download/v0.1.0/ClassLoop-0.1.0-arm64-win.zip`
@@ -161,7 +161,7 @@ Fallback rules:
 - If a URL is missing, show `Packaging pending` and keep the web/PWA demo available.
 - If a URL points to Vercel Blob, ignore it and show `Packaging pending`.
 - macOS public downloads should stay Apple silicon only unless Intel artifacts are intentionally restored.
-- The macOS Swift preview is source/build-script only until a signed/notarized Swift `.app` or `.dmg` is produced and verified.
+- macOS public downloads use the Swift app. The free distribution path remains ad-hoc signed unless a paid Developer ID/notarization pass is added later.
 - Linux public downloads should default to AppImage. Offer `.deb` only after Linux-host verification.
 - Run `npm run release:checksums` before publishing new desktop artifacts.
 

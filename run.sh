@@ -14,14 +14,15 @@ usage() {
 ClassLoop launcher
 
 Usage:
-  ./run.sh                    Start the Electron desktop app
+  ./run.sh                    Start the macOS Swift app on Mac, Electron elsewhere
   ./run.sh --dev              Start the browser dev server
   ./run.sh --check-env        Validate launcher env loading without starting app
   ./run.sh --packaged [path]  Launch a packaged app build
-  ./run.sh --package-mac      Build the Apple silicon macOS DMG/ZIP
+  ./run.sh --package-mac      Build the Apple silicon Swift macOS DMG/ZIP
+  ./run.sh --package-electron-mac Build the legacy Electron macOS DMG/ZIP
   ./run.sh --package-win      Build Windows x64/arm64 packages
   ./run.sh --package-linux    Build Linux x64/arm64 AppImages
-  ./run.sh --package-swift-mac Build the native Swift macOS preview
+  ./run.sh --package-swift-mac Build the native Swift macOS DMG/ZIP
   ./run.sh --package-all      Build all desktop variants from the current local source
   ./run.sh --help             Show this help
 
@@ -159,7 +160,7 @@ packaged_app_path() {
         echo "ClassLoop macOS packages are Apple silicon only. Use ./run.sh for local development on this Mac." >&2
         exit 1
       fi
-      echo "$ROOT_DIR/release/mac-arm64/ClassLoop.app/Contents/MacOS/ClassLoop"
+      echo "$ROOT_DIR/release/swift-mac-arm64/ClassLoop.app/Contents/MacOS/ClassLoop"
       ;;
     Linux)
       echo "$ROOT_DIR/release/linux-unpacked/classloop"
@@ -204,6 +205,18 @@ package_macos() {
   npm run package:mac
 }
 
+package_electron_macos() {
+  if [ "$(uname -s)" != "Darwin" ]; then
+    echo "Legacy Electron macOS packaging must run on macOS." >&2
+    exit 1
+  fi
+  if [ "$(uname -m)" != "arm64" ]; then
+    echo "ClassLoop macOS packaging is Apple silicon arm64 only." >&2
+    exit 1
+  fi
+  npm run package:mac:electron
+}
+
 package_windows() {
   npm run package:win
 }
@@ -214,10 +227,10 @@ package_linux() {
 
 package_swift_macos() {
   if [ "$(uname -s)" != "Darwin" ]; then
-    echo "Swift macOS preview builds must run on macOS." >&2
+    echo "Swift macOS builds must run on macOS." >&2
     exit 1
   fi
-  npm run swift:mac:build
+  npm run swift:mac:package
 }
 
 package_all_desktops() {
@@ -232,7 +245,11 @@ case "$mode" in
     require_local_toolchain
     load_local_env
     ensure_dependencies
-    npm start
+    if [ "$(uname -s)" = "Darwin" ]; then
+      npm run swift:mac:run
+    else
+      npm start
+    fi
     ;;
   --dev)
     require_local_toolchain
@@ -253,6 +270,12 @@ case "$mode" in
     load_local_env
     ensure_dependencies
     package_macos
+    ;;
+  --package-electron-mac)
+    require_local_toolchain
+    load_local_env
+    ensure_dependencies
+    package_electron_macos
     ;;
   --package-win)
     require_local_toolchain

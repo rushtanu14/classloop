@@ -1,9 +1,23 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { spawnSync } = require("child_process");
 const { _electron: electron } = require("playwright");
 
 const appName = "ClassLoop";
+
+if (process.platform === "darwin") {
+  if (process.argv[2] && !fs.existsSync(path.resolve(process.argv[2]))) {
+    console.error(`Packaged executable was not found: ${path.resolve(process.argv[2])}`);
+    process.exit(1);
+  }
+  const swiftSmoke = path.join(__dirname, "smoke-swift-mac.cjs");
+  const result = spawnSync(process.execPath, [swiftSmoke], {
+    cwd: path.resolve(__dirname, ".."),
+    stdio: "inherit",
+  });
+  process.exit(result.status ?? 1);
+}
 
 function candidateAppNames() {
   return [appName];

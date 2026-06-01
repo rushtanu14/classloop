@@ -11,17 +11,13 @@ const productName = packageJson.build?.productName || "ClassLoop";
 const rollbackTarget = process.argv[2] || process.env.CLASSLOOP_ROLLBACK_TARGET_VERSION || "last-known-good";
 
 const requiredArtifacts = [
-  { rel: `${productName}-${version}-arm64.dmg`, label: "macOS arm64 DMG", minBytes: 10 * 1024 * 1024 },
-  { rel: `${productName}-${version}-arm64-mac.zip`, label: "macOS arm64 ZIP", minBytes: 10 * 1024 * 1024 },
+  { rel: `${productName}-Swift-${version}-arm64.dmg`, label: "Swift macOS arm64 DMG", minBytes: 250 * 1024 },
+  { rel: `${productName}-Swift-${version}-arm64-mac.zip`, label: "Swift macOS arm64 ZIP", minBytes: 250 * 1024 },
   { rel: `${productName} Setup ${version}.exe`, label: "Windows x64 NSIS installer", minBytes: 10 * 1024 * 1024 },
   { rel: `${productName}-${version}-win.zip`, label: "Windows x64 ZIP", minBytes: 10 * 1024 * 1024 },
   { rel: `${productName}-${version}-arm64-win.zip`, label: "Windows arm64 ZIP", minBytes: 10 * 1024 * 1024 },
   { rel: `${productName}-${version}.AppImage`, label: "Linux x64 AppImage", minBytes: 10 * 1024 * 1024 },
   { rel: `${productName}-${version}-arm64.AppImage`, label: "Linux arm64 AppImage", minBytes: 10 * 1024 * 1024 },
-  { rel: "latest-mac.yml", label: "macOS update metadata", minBytes: 80 },
-  { rel: "latest.yml", label: "Windows update metadata", minBytes: 80 },
-  { rel: "latest-linux.yml", label: "Linux x64 update metadata", minBytes: 80 },
-  { rel: "latest-linux-arm64.yml", label: "Linux arm64 update metadata", minBytes: 80 },
 ];
 
 const optionalArtifacts = [
@@ -32,8 +28,8 @@ const optionalArtifacts = [
 const platformTargets = [
   {
     id: "macOS arm64",
-    executable: path.join("release", "mac-arm64", `${productName}.app`, "Contents", "MacOS", productName),
-    appAsar: path.join("release", "mac-arm64", `${productName}.app`, "Contents", "Resources", "app.asar"),
+    executable: path.join("release", "swift-mac-arm64", `${productName}.app`, "Contents", "MacOS", productName),
+    bundledDist: path.join("release", "swift-mac-arm64", `${productName}.app`, "Contents", "Resources", "dist", "index.html"),
   },
   {
     id: "Windows x64",
@@ -88,6 +84,11 @@ function extractJsonFromAsar(appAsar, filePath) {
 function verifyPackagedApp(target) {
   const executable = requireFile(target.executable, `${target.id} packaged executable`);
   fs.accessSync(executable, fs.constants.R_OK);
+  if (target.bundledDist) {
+    requireFile(target.bundledDist, `${target.id} bundled dist/index.html`);
+    console.log(`PASS ${target.id} Swift app includes bundled ClassLoop dist`);
+    return;
+  }
   const appAsar = requireFile(target.appAsar, `${target.id} app.asar`);
   const packagedPackage = extractJsonFromAsar(appAsar, "package.json");
   const mainFile = packagedPackage.main || "desktop/main.cjs";
@@ -120,7 +121,7 @@ function writeRollbackSimulation() {
     publicDownloadManifest: "public/classloop-downloads.json",
     verification: [
       "Hosted landing page shows the previous known-good installer link or Packaging pending.",
-      "Manual install-over-replace keeps Electron user data in the per-user data directory.",
+      "Manual install-over-replace keeps Swift macOS or Electron desktop data in the per-user data directory.",
       "Run npm run test:desktop:first-run on each host OS and npm run test:release:distribution before re-opening downloads.",
     ],
   };
@@ -161,8 +162,12 @@ function run() {
       console.warn(`WARN optional ${artifact.label} is absent. Publish the AppImage, or build .deb on a Linux host before offering Debian packages.`);
     }
   }
-  for (const metadata of ["latest-mac.yml", "latest.yml", "latest-linux.yml", "latest-linux-arm64.yml"]) {
-    verifyMetadata(metadata);
+  for (const metadata of ["latest.yml", "latest-linux.yml", "latest-linux-arm64.yml"]) {
+    if (fs.existsSync(path.join(releaseDir, metadata))) {
+      verifyMetadata(metadata);
+    } else {
+      console.warn(`WARN optional ${metadata} release metadata is absent. Public downloads use direct installer/AppImage URLs.`);
+    }
   }
   for (const target of platformTargets) {
     verifyPackagedApp(target);

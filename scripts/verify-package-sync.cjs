@@ -34,10 +34,12 @@ const scriptsThatMustUseFreshDist = [
   "package",
   "package:all",
   "package:mac",
+  "package:mac:electron",
   "package:win",
   "package:linux",
   "package:linux:deb",
   "swift:mac:build",
+  "swift:mac:package",
   "swift:mac:run",
 ];
 
@@ -59,6 +61,15 @@ preparedPackageScripts.forEach((scriptName) => {
 });
 
 assert(
+  scripts["package:mac:prepared"]?.includes("package-swift-mac.cjs"),
+  "package:mac:prepared must package the Swift macOS app, not the Electron fallback.",
+);
+assert(
+  scripts["package:mac:electron"]?.includes("electron-builder --mac"),
+  "package:mac:electron must remain available as the explicit legacy Electron macOS fallback.",
+);
+
+assert(
   Array.isArray(pkg.build?.files) && pkg.build.files.includes("dist/**/*"),
   "electron-builder files must include dist/**/* so packaged macOS, Windows, and Linux builds share the latest web build.",
 );
@@ -69,14 +80,22 @@ assert(
 
 const swiftSource = readText("macos-swift/ClassLoopSwift/Sources/ClassLoopSwift/ClassLoopSwiftApp.swift");
 assert(
-  swiftSource.includes("CLASSLOOP_SWIFT_LOCAL_DIST") && swiftSource.includes("loadFileURL"),
-  "Swift macOS preview must load the local dist build instead of drifting to unrelated bundled code.",
+  swiftSource.includes("CLASSLOOP_SWIFT_LOCAL_DIST") && swiftSource.includes("LocalDistServer"),
+  "Swift macOS app must load the local dist build instead of drifting to unrelated bundled code.",
+);
+assert(
+  swiftSource.includes("Bundle.main.resourceURL") && swiftSource.includes('appendingPathComponent("dist"') && swiftSource.includes("127.0.0.1"),
+  "Swift macOS app must be able to serve the bundled dist inside ClassLoop.app.",
 );
 
 const downloads = readJson("public/classloop-downloads.json");
 assert(
+  downloads.macos?.arm64Url?.includes("ClassLoop-Swift-") && downloads.macos?.arm64ZipUrl?.includes("ClassLoop-Swift-"),
+  "public/classloop-downloads.json must point macOS users at the Swift app DMG/ZIP.",
+);
+assert(
   downloads.macos?.sourceUrl?.includes("macos-swift/ClassLoopSwift"),
-  "public/classloop-downloads.json must expose the Swift macOS preview source option.",
+  "public/classloop-downloads.json must expose the Swift macOS source option.",
 );
 
 if (failures.length) {
@@ -85,4 +104,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("PASS ClassLoop package sync guard: local changes rebuild shared dist before macOS, Windows, Linux, and Swift packaging.");
+console.log("PASS ClassLoop package sync guard: local changes rebuild shared dist before Swift macOS, Windows, and Linux packaging.");

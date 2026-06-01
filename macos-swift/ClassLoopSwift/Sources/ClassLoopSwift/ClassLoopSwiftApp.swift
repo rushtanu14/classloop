@@ -357,24 +357,41 @@ struct ClassLoopWebView: NSViewRepresentable {
     webView.allowsBackForwardNavigationGestures = true
     webView.navigationDelegate = context.coordinator
     webView.uiDelegate = context.coordinator
-    load(model.launchSource, in: webView)
+    load(model.launchSource, in: webView, coordinator: context.coordinator)
     return webView
   }
 
   func updateNSView(_ webView: WKWebView, context: Context) {
     if context.coordinator.reloadRequested != model.reloadRequested {
       context.coordinator.reloadRequested = model.reloadRequested
-      load(model.launchSource, in: webView)
+      load(model.launchSource, in: webView, coordinator: context.coordinator)
     }
   }
 
-  private func load(_ source: ClassLoopLaunchSource, in webView: WKWebView) {
+  private func load(_ source: ClassLoopLaunchSource, in webView: WKWebView, coordinator: Coordinator) {
     switch source {
     case .local(let appURL, _, _):
-      webView.load(URLRequest(url: appURL))
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-        if webView.url == nil || webView.url?.absoluteString == "about:blank" {
-          webView.load(URLRequest(url: appURL))
+      let request = URLRequest(url: appURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+      webView.load(request)
+      coordinator.localLoadGeneration += 1
+      let loadGeneration = coordinator.localLoadGeneration
+
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak webView, weak coordinator] in
+        guard
+          let webView,
+          let coordinator,
+          coordinator.localLoadGeneration == loadGeneration
+        else {
+          return
+        }
+
+        let healthCheck = "Boolean(document.body && document.body.innerText && document.body.innerText.includes('ClassLoop'))"
+        webView.evaluateJavaScript(healthCheck) { result, error in
+          guard coordinator.localLoadGeneration == loadGeneration else { return }
+          if error == nil, (result as? Bool) == true {
+            return
+          }
+          webView.load(request)
         }
       }
     case .hosted(let url):
@@ -384,6 +401,7 @@ struct ClassLoopWebView: NSViewRepresentable {
 
   final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
     var reloadRequested = false
+    var localLoadGeneration = 0
 
     func webView(
       _ webView: WKWebView,

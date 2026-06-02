@@ -68,6 +68,9 @@ import {
   buildStripePaymentLinkUrl,
   createBillingPortalSession,
   createCloudAccount,
+  createCheckoutSession,
+  createEmbeddedCheckoutSession,
+  ensureCloudAccount,
   getBackendStatus,
   getCloudEmailRedirectUrl,
   getCloudProfile,
@@ -315,6 +318,8 @@ type LocalReadResult<T> = {
 type LocalStateReadResult = {
   state: SharedState;
   failedKeys: string[];
+  storage: "browser" | "desktop";
+  readOnly?: boolean;
 };
 
 type ReleaseManifestStatus = "loading" | "ready" | "unavailable" | "invalid" | "blocked";
@@ -628,6 +633,18 @@ const localWriteFailureNotice: WorkspaceNotice = {
   severity: "error",
   title: "Encrypted browser storage could not save changes",
   message: "Your current workspace is still open in memory. Export important work before closing this tab, then check browser storage permissions or available disk space.",
+};
+
+const desktopReadFailureNotice: WorkspaceNotice = {
+  severity: "error",
+  title: "Desktop account data could not be read",
+  message: "ClassLoop opened in read-only recovery mode. Restore or move the desktop data file before saving new accounts or class work.",
+};
+
+const desktopWriteFailureNotice: WorkspaceNotice = {
+  severity: "error",
+  title: "Desktop account data could not be saved",
+  message: "Your current workspace is still open in memory. Restore or export important work before closing ClassLoop.",
 };
 
 function workspaceBootSteps(phase: BootPhase, notice: WorkspaceNotice | null): BootStep[] {
@@ -1603,6 +1620,47 @@ async function writeSecureLocalJson(key: string, value: unknown) {
   localStorage.setItem(key, await encryptLocalJson(value));
 }
 
+function canUseDesktopStateApi() {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname.toLowerCase();
+  return !import.meta.env.DEV && ["127.0.0.1", "localhost"].includes(host);
+}
+
+async function readDesktopState(): Promise<LocalStateReadResult | null> {
+  if (!canUseDesktopStateApi()) return null;
+  try {
+    const response = await fetch("/api/state", { cache: "no-store" });
+    if (response.status === 404) return null;
+    const data = await response.json().catch(() => ({}));
+    const locked = !response.ok || Boolean(data?.readOnly || data?.readError);
+    return {
+      state: normalizeSharedState(data),
+      failedKeys: locked ? ["desktop"] : [],
+      storage: "desktop",
+      readOnly: locked,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function writeDesktopState(
+  state: Pick<SharedState, "accounts" | "sessions" | "personalMeetings" | "draft" | "demoLoaded" | "classGroups" | "rosterTemplates" | "privacySettings" | "auditLog" | "billingProfile">,
+) {
+  if (!canUseDesktopStateApi()) return false;
+  const response = await fetch("/api/state", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: sharedStateJson(state),
+  });
+  if (response.status === 404) return false;
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || `Desktop state save failed with status ${response.status}.`);
+  }
+  return true;
+}
+
 async function readLocalStateFallback(): Promise<LocalStateReadResult> {
   const [
     accounts,
@@ -1654,7 +1712,12 @@ async function readLocalStateFallback(): Promise<LocalStateReadResult> {
       billingProfile: billingProfile.value,
     }),
     failedKeys: results.filter(([, result]) => result.failed).map(([key]) => key),
+    storage: "browser",
   };
+}
+
+async function readLocalState(): Promise<LocalStateReadResult> {
+  return (await readDesktopState()) ?? readLocalStateFallback();
 }
 
 function clearClassLoopLocalPersistence() {
@@ -1720,6 +1783,17 @@ async function writeLocalStateFallback(
     writeSecureLocalJson(secureLocalKeys.auditLog, persistable.auditLog),
     writeSecureLocalJson(secureLocalKeys.billingProfile, persistable.billingProfile),
   ]);
+}
+
+async function writeLocalState(
+  state: Pick<SharedState, "accounts" | "sessions" | "personalMeetings" | "draft" | "demoLoaded" | "classGroups" | "rosterTemplates" | "privacySettings" | "auditLog" | "billingProfile">,
+  storage: LocalStateReadResult["storage"],
+) {
+  if (storage === "desktop") {
+    const savedToDesktop = await writeDesktopState(state);
+    if (savedToDesktop) return;
+  }
+  await writeLocalStateFallback(state);
 }
 
 function normalizeSharedState(data: Partial<SharedState>): SharedState {
@@ -2003,6 +2077,7 @@ function App() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
   const [bootPhase, setBootPhase] = useState<BootPhase>("local");
   const [workspaceNotice, setWorkspaceNotice] = useState<WorkspaceNotice | null>(null);
+  const [localStorageTarget, setLocalStorageTarget] = useState<LocalStateReadResult["storage"]>("browser");
   const [templateLinks, setTemplateLinks] = useState<TemplateLinkManifest>({});
   const [passwordResetCodes, setPasswordResetCodes] = useState<Record<string, PasswordResetRecord>>({});
   const [celebrationMoment, setCelebrationMoment] = useState<CelebrationMoment | null>(null);
@@ -2063,6 +2138,7 @@ function App() {
       setPrivacySettings(defaultPrivacySettings);
       setAuditLog([]);
       setBillingProfile(defaultBillingProfile);
+      setLocalStorageTarget("browser");
       lastSharedJsonRef.current = sharedStateJson(persistableSharedState({
         accounts: demoAccounts,
         sessions: [],
@@ -2083,10 +2159,11 @@ function App() {
       };
     }
 
-    readLocalStateFallback()
+    readLocalState()
       .then((localResult) => {
         if (!active) return;
         const localState = localResult.state;
+        setLocalStorageTarget(localResult.storage);
         setAccounts(localState.accounts);
         setSessions(localState.sessions);
         setPersonalMeetings(localState.personalMeetings);
@@ -2097,9 +2174,15 @@ function App() {
         setPrivacySettings(localState.privacySettings);
         setAuditLog(localState.auditLog);
         setBillingProfile(defaultBillingProfile);
-        lastSharedJsonRef.current = sharedStateJson(localState);
+        lastSharedJsonRef.current = sharedStateJson(persistableSharedState(localState));
         setSyncStatus("local");
-        setWorkspaceNotice(localResult.failedKeys.length ? localReadFailureNotice : null);
+        setWorkspaceNotice(
+          localResult.failedKeys.length
+            ? localResult.storage === "desktop"
+              ? desktopReadFailureNotice
+              : localReadFailureNotice
+            : null,
+        );
         setBootPhase("ready");
       })
       .catch(() => {
@@ -2114,6 +2197,7 @@ function App() {
         setPrivacySettings(defaultPrivacySettings);
         setAuditLog([]);
         setBillingProfile(defaultBillingProfile);
+        setLocalStorageTarget("browser");
         lastSharedJsonRef.current = sharedStateJson(persistableSharedState({
           accounts: demoAccounts,
           sessions: [],
@@ -2162,16 +2246,16 @@ function App() {
     const nextJson = sharedStateJson(persistableState);
     if (nextJson === lastSharedJsonRef.current) return;
 
-    void writeLocalStateFallback(persistableState)
+    void writeLocalState(persistableState, localStorageTarget)
       .then(() => {
         lastSharedJsonRef.current = nextJson;
         setSyncStatus("local");
-        setWorkspaceNotice((notice) => (notice === localWriteFailureNotice ? null : notice));
+        setWorkspaceNotice((notice) => (notice === localWriteFailureNotice || notice === desktopWriteFailureNotice ? null : notice));
       })
       .catch(() => {
-        setWorkspaceNotice(localWriteFailureNotice);
+        setWorkspaceNotice(localStorageTarget === "desktop" ? desktopWriteFailureNotice : localWriteFailureNotice);
       });
-  }, [accounts, auditLog, auth?.demo, billingProfile, classGroups, demoLoaded, draft, personalMeetings, privacySettings, publicDemoOnly, rosterTemplates, sessions, sharedReady]);
+  }, [accounts, auditLog, auth?.demo, billingProfile, classGroups, demoLoaded, draft, localStorageTarget, personalMeetings, privacySettings, publicDemoOnly, rosterTemplates, sessions, sharedReady]);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -2648,7 +2732,37 @@ function App() {
     }
   };
 
-  const signInAccount = async (account: Account): Promise<AuthResult> => {
+  const shouldAutoProvisionCloudAccount = (account: Account) => {
+    if (publicDemoOnly || account.demo || isDemoEmail(account.email)) return false;
+    const testOverride = Boolean((window as Window & { __CLASSLOOP_TEST_AUTO_CLOUD__?: boolean }).__CLASSLOOP_TEST_AUTO_CLOUD__);
+    return getBackendStatus().supabaseConfigured && (testOverride || !import.meta.env.DEV);
+  };
+
+  const prepareCloudAccountForLocalLogin = (account: Account, password: string, source: string) => {
+    if (!shouldAutoProvisionCloudAccount(account)) return;
+    const actor: AuthSession = {
+      accountId: account.id,
+      role: account.role,
+      email: normalizeEmail(account.email),
+      name: account.name,
+      demo: account.demo,
+    };
+    void ensureCloudAccount(account.email, password, {
+      role: account.role,
+      name: account.name,
+      source,
+    }).then((result) => {
+      if (result.ok) {
+        appendAudit("cloud_account_ready", "Cloud account prepared for this local login.", actor);
+        return;
+      }
+      if (result.code !== "not_configured") {
+        appendAudit("cloud_account_pending", result.message, actor);
+      }
+    });
+  };
+
+  const signInAccount = async (account: Account, password?: string): Promise<AuthResult> => {
     const normalizedEmail = normalizeEmail(account.email);
     setAuthLoading(true);
     try {
@@ -2662,13 +2776,14 @@ function App() {
 
       if (account.role === "teacher") {
         setTheme(account.theme ?? defaultTheme);
-        setAuth({
+        const nextAuth: AuthSession = {
           accountId: account.id,
           role: "teacher",
           email: normalizedEmail,
           name: account.name,
           demo: account.demo,
-        });
+        };
+        setAuth(nextAuth);
         appendAudit("login", "Teacher signed in.", {
           accountId: account.id,
           role: "teacher",
@@ -2676,6 +2791,7 @@ function App() {
           name: account.name,
           demo: account.demo,
         });
+        if (password) prepareCloudAccountForLocalLogin(account, password, "classloop_local_signin");
         navigate("dashboard");
         if (account.demo) startWalkthrough();
         return { ok: true };
@@ -2683,13 +2799,14 @@ function App() {
 
       if (account.role === "individual") {
         setTheme(account.theme ?? defaultTheme);
-        setAuth({
+        const nextAuth: AuthSession = {
           accountId: account.id,
           role: "individual",
           email: normalizedEmail,
           name: account.name,
           demo: account.demo,
-        });
+        };
+        setAuth(nextAuth);
         appendAudit("login", "Individual signed in.", {
           accountId: account.id,
           role: "individual",
@@ -2697,6 +2814,7 @@ function App() {
           name: account.name,
           demo: account.demo,
         });
+        if (password) prepareCloudAccountForLocalLogin(account, password, "classloop_local_signin");
         navigate("personal-dashboard");
         return { ok: true };
       }
@@ -2706,14 +2824,15 @@ function App() {
 
       if (student) setSelectedStudentId(student.id);
       setTheme(account.theme ?? defaultTheme);
-      setAuth({
+      const nextAuth: AuthSession = {
         accountId: account.id,
         role: "student",
         email: normalizedEmail,
         name: student?.name ?? account.name,
         studentId: student?.id,
         demo: account.demo,
-      });
+      };
+      setAuth(nextAuth);
       appendAudit("login", "Student signed in.", {
         accountId: account.id,
         role: "student",
@@ -2722,6 +2841,7 @@ function App() {
         studentId: student?.id,
         demo: account.demo,
       });
+      if (password) prepareCloudAccountForLocalLogin(account, password, "classloop_local_signin");
       navigate("student");
       if (account.demo) startWalkthrough();
       return { ok: true };
@@ -2824,9 +2944,8 @@ function App() {
       (item) => item.role === role && normalizeEmail(item.email) === normalizedEmail,
     );
 
-    if (!account || account.passwordHash !== passwordHash) {
-      const existingAnyRole = accounts.find((item) => normalizeEmail(item.email) === normalizedEmail);
-      if (!existingAnyRole?.demo && getBackendStatus().supabaseConfigured) {
+    if (!account) {
+      if (getBackendStatus().supabaseConfigured) {
         const cloudResult = await signIntoCloud(normalizedEmail, password);
         if (cloudResult.code === "email_confirmation_required") {
           return {
@@ -2843,7 +2962,28 @@ function App() {
           return signInCloudBackedAccount(role, normalizedEmail, password, cloudResult.session);
         }
       }
-      return { ok: false, message: "Email or password is incorrect." };
+      return { ok: false, message: `Email not associated with a ClassLoop ${role} account.` };
+    }
+
+    if (account.passwordHash !== passwordHash) {
+      if (!account.demo && getBackendStatus().supabaseConfigured) {
+        const cloudResult = await signIntoCloud(normalizedEmail, password);
+        if (cloudResult.code === "email_confirmation_required") {
+          return {
+            ok: false,
+            code: "email_confirmation_required",
+            message: cloudResult.message,
+            nextMode: "signin",
+            role,
+            email: normalizedEmail,
+            redirectUrl: cloudResult.redirectUrl,
+          };
+        }
+        if (cloudResult.ok && cloudResult.session) {
+          return signInCloudBackedAccount(role, normalizedEmail, password, cloudResult.session);
+        }
+      }
+      return { ok: false, message: "Password is incorrect for this ClassLoop account." };
     }
 
     if (!account.demo) {
@@ -2854,7 +2994,7 @@ function App() {
         password,
       };
     }
-    return signInAccount(account);
+    return signInAccount(account, password);
   };
 
   const handleCreateAccount = async (role: AuthRole, name: string, email: string, password: string): Promise<AuthResult> => {
@@ -2879,7 +3019,7 @@ function App() {
             password,
           };
         }
-        return signInAccount(existingAccount);
+        return signInAccount(existingAccount, password);
       }
       return {
         ok: false,
@@ -2918,7 +3058,7 @@ function App() {
           };
         }
         if (!cloudResult.ok) {
-          if (/already|registered|exists/i.test(cloudResult.message)) {
+          if (cloudResult.code === "account_exists" || /already|registered|exists/i.test(cloudResult.message)) {
             const signInResult = await signIntoCloud(normalizedEmail, password);
             if (signInResult.code === "email_confirmation_required") {
               return {
@@ -2979,7 +3119,7 @@ function App() {
             password,
           };
         }
-        return signInAccount(existingAccount);
+        return signInAccount(existingAccount, password);
       }
       return {
         ok: false,
@@ -7992,8 +8132,15 @@ function SyncBillingPage({
     return true;
   };
 
-  const connectCloud = async () => {
-    const result = await signIntoCloud(cloudEmail, cloudPassword);
+  const connectCloud = async (mode: "signin" | "signup" = "signin") => {
+    const result =
+      mode === "signin"
+        ? await signIntoCloud(cloudEmail, cloudPassword)
+        : await createCloudAccount(cloudEmail, cloudPassword, {
+            role: auth.role,
+            name: auth.name,
+            source: "classloop_plan_options",
+          });
     if (showEmailConfirmation(result, cloudEmail, "cloud-login")) return;
     setMessage(result.message);
     setConnectedEmail(result.session?.user.email ?? "");
@@ -8239,8 +8386,11 @@ function SyncBillingPage({
                 <input type="password" value={cloudPassword} onChange={(event) => setCloudPassword(event.target.value)} />
               </label>
               <div className="button-row">
-                <button className="primary-button" type="button" onClick={connectCloud}>
+                <button className="primary-button" type="button" onClick={() => void connectCloud("signin")}>
                   Sign in
+                </button>
+                <button className="ghost-button" type="button" onClick={() => void connectCloud("signup")} disabled={!backendStatus.supabaseConfigured}>
+                  Create account
                 </button>
               </div>
               {connectedEmail && <p className="settings-message success">Connected as {connectedEmail}</p>}

@@ -209,6 +209,21 @@ function sampleState() {
         submissions: [],
       },
     ],
+    personalMeetings: [
+      {
+        id: "desktop-personal-meeting",
+        ownerEmail: "desktop-state@classloop.test",
+        title: "Desktop Personal Meeting",
+        date: now.slice(0, 10),
+        sourceText: "Personal meeting state should round-trip through encrypted desktop storage.",
+        recap: "Personal state smoke recap.",
+        tasks: [],
+        resources: [],
+        questions: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
     draft: null,
     demoLoaded: false,
     classGroups: [],
@@ -240,7 +255,7 @@ async function run() {
 
     const writeResult = await apiState(classloop.page, "PUT", expected);
     if (writeResult.status !== 200 || writeResult.body.sessions?.[0]?.title !== expected.sessions[0].title) {
-      throw new Error(`Expected state write to succeed, got status ${writeResult.status}.`);
+      throw new Error(`Expected state write to succeed, got status ${writeResult.status}: ${JSON.stringify(writeResult.body)}`);
     }
     await waitForFile(dataFile);
 
@@ -257,7 +272,11 @@ async function run() {
     }
 
     const decryptedRead = await waitForSessionTitle(classloop.page, expected.sessions[0].title);
-    if (decryptedRead.status !== 200 || decryptedRead.body.sessions?.[0]?.title !== expected.sessions[0].title) {
+    if (
+      decryptedRead.status !== 200 ||
+      decryptedRead.body.sessions?.[0]?.title !== expected.sessions[0].title ||
+      decryptedRead.body.personalMeetings?.[0]?.title !== expected.personalMeetings[0].title
+    ) {
       throw new Error(`Expected encrypted state to decrypt through /api/state, got status ${decryptedRead.status}.`);
     }
     await wait(750);

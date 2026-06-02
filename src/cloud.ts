@@ -42,7 +42,13 @@ export type CloudProfile = {
 export type CloudAuthResult = {
   ok: boolean;
   message: string;
-  code?: "email_confirmation_required";
+  code?:
+    | "not_configured"
+    | "invalid_credentials"
+    | "account_exists"
+    | "email_confirmation_required"
+    | "signup_failed"
+    | "signin_failed";
   email?: string;
   redirectUrl?: string;
   session?: SupabaseSession | null;
@@ -129,11 +135,6 @@ export function getCloudEmailRedirectUrl(route = "billing") {
   return `${base.replace(/\/+$/, "")}/#/${safeRoute}${safeRoute.includes("?") ? "&" : "?"}cloud=confirmed`;
 }
 
-function isEmailConfirmationError(error: unknown) {
-  const text = error instanceof Error ? error.message : `${(error as { message?: string; code?: string })?.message ?? ""} ${(error as { code?: string })?.code ?? ""}`;
-  return /email.*not.*confirmed|confirm.*email|email.*confirmation/i.test(text);
-}
-
 function emailConfirmationRequiredResult(
   email: string,
   message = "Confirm your email to finish linking this ClassLoop cloud account.",
@@ -200,6 +201,35 @@ function cloudQueueStorage() {
   return storage;
 }
 
+function supabaseErrorText(error: unknown) {
+  if (!error) return "";
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && "message" in error) return String((error as { message?: unknown }).message ?? "");
+  return String(error);
+}
+
+function isInvalidCredentialsError(error: unknown) {
+  const text = supabaseErrorText(error);
+  const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  return code === "invalid_credentials" || /invalid login credentials/i.test(text);
+}
+
+function isAccountExistsError(error: unknown) {
+  const text = supabaseErrorText(error);
+  const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  return (
+    code === "user_already_exists" ||
+    code === "email_exists" ||
+    /user already registered|already registered|already exists|email.*already/i.test(text)
+  );
+}
+
+function isEmailConfirmationError(error: unknown) {
+  const text = supabaseErrorText(error);
+  const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  return code === "email_not_confirmed" || /email.*not.*confirmed|confirm.*email|email.*confirmation/i.test(text);
+}
+
 function readCloudQueue(): QueuedCloudOperation[] {
   const storage = cloudQueueStorage();
   if (!storage) {
@@ -262,14 +292,18 @@ export async function flushQueuedCloudRequests() {
 
 export async function signIntoCloud(email: string, password: string): Promise<CloudAuthResult> {
   const client = getSupabaseClient();
-  if (!client) return { ok: false, message: "Cloud sync is not available in this build." };
-  const { data, error } = await client.auth.signInWithPassword({ email, password });
+  if (!client) return { ok: false, code: "not_configured", message: "Cloud sync is not available in this build." };
+  const { data, error } = await client.auth.signInWithPassword({ email: normalizeCloudEmail(email), password });
   if (error) {
     if (isEmailConfirmationError(error)) return emailConfirmationRequiredResult(email);
-    if (/invalid|credential|password/i.test(error.message)) {
-      return { ok: false, message: "Email or password is incorrect." };
+    if (isInvalidCredentialsError(error)) {
+      return {
+        ok: false,
+        code: "invalid_credentials",
+        message: "Email not associated with a ClassLoop cloud account, or the cloud password is different.",
+      };
     }
-    return { ok: false, message: "Unable to sign in right now. Try again later." };
+    return { ok: false, code: "signin_failed", message: `Unable to sign in: ${error.message}` };
   }
   await flushQueuedCloudRequests();
   return { ok: true, message: "Cloud sync connected.", session: data.session };
@@ -277,7 +311,7 @@ export async function signIntoCloud(email: string, password: string): Promise<Cl
 
 export async function createCloudAccount(email: string, password: string, options: CloudAccountOptions = {}): Promise<CloudAuthResult> {
   const client = getSupabaseClient();
-  if (!client) return { ok: false, message: "Account creation is not available in this build." };
+  if (!client) return { ok: false, code: "not_configured", message: "Account creation is not available in this build." };
   const normalizedEmail = normalizeCloudEmail(email);
   const redirectUrl = getCloudEmailRedirectUrl(options.redirectRoute ?? "dashboard");
   const { data, error } = await client.auth.signUp({
@@ -295,11 +329,15 @@ export async function createCloudAccount(email: string, password: string, option
     },
   });
   if (error) {
-    if (isEmailConfirmationError(error)) return emailConfirmationRequiredResult(normalizedEmail, undefined, options.redirectRoute ?? "dashboard");
-    if (/already|registered|exists/i.test(error.message)) {
-      return { ok: false, message: "That email already has a ClassLoop account. Sign in instead or reset the password." };
+    if (isAccountExistsError(error)) {
+      return {
+        ok: false,
+        code: "account_exists",
+        message: "A ClassLoop cloud account already exists for this email. Sign in with that cloud password to connect it.",
+      };
     }
-    return { ok: false, message: "Unable to create this account right now. Try again later." };
+    if (isEmailConfirmationError(error)) return emailConfirmationRequiredResult(normalizedEmail, undefined, options.redirectRoute ?? "dashboard");
+    return { ok: false, code: "signup_failed", message: `Unable to create cloud account: ${error.message}` };
   }
   await flushQueuedCloudRequests();
   if (!data.session) {
@@ -362,6 +400,33 @@ export async function prepareBillingCloudAccount(
     throw new Error(data.error || fallback);
   }
   return data as { ready: true; email: string };
+}
+
+export async function ensureCloudAccount(email: string, password: string, options: CloudAccountOptions = {}): Promise<CloudAuthResult> {
+  const signInResult = await signIntoCloud(email, password);
+  if (signInResult.ok) {
+    return { ...signInResult, message: "Existing ClassLoop cloud account connected." };
+  }
+  if (signInResult.code === "not_configured" || signInResult.code === "email_confirmation_required") {
+    return signInResult;
+  }
+  if (signInResult.code !== "invalid_credentials") {
+    return signInResult;
+  }
+
+  const createResult = await createCloudAccount(email, password, options);
+  if (createResult.ok || createResult.code === "not_configured" || createResult.code === "email_confirmation_required") {
+    return createResult;
+  }
+
+  if (createResult.code !== "account_exists") {
+    return createResult;
+  }
+
+  return {
+    ...signInResult,
+    message: "A ClassLoop cloud account already exists for this email, but the cloud password is different. Local login is still saved on this device.",
+  };
 }
 
 export async function signOutCloud() {

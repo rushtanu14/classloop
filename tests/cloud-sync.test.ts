@@ -10,6 +10,7 @@ import {
 import {
   cloudRequest,
   createCloudAccount,
+  ensureCloudAccount,
   getBackendStatus,
   getCloudAuthState,
   getCloudSession,
@@ -146,9 +147,24 @@ assertEqual(backendStatus.webReady, false, "absent Supabase credentials should k
 assertEqual(await getCloudSession(), null, "desktop/local app should not require a Supabase session");
 assertEqual((await getCloudAuthState()).status, "signed_out", "absent Supabase credentials should be signed out, not crashed");
 assertEqual(
+  (await signIntoCloud("teacher@classloop.test", "password")).code,
+  "not_configured",
+  "cloud login should identify absent Supabase credentials",
+);
+assertEqual(
   (await signIntoCloud("teacher@classloop.test", "password")).ok,
   false,
   "cloud login should fail gracefully when Supabase credentials are absent",
+);
+assertEqual(
+  (await createCloudAccount("teacher@classloop.test", "password")).code,
+  "not_configured",
+  "cloud signup should identify absent Supabase credentials",
+);
+assertEqual(
+  (await ensureCloudAccount("teacher@classloop.test", "password")).code,
+  "not_configured",
+  "automatic cloud provisioning should not block local accounts when Supabase credentials are absent",
 );
 assertEqual(
   (await createCloudAccount("teacher@classloop.test", "password")).ok,

@@ -418,6 +418,52 @@ async function mockCloudAuthForStripeCheckout(
   return { resendRequests };
 }
 
+async function mockCloudSignup(page: Page, cloudEmail: string, requests: Array<Record<string, unknown>>) {
+  const fakeUser = {
+    id: "00000000-0000-4000-8000-000000000456",
+    aud: "authenticated",
+    role: "authenticated",
+    email: cloudEmail,
+    email_confirmed_at: "2026-06-02T00:00:00.000Z",
+    confirmed_at: "2026-06-02T00:00:00.000Z",
+    last_sign_in_at: "2026-06-02T00:00:00.000Z",
+    app_metadata: { provider: "email", providers: ["email"] },
+    user_metadata: {},
+    identities: [],
+    created_at: "2026-06-02T00:00:00.000Z",
+    updated_at: "2026-06-02T00:00:00.000Z",
+  };
+
+  await page.route("**/auth/v1/token?grant_type=password", async (route) => {
+    await route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: "invalid_credentials",
+        msg: "Invalid login credentials",
+        message: "Invalid login credentials",
+      }),
+    });
+  });
+
+  await page.route("**/auth/v1/signup**", async (route) => {
+    const body = JSON.parse(route.request().postData() || "{}") as Record<string, unknown>;
+    requests.push(body);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        access_token: "playwright-signup-access-token",
+        token_type: "bearer",
+        expires_in: 3600,
+        expires_at: Math.floor(Date.now() / 1000) + 3600,
+        refresh_token: "playwright-signup-refresh-token",
+        user: fakeUser,
+      }),
+    });
+  });
+}
+
 async function mockStripeJsForEmbeddedCheckout(page: Page) {
   await page.route("https://js.stripe.com/**", async (route) => {
     await route.fulfill({
@@ -1309,6 +1355,41 @@ test("account creation, settings, and password reset work", async ({ page }) => 
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
 });
 
+test("free local account prepares a cloud account on login when Supabase is configured", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The cloud provisioning regression only needs one browser project.");
+  await resetBrowser(page);
+  const runId = Date.now().toString(36);
+  const email = `free-cloud-${runId}@classloop.test`;
+  const password = `free-cloud-pass-${runId}`;
+
+  await createAccount(page, "teacher", "Free Cloud Teacher", email, password);
+  await waitForPersistedAccounts(page);
+  await signOut(page);
+
+  const signupRequests: Array<Record<string, unknown>> = [];
+  await mockCloudSignup(page, email, signupRequests);
+  await page.evaluate(() => {
+    (window as Window & { __CLASSLOOP_TEST_AUTO_CLOUD__?: boolean }).__CLASSLOOP_TEST_AUTO_CLOUD__ = true;
+  });
+
+  await signInAccount(page, "teacher", email, password);
+  await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+  await expect.poll(() => signupRequests.length).toBe(1);
+  expect(signupRequests[0]).toMatchObject({
+    email,
+    password,
+    data: {
+      role: "teacher",
+      name: "Free Cloud Teacher",
+      source: "classloop_local_signin",
+    },
+  });
+
+  await page.getByRole("button", { name: /^plan options$/i }).click();
+  await expect(page.getByText(`Connected as ${email}`)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/FREE · not_configured/i)).toBeVisible();
+});
+
 test("teacher can log in, import a sample, preview publishing, publish, open student view, and access analytics", async ({ page }) => {
   await signIn(page, "teacher");
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
@@ -1791,10 +1872,15 @@ test("accessibility and error-recovery smoke covers keyboard focus, labels, and 
   expect(focusedAfterTab?.visible).toBe(true);
   expect(focusedAfterTab?.hasFocusTreatment).toBe(true);
 
+  await page.getByPlaceholder("name@example.com").fill(`missing-${Date.now()}@classloop.test`);
+  await page.getByPlaceholder("Enter password").fill("wrong-password");
+  await page.locator("form.login-form button[type='submit']").click();
+  await expect(page.getByText(/email not associated with a classloop teacher account/i)).toBeVisible();
+
   await page.getByPlaceholder("name@example.com").fill(teacherEmail);
   await page.getByPlaceholder("Enter password").fill("wrong-password");
   await page.locator("form.login-form button[type='submit']").click();
-  await expect(page.getByText(/email or password is incorrect/i)).toBeVisible();
+  await expect(page.getByText(/password is incorrect for this classloop account/i)).toBeVisible();
 
   const runId = Date.now().toString(36);
   await createAccount(page, "teacher", "Accessibility Teacher", `accessibility-${runId}@classloop.test`, `access-pass-${runId}`);

@@ -315,6 +315,33 @@ export async function createCloudAccount(email: string, password: string, option
   return { ok: true, message: "Cloud account created and connected.", session: data.session };
 }
 
+export async function resendCloudConfirmation(email: string, redirectUrl = getCloudEmailRedirectUrl("dashboard")): Promise<CloudAuthResult> {
+  const client = getSupabaseClient();
+  if (!client) return { ok: false, message: "Cloud email is not available in this build." };
+  const normalizedEmail = normalizeCloudEmail(email);
+  const { error } = await client.auth.resend({
+    type: "signup",
+    email: normalizedEmail,
+    options: {
+      emailRedirectTo: redirectUrl,
+    },
+  });
+  if (error) {
+    return {
+      ok: false,
+      email: normalizedEmail,
+      redirectUrl,
+      message: "Unable to resend the confirmation email right now. Check spam or try again in a minute.",
+    };
+  }
+  return {
+    ok: true,
+    email: normalizedEmail,
+    redirectUrl,
+    message: "Confirmation email sent again. Check inbox, spam, promotions, and school-filtered mail.",
+  };
+}
+
 export async function prepareBillingCloudAccount(
   email: string,
   password: string,

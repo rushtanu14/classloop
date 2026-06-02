@@ -81,6 +81,7 @@ import {
   manualProBillingProfileForEmail,
   planCatalog,
   prepareBillingCloudAccount,
+  resendCloudConfirmation,
   signIntoCloud,
   signOutCloud,
   type BillingProfile,
@@ -187,6 +188,7 @@ type CloudEmailConfirmationOverlayProps = {
   secondaryActionLabel?: string;
   secondaryActionHelper?: string;
   onSecondaryAction?: () => void | Promise<void>;
+  onResend?: () => Promise<CloudAuthResult>;
 };
 
 type PendingLocalAccount = {
@@ -4988,6 +4990,7 @@ function LoginPage({
             secondaryActionLabel={pendingLocalAccount ? (isSubmitting ? "Continuing..." : "Continue on this device") : undefined}
             secondaryActionHelper="You can use ClassLoop locally now. Multi-device sync stays unavailable until this email is confirmed."
             onSecondaryAction={continueOnThisDevice}
+            onResend={() => resendCloudConfirmation(cloudConfirmation.email, cloudConfirmation.redirectUrl)}
           />
         )}
       </main>
@@ -5178,6 +5181,7 @@ function LoginPage({
             secondaryActionLabel={pendingLocalAccount ? (isSubmitting ? "Continuing..." : "Continue on this device") : undefined}
             secondaryActionHelper="You can use ClassLoop locally now. Multi-device sync stays unavailable until this email is confirmed."
             onSecondaryAction={continueOnThisDevice}
+            onResend={() => resendCloudConfirmation(cloudConfirmation.email, cloudConfirmation.redirectUrl)}
           />
         )}
         {mode === "create" && (
@@ -7416,8 +7420,25 @@ function CloudEmailConfirmationOverlay({
   secondaryActionLabel,
   secondaryActionHelper,
   onSecondaryAction,
+  onResend,
 }: CloudEmailConfirmationOverlayProps) {
   const isAccountCreation = prompt.context === "account-create";
+  const [resendStatus, setResendStatus] = useState("");
+  const [resending, setResending] = useState(false);
+
+  const resendConfirmation = async () => {
+    if (!onResend) return;
+    setResending(true);
+    setResendStatus("");
+    try {
+      const result = await onResend();
+      setResendStatus(result.message);
+    } catch (error) {
+      setResendStatus(error instanceof Error ? error.message : "Unable to resend the confirmation email right now.");
+    } finally {
+      setResending(false);
+    }
+  };
 
   return (
     <div className="modal-backdrop cloud-confirmation-backdrop" role="dialog" aria-modal="true" aria-labelledby="cloud-confirmation-title">
@@ -7479,6 +7500,7 @@ function CloudEmailConfirmationOverlay({
         <p className="cloud-confirmation-note">
           <strong>Expected return link:</strong> {prompt.redirectUrl}
         </p>
+        {resendStatus && <p className="cloud-confirmation-note" role="status">{resendStatus}</p>}
 
         {secondaryActionLabel && (
           <p className="cloud-confirmation-note">
@@ -7490,6 +7512,12 @@ function CloudEmailConfirmationOverlay({
           <button type="button" className="ghost-button" onClick={onClose}>
             Close
           </button>
+          {onResend && (
+            <button type="button" className="ghost-button" onClick={resendConfirmation} disabled={resending}>
+              <Mail size={17} />
+              {resending ? "Resending..." : "Resend confirmation email"}
+            </button>
+          )}
           {secondaryActionLabel && onSecondaryAction && (
             <button type="button" className="ghost-button" onClick={onSecondaryAction} title={secondaryActionHelper}>
               <Smartphone size={17} />
@@ -7833,6 +7861,7 @@ function EmbeddedCheckoutPage({
             setCloudConfirmation(null);
             navigate("billing");
           }}
+          onResend={() => resendCloudConfirmation(cloudConfirmation.email, cloudConfirmation.redirectUrl)}
         />
       )}
     </div>
@@ -8287,6 +8316,7 @@ function SyncBillingPage({
             }
             void startCheckout("pro");
           }}
+          onResend={() => resendCloudConfirmation(cloudConfirmation.email, cloudConfirmation.redirectUrl)}
         />
       )}
     </div>

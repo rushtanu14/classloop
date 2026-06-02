@@ -1,8 +1,7 @@
-const CACHE_NAME = "classloop-mobile-shell-v5";
+const CACHE_NAME = "classloop-mobile-shell-v6";
 const SHELL_ASSETS = [
   "/",
   "/manifest.webmanifest",
-  "/classloop-downloads.json",
   "/classloop-app-icon.svg",
   "/classloop-app-icon-192.png",
   "/classloop-app-icon-512.png",
@@ -41,6 +40,21 @@ self.addEventListener("fetch", (event) => {
 
   if (event.request.mode === "navigate") {
     event.respondWith(fetch(event.request).catch(() => caches.match("/")));
+    return;
+  }
+
+  if (requestUrl.pathname === "/classloop-downloads.json") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (event.request.method === "GET" && response.ok) {
+            const responseClone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
     return;
   }
 

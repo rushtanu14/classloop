@@ -144,7 +144,9 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   expect(serviceWorker.ok()).toBeTruthy();
   const serviceWorkerText = await serviceWorker.text();
   expect(serviceWorkerText).toContain("classloop-mobile-shell");
-  expect(serviceWorkerText).toContain("/classloop-downloads.json");
+  const shellAssetsBlock = serviceWorkerText.match(/const SHELL_ASSETS = \[[\s\S]*?\];/)?.[0] ?? "";
+  expect(shellAssetsBlock).not.toContain("/classloop-downloads.json");
+  expect(serviceWorkerText).toContain('requestUrl.pathname === "/classloop-downloads.json"');
 
   if (readyDownloads) {
     const firstReadyDownload = platformDownloads.getByRole("button").filter({ hasText: /download ready/i }).first();

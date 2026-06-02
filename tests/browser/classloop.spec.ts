@@ -318,6 +318,7 @@ async function mockCloudAuthForStripeCheckout(
     name?: string;
   } = {},
 ) {
+  const resendRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
   const userMetadata = {
     product: "ClassLoop",
     plan: "free",
@@ -403,6 +404,18 @@ async function mockCloudAuthForStripeCheckout(
       body: JSON.stringify(authSessionBody),
     });
   });
+  await page.route("**/auth/v1/resend**", async (route) => {
+    resendRequests.push({
+      url: route.request().url(),
+      body: route.request().postDataJSON() as Record<string, unknown>,
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ user: null, session: null }),
+    });
+  });
+  return { resendRequests };
 }
 
 async function mockStripeJsForEmbeddedCheckout(page: Page) {
@@ -917,7 +930,7 @@ test("cloud signup confirmation lets teachers continue locally until email is co
   const password = `confirm-pass-${runId}`;
 
   await resetBrowser(page);
-  await mockCloudAuthForStripeCheckout(page, email, {
+  const cloudAuth = await mockCloudAuthForStripeCheckout(page, email, {
     role: "teacher",
     name: "Needs Confirmation",
     signupRequiresConfirmation: true,
@@ -938,6 +951,10 @@ test("cloud signup confirmation lets teachers continue locally until email is co
   await expect(dialog).toContainText(/Continue on this device stores the account locally/i);
   await expect(dialog).toContainText(/Multi-device cloud sync will stay unavailable/i);
   await expect(page.getByRole("heading", { name: /sign in to classloop/i })).toBeVisible();
+  await dialog.getByRole("button", { name: /resend confirmation email/i }).click();
+  await expect(dialog).toContainText(/Confirmation email sent again/i);
+  await expect.poll(() => cloudAuth.resendRequests.length).toBe(1);
+  expect(cloudAuth.resendRequests[0].body).toMatchObject({ email, type: "signup" });
   await dialog.getByRole("button", { name: /continue on this device/i }).click();
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
   await skipAutoWalkthrough(page);
@@ -1668,7 +1685,7 @@ test("unconfirmed cloud email shows instructions overlay instead of a red billin
   const checkoutRequests: Array<Record<string, unknown>> = [];
   const cloudOptions = { emailNotConfirmed: true };
 
-  await mockCloudAuthForStripeCheckout(page, email, cloudOptions);
+  const cloudAuth = await mockCloudAuthForStripeCheckout(page, email, cloudOptions);
   await page.route("**/api/billing/prepare-account", async (route) => {
     prepareRequests.push(route.request().postDataJSON() as Record<string, unknown>);
     await route.fulfill({
@@ -1702,6 +1719,10 @@ test("unconfirmed cloud email shows instructions overlay instead of a red billin
   await expect(page.locator(".settings-message").filter({ hasText: /email not confirmed|confirm your email/i })).toHaveCount(0);
   await expect.poll(() => prepareRequests.length).toBe(0);
   await expect.poll(() => checkoutRequests.length).toBe(0);
+  await dialog.getByRole("button", { name: /resend confirmation email/i }).click();
+  await expect(dialog).toContainText(/Confirmation email sent again/i);
+  await expect.poll(() => cloudAuth.resendRequests.length).toBe(1);
+  expect(cloudAuth.resendRequests[0].body).toMatchObject({ email, type: "signup" });
 
   await dialog.getByRole("button", { name: /close email confirmation instructions/i }).click();
   await page.getByPlaceholder("you@school.org").fill(email);

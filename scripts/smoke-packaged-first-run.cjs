@@ -5,6 +5,11 @@ const { spawnSync } = require("child_process");
 const { _electron: electron } = require("playwright");
 
 const appName = "ClassLoop";
+const rootDir = path.resolve(__dirname, "..");
+
+function swiftMacExecutablePath() {
+  return path.join(rootDir, "release", "swift-mac-arm64", `${appName}.app`, "Contents", "MacOS", appName);
+}
 
 if (process.platform === "darwin") {
   if (process.argv[2] && !fs.existsSync(path.resolve(process.argv[2]))) {
@@ -48,6 +53,22 @@ function resolveExecutable() {
   return path.resolve(process.argv[2] || defaultExecutablePath());
 }
 
+function shouldUseSwiftMacSmoke() {
+  return process.platform === "darwin" && !process.argv[2] && fs.existsSync(swiftMacExecutablePath());
+}
+
+function runSwiftMacSmoke() {
+  console.log("[packaged-smoke] macOS package default is the Swift Apple silicon app; running Swift first-run smoke.");
+  const result = spawnSync(process.execPath, [path.join(rootDir, "scripts", "smoke-swift-mac.cjs")], {
+    cwd: rootDir,
+    encoding: "utf8",
+    stdio: "inherit",
+  });
+  if (result.status !== 0) {
+    process.exitCode = result.status || 1;
+  }
+}
+
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -78,7 +99,37 @@ async function close(app) {
   }
 }
 
+async function ensureAuthForm(page, mode) {
+  const heading =
+    mode === "create" ? page.getByText(/Create your ClassLoop account/i) : page.getByText(/Sign in to ClassLoop/i);
+  if (await heading.isVisible().catch(() => false)) {
+    return;
+  }
+
+  await page.waitForSelector(".auth-entry-actions, .auth-mode-link", { timeout: 20_000 });
+  if (mode === "create") {
+    const entryCreate = page.locator(".auth-entry-actions").getByRole("button", { name: /^create account$/i });
+    if (await entryCreate.isVisible().catch(() => false)) {
+      await entryCreate.click();
+    } else {
+      await page.locator(".auth-mode-link").click();
+    }
+  } else {
+    const entryLogin = page.locator(".auth-entry-actions").getByRole("button", { name: /^log in$/i });
+    if (await entryLogin.isVisible().catch(() => false)) {
+      await entryLogin.click();
+    }
+  }
+
+  await heading.waitFor({ timeout: 20_000 });
+}
+
 async function run() {
+  if (shouldUseSwiftMacSmoke()) {
+    runSwiftMacSmoke();
+    return;
+  }
+
   const executablePath = resolveExecutable();
   if (!fs.existsSync(executablePath)) {
     throw new Error(`Packaged executable was not found: ${executablePath}`);
@@ -105,9 +156,8 @@ async function run() {
     const firstPage = await firstRun.firstWindow();
     firstPage.setDefaultTimeout(20_000);
     log("Waiting for first-run sign-in screen");
-    await firstPage.getByPlaceholder("name@example.com").waitFor({ timeout: 20_000 });
+    await ensureAuthForm(firstPage, "create");
     log("Creating a clean teacher account");
-    await firstPage.getByRole("button", { name: /create account/i }).click();
     await firstPage.getByLabel(/^name$/i).fill("Packaged Smoke Teacher");
     await firstPage.getByPlaceholder("name@example.com").fill(email);
     await firstPage.locator('input[placeholder="Enter password"]').fill(password);
@@ -132,7 +182,7 @@ async function run() {
     secondRun = await electron.launch(launchOptions);
     const secondPage = await secondRun.firstWindow();
     secondPage.setDefaultTimeout(20_000);
-    await secondPage.getByPlaceholder("name@example.com").waitFor({ timeout: 20_000 });
+    await ensureAuthForm(secondPage, "signin");
     await secondPage.getByPlaceholder("name@example.com").fill(email);
     await secondPage.getByPlaceholder("Enter password").fill(password);
     await secondPage.locator("form.login-form button[type='submit']").click();

@@ -1,15 +1,17 @@
 import { assertIpRateLimit, json, methodNotAllowed, readJsonBody, requireUser, sendApiError } from "./_shared.js";
+import { applyManualProGrantToRow, manualProProfileColumns } from "./billing/manual-pro.js";
 import { validateProfilePatchPayload } from "./validators.js";
 
 const PROFILE_RATE_LIMIT = { endpoint: "profile", limit: 120, windowMs: 60 * 1000 };
 const PROFILE_BODY_MAX_BYTES = 2_000;
 
 export function billingProfileFromRow(row) {
+  const entitledRow = applyManualProGrantToRow(row);
   return {
-    tier: row?.plan_tier || "free",
-    status: row?.subscription_status || "not_configured",
-    customerId: row?.stripe_customer_id || undefined,
-    currentPeriodEnd: row?.current_period_end || undefined,
+    tier: entitledRow?.plan_tier || "free",
+    status: entitledRow?.subscription_status || "not_configured",
+    customerId: entitledRow?.stripe_customer_id || undefined,
+    currentPeriodEnd: entitledRow?.current_period_end || undefined,
   };
 }
 
@@ -31,7 +33,7 @@ async function ensureProfile(supabase, user) {
     .eq("id", user.id)
     .maybeSingle();
   if (error) throw error;
-  if (data) return data;
+  if (data) return applyManualProGrantToRow(data);
 
   const { data: inserted, error: insertError } = await supabase
     .from("classloop_profiles")
@@ -42,11 +44,12 @@ async function ensureProfile(supabase, user) {
       plan_tier: "free",
       subscription_status: "not_configured",
       no_training_on_student_data: true,
+      ...manualProProfileColumns(user.email || ""),
     })
     .select("email, role, plan_tier, subscription_status, stripe_customer_id, current_period_end, no_training_on_student_data")
     .single();
   if (insertError) throw insertError;
-  return inserted;
+  return applyManualProGrantToRow(inserted);
 }
 
 export default async function handler(request, response) {
@@ -80,12 +83,13 @@ export default async function handler(request, response) {
         .select("email, role, plan_tier, subscription_status, stripe_customer_id, current_period_end, no_training_on_student_data")
         .single();
       if (error) throw error;
+      const entitledData = applyManualProGrantToRow(data);
 
       return json(response, 200, {
-        email: data.email,
-        role: data.role,
-        billingProfile: billingProfileFromRow(data),
-        noTrainingOnStudentData: Boolean(data.no_training_on_student_data),
+        email: entitledData.email,
+        role: entitledData.role,
+        billingProfile: billingProfileFromRow(entitledData),
+        noTrainingOnStudentData: Boolean(entitledData.no_training_on_student_data),
       });
     }
 

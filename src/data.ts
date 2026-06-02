@@ -124,6 +124,10 @@ function cleanSpeakerLabel(value: string) {
     .trim();
 }
 
+function isClassLoopLiveCaptureSpeakerLabel(value: string) {
+  return /^unknown (?:in-person|meeting) voice \d+$/i.test(cleanSpeakerLabel(value));
+}
+
 function isPrivateMessageLine(line: string) {
   return /^\s*(?:\[[^\]]+\]\s*)?\[(?:private chat|direct message|dm)\]/i.test(line);
 }
@@ -139,6 +143,24 @@ function isAmbiguousGenericSpeaker(speaker: string) {
     genericSpeakerLabelPattern.test(cleaned) &&
       (!stripped || /^\d+$/.test(stripped) || /^(one|two|three|four|five|six|seven|eight|nine|ten)$/i.test(stripped)),
   );
+}
+
+function isJunkPersonLabel(value: string) {
+  const normalized = normalizeSpeakerName(value);
+  const compact = compactSpeakerName(value);
+  return Boolean(
+    !normalized ||
+      /^(?:class|course|period|section|room|roster|students?|participants?|attendance|assignment|homework|worksheet|meeting|recording|transcript)$/i.test(
+        normalized,
+      ) ||
+      /^(?:\d+|[a-z]{1,3}\d+|\d+[a-z]{1,3})$/i.test(compact)
+  );
+}
+
+function hasNameLikeToken(value: string) {
+  return value
+    .split(/\s+/)
+    .some((token) => /^[A-Za-z][A-Za-z.'-]{1,}$/.test(token.replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, "")));
 }
 
 function isChatLine(line: string) {
@@ -164,11 +186,16 @@ function isNonInstructionalChatText(text: string, sourceLine = "") {
 }
 
 function isPlausibleTranscriptSpeakerLabel(value: string) {
-  const stripped = stripGenericSpeakerLabel(cleanSpeakerLabel(value));
+  const cleaned = cleanSpeakerLabel(value);
+  if (isClassLoopLiveCaptureSpeakerLabel(cleaned)) return true;
+
+  const stripped = stripGenericSpeakerLabel(cleaned);
   const normalized = normalizeSpeakerName(stripped);
   const tokens = stripped.split(/\s+/).filter(Boolean);
   if (!normalized || !tokens.length || tokens.length > 5) return false;
-  if (genericSpeakerLabelPattern.test(value.trim())) return true;
+  if (isJunkPersonLabel(stripped) || !hasNameLikeToken(stripped)) return false;
+  if (/^[^\p{L}\p{N}]+/u.test(stripped) && tokens.length === 1) return false;
+  if (genericSpeakerLabelPattern.test(cleaned)) return true;
   if (tokens.length <= 3) return true;
 
   const hasSentenceWords = tokens.some((token) => /^[a-z]{2,}$/.test(token));
@@ -191,7 +218,7 @@ function isTranscriptMetadataSpeaker(speaker: string) {
   return (
     !normalized ||
     complianceMetadataLabelPattern.test(normalized) ||
-    /^(teacher|instructor|professor|facilitator|host|classloop|meeting title|meeting date|meeting id|meeting passcode|passcode|date|duration|participants?|transcript|transcription|recording|audio|chat|question|questions|answer|answers|summary|agenda|topic|topics|resources?|links?|name|email|attendance|zoom names?|student access|speaker|speakers|speaker matching|transcript speaker matching|start time|end time|timezone|language|notes|practice problems?|skills? to reinforce|common mistakes?|project or repo|debug targets?|workshop deliverable|decisions? made|owners?|next checkpoint|peer questions?|practice goals?|google classroom course|classroom course|section period|course code|imported classroom items?|zoom cloud meeting|zoom meeting|raw zoom transcript)$/i.test(
+    /^(teacher|instructor|professor|facilitator|host|class|course|section|period|room|roster|classloop|meeting title|meeting date|meeting id|meeting passcode|passcode|date|duration|participants?|transcript|transcription|recording|audio|chat|question|questions|answer|answers|summary|agenda|topic|topics|resources?|links?|name|email|attendance|zoom names?|student access|speaker|speakers|speaker matching|transcript speaker matching|start time|end time|timezone|language|notes|practice problems?|skills? to reinforce|common mistakes?|project or repo|debug targets?|workshop deliverable|decisions? made|owners?|next checkpoint|peer questions?|practice goals?|google classroom course|classroom course|section period|course code|imported classroom items?|zoom cloud meeting|zoom meeting|raw zoom transcript)$/i.test(
       normalized,
     ) ||
     /^\d+$/.test(normalized) ||
@@ -564,6 +591,8 @@ function isPlausibleRosterName(name: string) {
   return Boolean(
     normalized &&
       !isRosterMetadataText(name) &&
+      !isJunkPersonLabel(name) &&
+      hasNameLikeToken(name) &&
       /[a-z]/i.test(name) &&
       !/@/.test(name) &&
       !genericSpeakerLabelPattern.test(name.trim()) &&

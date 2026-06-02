@@ -88,7 +88,7 @@ function emailConfig() {
   return { configured: false, provider: "Not configured" };
 }
 
-function textForStudentEmail(session, student) {
+function textForStudentEmail(session, student, includeAccessInstructions = false) {
   const followUp = Array.isArray(session.followUps)
     ? session.followUps.find((item) => item.studentId === student.id)
     : null;
@@ -112,18 +112,27 @@ function textForStudentEmail(session, student) {
       : "",
     "",
     "Open ClassLoop with your roster email to see the full student dashboard.",
+    includeAccessInstructions
+      ? [
+          "",
+          "Student access:",
+          `- Use this roster email: ${studentEmail(student)}`,
+          "- Open ClassLoop and choose Student sign in.",
+          "- If ClassLoop sends an access email, use the link or code sent to this address.",
+        ].join("\n")
+      : "",
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-async function sendRecapEmails(session, onlyRecipients) {
+async function sendRecapEmails(session, onlyRecipients, includeAccessInstructions = false) {
   const config = emailConfig();
   if (!config.configured) {
-    throw httpError(503, "Email is not configured. Set SMTP or Gmail app-password environment variables before sending.");
+    throw httpError(503, "Email delivery is not available right now.");
   }
   if (!config.from) {
-    throw httpError(503, "Email sender is missing. Set CLASSLOOP_SMTP_FROM or CLASSLOOP_GMAIL_FROM.");
+    throw httpError(503, "Email delivery is not available right now.");
   }
 
   const transporter = nodemailer.createTransport(config.transport);
@@ -143,7 +152,7 @@ async function sendRecapEmails(session, onlyRecipients) {
         replyTo: config.replyTo,
         to,
         subject: `ClassLoop recap: ${session.title || "Session follow-up"}`,
-        text: textForStudentEmail(session, student),
+        text: textForStudentEmail(session, student, includeAccessInstructions),
       });
       recipients.push(to);
     } catch (error) {
@@ -237,7 +246,7 @@ export default async function handler(request, response) {
       throw httpError(403, "Only the teacher who owns this session can send recap emails.");
     }
 
-    const result = await sendRecapEmails(session, body.recipients);
+    const result = await sendRecapEmails(session, body.recipients, body.includeAccessInstructions);
     const nextState = {
       ...state,
       sessions: sessions.map((item, index) => (index === sessionIndex ? markSessionEmailsSent(item, result) : item)),

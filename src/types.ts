@@ -35,6 +35,7 @@ export type ClassGroup = {
   id: string;
   ownerEmail: string;
   name: string;
+  description?: string;
   defaultSessionType: SessionType;
   students: Student[];
   createdAt: string;

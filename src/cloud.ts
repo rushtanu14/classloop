@@ -42,7 +42,17 @@ export type CloudProfile = {
 export type CloudAuthResult = {
   ok: boolean;
   message: string;
+  code?: "email_confirmation_required";
+  email?: string;
+  redirectUrl?: string;
   session?: SupabaseSession | null;
+};
+
+export type CloudAccountOptions = {
+  role?: CloudProfile["role"];
+  name?: string;
+  redirectRoute?: string;
+  source?: string;
 };
 
 export const planCatalog = [
@@ -50,23 +60,29 @@ export const planCatalog = [
     tier: "free" as const,
     name: "Free",
     price: "$0",
-    detail: "1 generated session per day, Google/Zoom workflow, student accounts, recap email delivery, and roster tools.",
+    detail: "1 generated session per day, transcript import, student accounts, recap email delivery, roster tools, and multi-device cloud sync.",
     sessionLimit: 1,
   },
   {
     tier: "pro" as const,
     name: "Pro",
     price: "$3.99/mo",
-    detail: "Unlimited generated sessions plus private analytics and JSON/CSV/print report exports.",
+    detail: "Unlimited sessions, live in-person/online capture, delivery proof, private analytics, and JSON/CSV/print report exports.",
     sessionLimit: Number.POSITIVE_INFINITY,
   },
 ];
 
 const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
+const defaultStripePublishableKey =
+  "pk_live_51TVPunCZ4fp9VxAWEaKlZRDYDXbXORPxpWfa8MQ4YbZ2HRGo82H0FroVWaYPDfRj6eImeDQB3c21umsipqTsSX0q005Nt906Yz";
+const defaultStripePricingTableId = "prctbl_1TdX6hCZ4fp9VxAW8RoGLMmZ";
 const supabaseUrl = viteEnv.VITE_SUPABASE_URL;
 const supabaseAnonKey = viteEnv.VITE_SUPABASE_ANON_KEY;
-const stripePublishableKey = viteEnv.VITE_STRIPE_PUBLISHABLE_KEY;
+const stripePublishableKey = viteEnv.VITE_STRIPE_PUBLISHABLE_KEY || defaultStripePublishableKey;
+const stripePricingTableId = viteEnv.VITE_STRIPE_PRICING_TABLE_ID || defaultStripePricingTableId;
+const classLoopPublicUrl = viteEnv.VITE_CLASSLOOP_PUBLIC_URL || "https://classloop-followup.vercel.app";
 const offlineQueueKey = "classloop:cloud-offline-queue:v1";
+const manualProEmails = new Set(["rushilcpm02@gmail.com"]);
 
 let supabaseClient: SupabaseClient | null = null;
 
@@ -86,10 +102,51 @@ export function getStripePublishableKey() {
   return stripePublishableKey || "";
 }
 
+export function getStripePricingTableConfig() {
+  return {
+    pricingTableId: stripePricingTableId || "",
+    publishableKey: stripePublishableKey || "",
+  };
+}
+
 export function getSupabaseClient() {
   if (!supabaseUrl || !supabaseAnonKey) return null;
   if (!supabaseClient) supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
   return supabaseClient;
+}
+
+function normalizeCloudEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+export function getCloudEmailRedirectUrl(route = "billing") {
+  const safeRoute = route.replace(/^[#/]+/, "").replace(/[^a-z0-9-?=&_]/gi, "") || "billing";
+  const base =
+    classLoopPublicUrl ||
+    (typeof window !== "undefined" && /^https?:$/.test(window.location.protocol)
+      ? window.location.origin
+      : "https://classloop-followup.vercel.app");
+  return `${base.replace(/\/+$/, "")}/#/${safeRoute}${safeRoute.includes("?") ? "&" : "?"}cloud=confirmed`;
+}
+
+function isEmailConfirmationError(error: unknown) {
+  const text = error instanceof Error ? error.message : `${(error as { message?: string; code?: string })?.message ?? ""} ${(error as { code?: string })?.code ?? ""}`;
+  return /email.*not.*confirmed|confirm.*email|email.*confirmation/i.test(text);
+}
+
+function emailConfirmationRequiredResult(
+  email: string,
+  message = "Confirm your email to finish linking this ClassLoop cloud account.",
+  redirectRoute = "billing",
+): CloudAuthResult {
+  return {
+    ok: false,
+    code: "email_confirmation_required",
+    email: normalizeCloudEmail(email),
+    redirectUrl: getCloudEmailRedirectUrl(redirectRoute),
+    message,
+    session: null,
+  };
 }
 
 export function planForTier(tier: PlanTier) {
@@ -98,6 +155,24 @@ export function planForTier(tier: PlanTier) {
 
 export function isPaidPlan(profile?: BillingProfile | null) {
   return Boolean(profile?.customerId && profile.tier === "pro" && profile.status === "active");
+}
+
+export function isManualProEmail(email = "") {
+  return normalizeCloudEmail(email) ? manualProEmails.has(normalizeCloudEmail(email)) : false;
+}
+
+export function manualProBillingProfileForEmail(email = ""): BillingProfile | null {
+  const normalized = normalizeCloudEmail(email);
+  if (!isManualProEmail(normalized)) return null;
+  return {
+    tier: "pro",
+    status: "active",
+    customerId: `manual_pro_${normalized.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`,
+  };
+}
+
+export function isManualProBillingProfile(profile?: BillingProfile | null) {
+  return Boolean(profile?.customerId?.startsWith("manual_pro_"));
 }
 
 export async function getCloudSession() {
@@ -187,20 +262,79 @@ export async function flushQueuedCloudRequests() {
 
 export async function signIntoCloud(email: string, password: string): Promise<CloudAuthResult> {
   const client = getSupabaseClient();
-  if (!client) return { ok: false, message: "Add Supabase keys to .env.local before using cloud sync." };
+  if (!client) return { ok: false, message: "Cloud sync is not available in this build." };
   const { data, error } = await client.auth.signInWithPassword({ email, password });
-  if (error) return { ok: false, message: `Unable to sign in: ${error.message}` };
+  if (error) {
+    if (isEmailConfirmationError(error)) return emailConfirmationRequiredResult(email);
+    if (/invalid|credential|password/i.test(error.message)) {
+      return { ok: false, message: "Email or password is incorrect." };
+    }
+    return { ok: false, message: "Unable to sign in right now. Try again later." };
+  }
   await flushQueuedCloudRequests();
   return { ok: true, message: "Cloud sync connected.", session: data.session };
 }
 
-export async function createCloudAccount(email: string, password: string): Promise<CloudAuthResult> {
+export async function createCloudAccount(email: string, password: string, options: CloudAccountOptions = {}): Promise<CloudAuthResult> {
   const client = getSupabaseClient();
-  if (!client) return { ok: false, message: "Add Supabase keys to .env.local before creating cloud accounts." };
-  const { data, error } = await client.auth.signUp({ email, password });
-  if (error) return { ok: false, message: `Unable to create cloud account: ${error.message}` };
+  if (!client) return { ok: false, message: "Account creation is not available in this build." };
+  const normalizedEmail = normalizeCloudEmail(email);
+  const redirectUrl = getCloudEmailRedirectUrl(options.redirectRoute ?? "dashboard");
+  const { data, error } = await client.auth.signUp({
+    email: normalizedEmail,
+    password,
+    options: {
+      emailRedirectTo: redirectUrl,
+      data: {
+        product: "ClassLoop",
+        plan: "free",
+        role: options.role,
+        name: options.name,
+        source: options.source ?? "classloop_account_creation",
+      },
+    },
+  });
+  if (error) {
+    if (isEmailConfirmationError(error)) return emailConfirmationRequiredResult(normalizedEmail, undefined, options.redirectRoute ?? "dashboard");
+    if (/already|registered|exists/i.test(error.message)) {
+      return { ok: false, message: "That email already has a ClassLoop account. Sign in instead or reset the password." };
+    }
+    return { ok: false, message: "Unable to create this account right now. Try again later." };
+  }
   await flushQueuedCloudRequests();
-  return { ok: true, message: "Cloud account created. Check email if confirmation is enabled.", session: data.session };
+  if (!data.session) {
+    return {
+      ok: true,
+      code: "email_confirmation_required",
+      email: normalizedEmail,
+      redirectUrl,
+      message: "Cloud account created. Confirm your email, then sign in to ClassLoop with the same password.",
+      session: null,
+    };
+  }
+  return { ok: true, message: "Cloud account created and connected.", session: data.session };
+}
+
+export async function prepareBillingCloudAccount(
+  email: string,
+  password: string,
+  role: "teacher",
+  name = "",
+): Promise<{ ready: true; email: string }> {
+  const response = await fetch("/api/billing/prepare-account", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, role, name }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const fallback =
+      response.status === 404
+        ? "Payment setup is not available in this build."
+        : "Unable to prepare payment right now.";
+    throw new Error(data.error || fallback);
+  }
+  return data as { ready: true; email: string };
 }
 
 export async function signOutCloud() {
@@ -213,10 +347,10 @@ export async function cloudRequest<T>(path: string, options: RequestInit = {}) {
   const session = await getCloudSession();
   const authState = cloudAuthStateFromSession(session);
   if (authState.status === "signed_out") {
-    throw new Error("Sign in with Supabase before using hosted sync.");
+    throw new Error("Sign in to cloud sync before continuing.");
   }
   if (authState.status === "expired") {
-    throw new Error("Cloud session expired. Sign in again to continue hosted sync.");
+    throw new Error("Cloud session expired. Sign in again to continue cloud sync.");
   }
 
   let response: Response;
@@ -238,7 +372,7 @@ export async function cloudRequest<T>(path: string, options: RequestInit = {}) {
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.error || `Cloud request failed with status ${response.status}.`);
+    throw new Error(data.error || "Cloud request failed. Try again later.");
   }
   return data as T;
 }

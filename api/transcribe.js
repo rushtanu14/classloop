@@ -30,7 +30,7 @@ function assertSupportedMedia(contentType) {
   ) {
     return;
   }
-  throw httpError(415, "Upload an audio or video recording for Whisper transcription.");
+  throw httpError(415, "Upload an audio or video recording for transcription.");
 }
 
 function normalizeSegments(payload) {
@@ -68,7 +68,7 @@ export default async function handler(request, response) {
     assertIpRateLimit(request, response, { endpoint: "transcribe", limit: 12, windowMs: 60 * 1000 });
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      throw httpError(503, "Whisper transcription is not configured. Set OPENAI_API_KEY on the server.");
+      throw httpError(503, "Recording transcription is not available right now.");
     }
 
     const contentType = headerValue(request.headers, "content-type") || "application/octet-stream";
@@ -94,7 +94,7 @@ export default async function handler(request, response) {
     });
     const payload = await openaiResponse.json().catch(() => ({}));
     if (!openaiResponse.ok) {
-      throw httpError(openaiResponse.status >= 500 ? 502 : openaiResponse.status, payload.error?.message || "Whisper transcription failed.");
+      throw httpError(openaiResponse.status >= 500 ? 502 : openaiResponse.status, "Recording transcription failed.");
     }
 
     const segments = normalizeSegments(payload);
@@ -107,6 +107,6 @@ export default async function handler(request, response) {
       segments,
     });
   } catch (error) {
-    return sendApiError(response, error, "Whisper transcription failed.");
+    return sendApiError(response, error, "Recording transcription failed.");
   }
 }

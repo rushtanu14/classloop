@@ -8,8 +8,14 @@ import {
 import { stripeApiVersion } from "../api/billing/stripe-client.js";
 import { checkoutReturnUrls, embeddedCheckoutReturnUrl } from "../api/billing/checkout.js";
 import { checkoutSessionPaymentAccepted, subscriptionIdFromInvoice } from "../api/billing/webhook.js";
+import {
+  applyManualProGrantToRow,
+  isManualProCustomerId,
+  manualProCustomerId,
+  manualProProfileColumns,
+} from "../api/billing/manual-pro.js";
 import { billingProfileFromRow, profilePatchColumns } from "../api/profile.js";
-import { isPaidPlan } from "../.test-build/src/cloud.js";
+import { isPaidPlan, manualProBillingProfileForEmail } from "../.test-build/src/cloud.js";
 
 function fakeSupabase() {
   const calls = [];
@@ -41,6 +47,17 @@ assert.equal(
   true,
   "Active Pro subscriptions with a Stripe customer should unlock paid features",
 );
+assert.deepEqual(
+  manualProBillingProfileForEmail(" RUSHILCPM02@gmail.com "),
+  {
+    tier: "pro",
+    status: "active",
+    customerId: "manual_pro_rushilcpm02_gmail_com",
+  },
+  "Rushil's owner email should resolve to a trusted manual Pro profile",
+);
+assert.equal(isPaidPlan(manualProBillingProfileForEmail("rushilcpm02@gmail.com")), true, "Manual owner Pro should unlock paid features");
+assert.equal(manualProBillingProfileForEmail("teacher@classloop.test"), null, "Other emails should not receive manual Pro");
 assert.equal(
   isPaidPlan({ tier: "pro", status: "trialing", customerId: "cus_trial" }),
   false,
@@ -191,3 +208,37 @@ assert.deepEqual(profile, {
   customerId: "cus_profile",
   currentPeriodEnd: "2026-06-12T00:00:00.000Z",
 });
+
+assert.equal(manualProCustomerId("rushilcpm02@gmail.com"), "manual_pro_rushilcpm02_gmail_com");
+assert.equal(isManualProCustomerId("manual_pro_rushilcpm02_gmail_com"), true, "Manual Pro ids should be distinguishable from Stripe ids");
+assert.deepEqual(manualProProfileColumns("teacher@classloop.test"), {}, "Non-owner emails should not get manual Pro columns");
+assert.deepEqual(
+  applyManualProGrantToRow({
+    email: "rushilcpm02@gmail.com",
+    plan_tier: "free",
+    subscription_status: "not_configured",
+  }),
+  {
+    email: "rushilcpm02@gmail.com",
+    plan_tier: "pro",
+    subscription_status: "active",
+    stripe_customer_id: "manual_pro_rushilcpm02_gmail_com",
+    subscription_id: "manual_pro_owner_grant",
+    current_period_end: null,
+  },
+  "Profile rows for Rushil's email should be upgraded by the trusted server helper",
+);
+assert.deepEqual(
+  billingProfileFromRow({
+    email: "rushilcpm02@gmail.com",
+    plan_tier: "free",
+    subscription_status: "not_configured",
+  }),
+  {
+    tier: "pro",
+    status: "active",
+    customerId: "manual_pro_rushilcpm02_gmail_com",
+    currentPeriodEnd: undefined,
+  },
+  "Hosted profile responses should expose manual Pro for Rushil's email",
+);

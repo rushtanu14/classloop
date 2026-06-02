@@ -42,6 +42,7 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   await expect(page.getByText("Teacher-approved drafts")).toBeVisible();
   await expect(page.getByText("Zoom transcript first")).toBeVisible();
   await expect(page.getByText("Classwide Classroom posts")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^beta$/i })).toHaveCount(0);
   await expectNoUnnamedInteractive(page, ".landing-page");
   await expectContrast(page, landingContrastSelectors);
   if ((page.viewportSize()?.width ?? 0) <= 500 && (await page.locator(".landing-route-frame").count())) {
@@ -59,10 +60,18 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
     await expect(page.locator(".landing-card-kicker").filter({ hasText: /^Support signals$/ })).toBeVisible();
   }
 
-  if (await docsButton.isVisible().catch(() => false)) {
-    await docsButton.click();
-    await expect(page.getByRole("heading", { name: /^ClassLoop docs\.$/i })).toBeVisible();
-  }
+  await page.goto("/?demoOnly=1#/beta");
+  await expect(page.getByText(/run a 15-minute classloop beta test/i)).toHaveCount(0);
+  await expect(page.getByText(/copy beta invite/i)).toHaveCount(0);
+  await expect(page.getByText(/feedback scorecard/i)).toHaveCount(0);
+
+  await page.goto("/?demoOnly=1#/docs");
+  await expect(page.getByRole("heading", { name: /^ClassLoop docs\.$/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /business model/i })).toBeVisible();
+  await expect(page.getByText(/Teacher Pro.*\$3\.99\/month/i)).toBeVisible();
+  await expect(page.getByText(/No per-minute transcript pricing/i)).toBeVisible();
+  await expect(page.getByText(/School\/team later/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /launch gates/i })).toBeVisible();
 
   await page.goto("/?demoOnly=1");
   if (!(await page.locator(".landing-platform-list").count())) {
@@ -160,16 +169,27 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   await expect(page.getByPlaceholder("Enter password")).toHaveCount(0);
 
   await page.getByRole("button", { name: /demo teacher side/i }).click();
-  await expect(page.getByRole("dialog", { name: /classloop guided walkthrough/i })).toBeVisible();
-  await page.getByRole("button", { name: /skip/i }).click();
+  const walkthroughDialog = page.getByRole("dialog", { name: /classloop guided walkthrough/i });
+  await walkthroughDialog.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
+  if (await walkthroughDialog.isVisible().catch(() => false)) {
+    const skipButton = walkthroughDialog.getByRole("button", { name: /skip/i });
+    await skipButton.click({ force: true, timeout: 5_000 }).catch(async () => {
+      await skipButton.dispatchEvent("click").catch(() => undefined);
+    });
+    await walkthroughDialog.waitFor({ state: "hidden", timeout: 5_000 }).catch(() => undefined);
+  } else {
+    await expect(page.getByLabel(/open interactive walkthrough/i)).toBeVisible();
+  }
   await expect(page.getByText(/You are on a demo account/i)).toBeVisible();
   await page.getByRole("button", { name: /^plan options$/i }).click();
-  await expect(page.getByRole("button", { name: /^Demo account$/i })).toBeDisabled();
-  await expect(page.getByText(/Demo account upgrades are disabled/i)).toBeVisible();
+  await expect(page.locator(".stripe-pricing-table-shell")).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: /Demo account upgrades are disabled/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /What Pro unlocks after payment/i })).toBeVisible();
-  await expect(page.getByText(/Stripe verifies the upgrade/i)).toBeVisible();
-  await expect(page.getByText(/Analytics and report exports/i)).toBeVisible();
-  await expect(page.getByText(/Google Classroom, Zoom transcript import, student accounts, and recap email delivery stay in the Free workflow/i)).toBeVisible();
+  await expect(page.locator(".pro-step-card").getByText("Create a cloud account", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Free accounts can upload this workspace to cloud sync/i)).toBeVisible();
+  await expect(page.getByText(/Live capture modes/i)).toBeVisible();
+  await expect(page.getByText(/Private analytics and report exports/i)).toBeVisible();
+  await expect(page.getByText(/Transcript upload remains available on Free/i)).toBeVisible();
 });
 
 test("hosted public screenshots and privacy routes expose compliance boundaries", async ({ page }) => {

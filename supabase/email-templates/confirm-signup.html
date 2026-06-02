@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Confirm your ClassLoop cloud account</title>
+  </head>
+  <body style="margin:0;background:#f4fbf8;color:#10231f;font-family:Inter,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4fbf8;padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fffefa;border:1px solid #cfe8df;border-radius:18px;overflow:hidden;">
+            <tr>
+              <td style="padding:28px 28px 16px;">
+                <p style="margin:0 0 10px;color:#0f766e;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;">ClassLoop Pro</p>
+                <h1 style="margin:0;color:#0f3d39;font-size:30px;line-height:1.12;">Thank you for being a Pro member.</h1>
+                <p style="margin:16px 0 0;color:#31554f;font-size:16px;line-height:1.55;">
+                  Confirm this email address to link {{ .Email }} to your ClassLoop cloud account. This keeps your Pro subscription, cloud workspace, and multi-device login attached to the right teacher account.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:8px 28px 24px;">
+                <a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;border-radius:12px;padding:14px 18px;font-weight:800;">
+                  Confirm email and link ClassLoop cloud
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 28px 28px;">
+                <p style="margin:0 0 10px;color:#31554f;font-size:14px;line-height:1.55;">
+                  After confirming, return to ClassLoop Plan options and sign in with the same email and password. Stripe still verifies active Pro before paid features unlock.
+                </p>
+                <p style="margin:0 0 10px;color:#31554f;font-size:14px;line-height:1.55;">
+                  If the button does not work, copy and paste this confirmation link into your browser:
+                </p>
+                <p style="margin:0 0 12px;word-break:break-all;color:#0f3d39;font-size:13px;line-height:1.45;">{{ .ConfirmationURL }}</p>
+                <p style="margin:0;color:#63736f;font-size:12px;line-height:1.45;">
+                  Expected return page: {{ .RedirectTo }}
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+week,day,format,post_title,hook,primary_screen,cta,asset_status
+1,Monday,Short video,Messy transcript to follow-up,Teachers should not have to turn a Zoom transcript into 30 separate reminders.,Import screen -> teacher review -> student preview,Comment beta or send a workflow to test,Needs fresh screen recording
+1,Thursday,Short video,After-class cleanup problem,The class ends but the teacher work does not.,Notes/transcript/links -> generated recap/tasks/resources,What is the most annoying after-class follow-up task?,Needs fresh screen recording
+2,Monday,Short video,Teacher review first,The AI should draft. The teacher should approve.,Teacher review and publish preview,Would you publish an AI draft if review was this explicit?,Needs product capture
+2,Thursday,Short video,Student view,What if each student got the version of class follow-up that mattered to them?,Student dashboard and completion check-in,What should a student follow-up page always include?,Needs product capture
+2,Weekend,Carousel,Starter deck mini-walkthrough,ClassLoop is a teacher assistant for after-class follow-through.,Starter promo deck slides 1-8,Teachers/tutors: ask for beta test link,Deck exists
+3,Monday,Short video,Privacy demo boundary,Real classroom data should not be forced into a public demo.,Hosted demo + download/privacy/support routes,What would you need to trust this?,Needs product capture
+3,Thursday,Short video,Tutor and small group use,This is not only for big classrooms.,Small roster/tutor notes -> follow-up preview,Tutors: would this fit your workflow?,Needs sample tutor scenario
+4,Monday,Short video,Quiet students without ranking,Participation tools should not shame students.,Private teacher analytics/support cues,How should support signals be shown safely?,Needs product capture
+4,Thursday,Build-in-public short,Granola for education follow-through,I am building a classroom assistant inspired by post-meeting memory tools.,Deck cover + product workflow + demo URL,Teachers/tutors/club leads: comment your workflow,Deck exists
+4,Weekend,Longer walkthrough,15-minute beta test path,Here is the exact path I want teachers to test.,Demo login -> import -> review -> student preview,Book or request a 15-minute beta test,Needs narrated walkthrough

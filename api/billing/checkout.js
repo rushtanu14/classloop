@@ -9,6 +9,7 @@ import {
   sendApiError,
 } from "../_shared.js";
 import { validateCheckoutPayload } from "../validators.js";
+import { isManualProCustomerId, isManualProEmail } from "./manual-pro.js";
 import { createStripeClient } from "./stripe-client.js";
 
 const CHECKOUT_RATE_LIMIT = { endpoint: "billing-checkout", limit: 30, windowMs: 10 * 60 * 1000 };
@@ -42,13 +43,16 @@ export default async function handler(request, response) {
     const price = requiredEnv("STRIPE_PRO_PRICE_ID");
     const baseUrl = process.env.CLASSLOOP_PUBLIC_URL || originUrl(request);
     const embedded = body?.uiMode === "embedded";
+    if (isManualProEmail(user.email || "")) {
+      return json(response, 409, { error: "Pro is already enabled for this ClassLoop account." });
+    }
     const { data: profile } = await supabase
       .from("classloop_profiles")
       .select("stripe_customer_id")
       .eq("id", user.id)
       .maybeSingle();
     const customerId =
-      profile?.stripe_customer_id ||
+      (profile?.stripe_customer_id && !isManualProCustomerId(profile.stripe_customer_id) ? profile.stripe_customer_id : "") ||
       (
         await stripe.customers.create({
           email: user.email || undefined,

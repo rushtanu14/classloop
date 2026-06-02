@@ -64,7 +64,7 @@ export function originUrl(request) {
 
 export function requiredEnv(name) {
   const value = process.env[name];
-  if (!value) throw httpError(503, "Hosted service is not configured.", { details: `Missing ${name}.` });
+  if (!value) throw httpError(503, "Hosted service is not available right now.");
   return value;
 }
 
@@ -392,12 +392,12 @@ export async function requireUser(request, response, options = {}) {
   const auth = request.headers.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
   if (!token) {
-    throw httpError(401, "Sign in with Supabase before using hosted sync.");
+    throw httpError(401, "Sign in before using cloud sync.");
   }
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data.user) {
-    throw httpError(401, "Invalid or expired Supabase session.");
+    throw httpError(401, "Invalid or expired session.");
   }
   if (options.rateLimit && response) {
     assertUserRateLimit(request, response, data.user, options.rateLimit);

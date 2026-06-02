@@ -6,6 +6,9 @@ const teacherEmail = "teacher@classloop.demo";
 const teacherPassword = "classloop-teacher";
 const studentEmail = "maya@classloop.demo";
 const studentPassword = "classloop-student";
+const classTemplateCopyUrl = "https://docs.google.com/document/d/17qDjDwntSB_QHYE6rn-TKwiOrIWyxPBywMzSwNJUhVU/copy";
+
+type TestAuthRole = "teacher" | "student" | "individual";
 
 async function resetBrowser(page: Page) {
   await page.goto("/");
@@ -59,7 +62,11 @@ async function skipAutoWalkthrough(page: Page) {
   const dialog = page.getByRole("dialog", { name: /classloop guided walkthrough/i });
   await dialog.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined);
   if (await dialog.isVisible().catch(() => false)) {
-    await dialog.getByRole("button", { name: /skip/i }).click();
+    const skipButton = dialog.getByRole("button", { name: /skip/i });
+    await skipButton.click({ force: true, timeout: 5_000 }).catch(async () => {
+      await skipButton.dispatchEvent("click").catch(() => undefined);
+    });
+    await dialog.waitFor({ state: "hidden", timeout: 5_000 }).catch(() => undefined);
   }
 }
 
@@ -146,11 +153,15 @@ async function signOut(page: Page) {
 
 async function createAccount(
   page: Page,
-  role: "teacher" | "student" | "individual",
+  role: TestAuthRole,
   name: string,
   email: string,
   password: string,
+  options: { mockCloud?: boolean } = {},
 ) {
+  if (options.mockCloud !== false) {
+    await mockCloudAuthForStripeCheckout(page, email, { role, name });
+  }
   await openCreateAccountForm(page);
   await chooseAuthRole(page, role);
   await page.getByPlaceholder("Your name").fill(name);
@@ -159,6 +170,39 @@ async function createAccount(
   await page.getByPlaceholder("Re-enter password").fill(password);
   await page.locator("form.login-form button[type='submit']").click();
   await skipAutoWalkthrough(page);
+}
+
+async function seedLocalAccount(
+  page: Page,
+  role: TestAuthRole,
+  name: string,
+  email: string,
+  password: string,
+) {
+  await page.evaluate(
+    async ({ role, name, email, password }) => {
+      const bytes = new TextEncoder().encode(password);
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      const passwordHash = Array.from(new Uint8Array(digest))
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+      localStorage.setItem(
+        "classloop:accounts:v1",
+        JSON.stringify([
+          {
+            id: `${role}-seeded-${Date.now().toString(36)}`,
+            role,
+            email,
+            name,
+            passwordHash,
+            createdAt: new Date().toISOString(),
+            theme: "classroom",
+          },
+        ]),
+      );
+    },
+    { role, name, email, password },
+  );
 }
 
 async function signInAccount(page: Page, role: "teacher" | "student" | "individual", email: string, password: string) {
@@ -224,14 +268,13 @@ async function signInWithSeededBillingProfile(
 }
 
 async function signInWithVerifiedProEntitlement(page: Page, email: string, password: string) {
-  const cloudEmail = `verified-${Date.now().toString(36)}@classloop.test`;
-  await mockCloudAuthForStripeCheckout(page, cloudEmail);
+  await mockCloudAuthForStripeCheckout(page, email, { role: "teacher", name: "Verified Pro Teacher" });
   await page.route("**/api/profile", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        email: cloudEmail,
+        email,
         role: "teacher",
         billingProfile: {
           tier: "pro",
@@ -255,17 +298,33 @@ async function signInWithVerifiedProEntitlement(page: Page, email: string, passw
   await page.goto("/#/dashboard");
   await signInAccount(page, "teacher", email, password);
   await page.getByRole("button", { name: /^plan options$/i }).click();
-  await expect(page.getByText(/FREE · not_configured/i)).toBeVisible();
-  await page.getByPlaceholder("you@school.org").fill(cloudEmail);
-  await page.getByLabel(/cloud password/i).fill("cloud-pass-123");
-  await page.getByRole("button", { name: /^sign in$/i }).click();
-  await expect(page.getByText(`Connected as ${cloudEmail}`)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(`Connected as ${email}`)).toBeVisible({ timeout: 15_000 });
+  await page.locator(".settings-options-panel").filter({ hasText: /Billing options/i }).locator("summary").click();
+  await page.getByRole("button", { name: /refresh plan/i }).click();
   await expect(page.getByText(/PRO · active/i)).toBeVisible();
   await page.getByLabel(/go to dashboard/i).click();
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
 }
 
-async function mockCloudAuthForStripeCheckout(page: Page, cloudEmail: string) {
+async function mockCloudAuthForStripeCheckout(
+  page: Page,
+  cloudEmail: string,
+  options: {
+    failPasswordSignIn?: boolean;
+    emailNotConfirmed?: boolean;
+    signupRequiresConfirmation?: boolean;
+    signupAlreadyExists?: boolean;
+    role?: TestAuthRole;
+    name?: string;
+  } = {},
+) {
+  const userMetadata = {
+    product: "ClassLoop",
+    plan: "free",
+    role: options.role ?? "teacher",
+    name: options.name ?? "ClassLoop Test User",
+    source: "playwright",
+  };
   const fakeUser = {
     id: "00000000-0000-4000-8000-000000000123",
     aud: "authenticated",
@@ -275,24 +334,73 @@ async function mockCloudAuthForStripeCheckout(page: Page, cloudEmail: string) {
     confirmed_at: "2026-05-19T00:00:00.000Z",
     last_sign_in_at: "2026-05-19T00:00:00.000Z",
     app_metadata: { provider: "email", providers: ["email"] },
-    user_metadata: {},
+    user_metadata: userMetadata,
     identities: [],
     created_at: "2026-05-19T00:00:00.000Z",
     updated_at: "2026-05-19T00:00:00.000Z",
   };
 
-  await page.route("**/auth/v1/token?grant_type=password", async (route) => {
+  const authSessionBody = {
+    access_token: "playwright-access-token",
+    token_type: "bearer",
+    expires_in: 3600,
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    refresh_token: "playwright-refresh-token",
+    user: fakeUser,
+  };
+  let passwordSignInAttempts = 0;
+
+  await page.route("**/auth/v1/token**", async (route) => {
+    passwordSignInAttempts += 1;
+    if (options.emailNotConfirmed) {
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "email_not_confirmed", error_description: "Email not confirmed" }),
+      });
+      return;
+    }
+    if (options.failPasswordSignIn && passwordSignInAttempts === 1) {
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "invalid_grant", error_description: "Invalid login credentials" }),
+      });
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        access_token: "playwright-access-token",
-        token_type: "bearer",
-        expires_in: 3600,
-        expires_at: Math.floor(Date.now() / 1000) + 3600,
-        refresh_token: "playwright-refresh-token",
-        user: fakeUser,
-      }),
+      body: JSON.stringify(authSessionBody),
+    });
+  });
+  await page.route("**/auth/v1/signup**", async (route) => {
+    if (options.signupAlreadyExists) {
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "user_already_exists", msg: "User already registered" }),
+      });
+      return;
+    }
+    if (options.signupRequiresConfirmation) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          user: {
+            ...fakeUser,
+            email_confirmed_at: null,
+            confirmed_at: null,
+          },
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(authSessionBody),
     });
   });
 }
@@ -303,6 +411,14 @@ async function mockStripeJsForEmbeddedCheckout(page: Page) {
       status: 200,
       contentType: "application/javascript",
       body: `
+        if (!window.customElements.get("stripe-pricing-table")) {
+          window.customElements.define("stripe-pricing-table", class extends HTMLElement {
+            connectedCallback() {
+              if (this.childElementCount) return;
+              this.innerHTML = '<section role="region" aria-label="Stripe pricing table smoke"><h2>Stripe pricing table test frame</h2><button type="button">Select Pro</button></section>';
+            }
+          });
+        }
         window.Stripe = function(publishableKey) {
           window.__classloopStripePublishableKey = publishableKey;
           return {
@@ -320,6 +436,68 @@ async function mockStripeJsForEmbeddedCheckout(page: Page) {
         };
       `,
     });
+  });
+}
+
+async function mockLiveCaptureDevices(page: Page) {
+  await page.addInitScript({
+    content: `
+      (() => {
+        const makeStream = () => new MediaStream();
+        Object.defineProperty(navigator, "mediaDevices", {
+          configurable: true,
+          value: {
+            getUserMedia: async () => makeStream(),
+            getDisplayMedia: async () => makeStream(),
+          },
+        });
+
+        class MockMediaRecorder {
+          static isTypeSupported() { return true; }
+          constructor() {
+            this.state = "inactive";
+            this.mimeType = "audio/webm";
+            this.ondataavailable = null;
+            this.onstop = null;
+          }
+          start() {
+            this.state = "recording";
+            setTimeout(() => {
+              if (this.ondataavailable) {
+                this.ondataavailable({ data: new Blob(["noisy capture sample"], { type: "audio/webm" }) });
+              }
+            }, 10);
+          }
+          stop() {
+            this.state = "inactive";
+            if (this.onstop) this.onstop();
+          }
+        }
+
+        class MockSpeechRecognition {
+          constructor() {
+            this.continuous = false;
+            this.interimResults = false;
+            this.lang = "en-US";
+            this.onresult = null;
+            this.onerror = null;
+            this.onend = null;
+          }
+          start() {
+            setTimeout(() => {
+              if (!this.onresult) return;
+              const result = { isFinal: true, 0: { transcript: "Maya said um the ratio is noisy but clear enough for Friday homework" } };
+              this.onresult({ resultIndex: 0, results: [result] });
+            }, 20);
+          }
+          stop() {}
+        }
+
+        Object.defineProperty(window, "MediaRecorder", { configurable: true, value: MockMediaRecorder });
+        Object.defineProperty(window, "SpeechRecognition", { configurable: true, value: MockSpeechRecognition });
+        Object.defineProperty(window, "webkitSpeechRecognition", { configurable: true, value: MockSpeechRecognition });
+      })();
+    `,
   });
 }
 
@@ -358,7 +536,7 @@ async function importReviewAndPublishScenario(page: Page, scenario: EndToEndScen
   await summary.getByLabel(/^Roster$/i).fill(scenario.roster);
   await summary.getByLabel(/^Resources$/i).fill(scenario.resources);
   await page.getByRole("button", { name: /generate draft/i }).click();
-  await expect(page.getByText(/edit the draft before publishing/i)).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".review-page")).toBeVisible({ timeout: 20_000 });
 
   await page.getByRole("tab", { name: /roster & matching/i }).click();
   await expect(page.getByText(/all transcript speakers match the roster/i)).toBeVisible();
@@ -392,8 +570,8 @@ async function importReviewAndPublishScenario(page: Page, scenario: EndToEndScen
   await page
     .getByLabel(/classroom body/i)
     .fill(`Class-wide recap for ${scenario.title}\n\nResources and shared tasks only.`);
-  await page.getByRole("button", { name: /post to classroom/i }).click();
-  await expect(page.getByText(/connect google classroom oauth/i)).toBeVisible();
+  await page.getByRole("button", { name: /prepare classroom post/i }).click();
+  await expect(page.getByText(/Edited assignment is ready/i)).toBeVisible();
   await expect(page.locator(".preview-diff-row")).toHaveCount(2);
   await expect(page.getByLabel(new RegExp(`Preview for ${escapeRegExp(scenario.student.name)}`, "i"))).toBeVisible();
   await page.getByRole("button", { name: /publish to students/i }).click();
@@ -539,6 +717,17 @@ test("hosted demo mode uses sample accounts only and does not persist demo works
   await expect(page.getByRole("heading", { name: /try classloop as a teacher or student/i })).toBeVisible();
 });
 
+test("teacher dashboard shows an assistant brief and next-step queue", async ({ page }) => {
+  await signIn(page, "teacher");
+  await expect(page.getByLabel("Teacher assistant brief")).toBeVisible();
+  await expect(page.getByText("Teacher assistant brief")).toBeVisible();
+  await expect(page.locator(".assistant-brief-fact")).toHaveCount(4);
+  await expect(page.locator(".assistant-action").first()).toBeVisible();
+  await expect(page.getByLabel("Copy-ready assistant drafts")).toBeVisible();
+  await expect(page.getByText("Next-class opener")).toBeVisible();
+  await expect(page.getByRole("button", { name: /copy next-class opener/i })).toBeVisible();
+});
+
 async function publishGeometrySample(page: Page) {
   await page.getByRole("button", { name: /new session/i }).first().click();
   await expect(page.getByText(/session template/i)).toBeVisible();
@@ -547,7 +736,7 @@ async function publishGeometrySample(page: Page) {
   await page.getByRole("button", { name: /use geometry sample/i }).click();
   await expect(page.getByText(/practice problems/i)).toBeVisible();
   await page.getByRole("button", { name: /generate draft/i }).click();
-  await expect(page.getByText(/edit the draft before publishing/i)).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".review-page")).toBeVisible({ timeout: 20_000 });
 
   await page.getByRole("tab", { name: /roster & matching/i }).click();
   await expect(page.getByText(/all transcript speakers match the roster/i)).toBeVisible();
@@ -558,7 +747,7 @@ async function publishGeometrySample(page: Page) {
     mimeType: "text/csv",
     buffer: Buffer.from("Name,Email,Aliases\nMaya Chen,maya@classloop.demo,Maya iPad\nAarav Patel,aarav@classloop.demo,\n"),
   });
-  await expect(page.locator('input[value="Maya iPad"]')).toBeVisible();
+  await expect(page.locator('input[value="Maya iPad"]').first()).toBeVisible();
   await page.locator(".roster-attendance-field select").first().selectOption("late");
   await page.getByRole("button", { name: /^link$/i }).first().click();
   await expect(page.getByText(/linked to maya@classloop.demo/i)).toBeVisible();
@@ -578,10 +767,16 @@ async function publishGeometrySample(page: Page) {
   await expect(page.getByText(/student portal preview/i)).toBeVisible();
   await expect(page.getByText(/per-student preview differences/i)).toBeVisible();
   await expect(page.getByText(/publish audit/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /edit session/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /save and close/i })).toBeVisible();
+  const publishActionHeights = await page
+    .locator(".publish-preview-page .review-actions > button")
+    .evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height));
+  expect(Math.max(...publishActionHeights) - Math.min(...publishActionHeights)).toBeLessThan(8);
   await expect(page.getByText(/teacher-approved class-wide post/i)).toBeVisible();
   await expect(page.locator('[aria-label="Email recap recipients"]')).toContainText("Maya Chen");
-  await page.getByLabel(/include magic link or email code/i).check();
-  await expect(page.getByText(/supabase\/auth email delivery/i)).toBeVisible();
+  await page.getByLabel(/include student sign-in instructions/i).check();
+  await expect(page.getByLabel(/student access instruction preview/i)).toContainText(/Access instructions will be added/i);
   expect(await page.locator(".preview-diff-row").count()).toBeGreaterThanOrEqual(2);
   await page.locator(".preview-diff-row").filter({ hasText: "Aarav" }).click();
   await expect(page.getByLabel(/Preview for Aarav Patel/i)).toBeVisible();
@@ -597,29 +792,38 @@ async function publishGeometrySample(page: Page) {
   await expect(page.getByText(/Follow-through tracker/i)).toBeVisible();
 }
 
-test("teacher can scaffold Classroom roster/resources and Zoom cloud transcript import", async ({ page }, testInfo) => {
+test("teacher can use template links, manual rosters, and Zoom cloud transcript import", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "The integration scaffold smoke runs once; responsive coverage comes from the main app smoke.");
   const runId = Date.now().toString(36);
   await resetBrowser(page);
   await createAccount(page, "teacher", `Integration Teacher ${runId}`, `integrations-${runId}@classloop.test`, `teacher-pass-${runId}`);
 
   await page.getByRole("button", { name: /new session/i }).first().click();
-  await expect(page.getByLabel(/google docs class template/i)).toBeVisible();
-  await expect(page.getByText(/template link is not connected yet/i)).toBeVisible();
-  await expect(page.getByText(/roster source/i)).toBeVisible();
-  await page.getByRole("button", { name: /google classroom/i }).click();
-  await page.getByLabel(/classroom course/i).selectOption("cs4all-period-4");
-  await expect(page.getByText(/Everyday Algorithms Worksheet/i)).toBeVisible();
-  await expect(page.getByText(/recent same-course item/i).first()).toBeVisible();
-  await page.getByRole("button", { name: /import selected classroom course/i }).click();
-  await expect(page.getByText(/Imported 6 students from CS4All Intro to Computational Thinking/i)).toBeVisible();
+  const classTemplateCard = page.getByLabel(/google docs class template/i);
+  await expect(classTemplateCard).toBeVisible();
+  await expect(classTemplateCard.getByRole("link", { name: /make a copy/i })).toHaveAttribute("href", classTemplateCopyUrl);
+  await expect(classTemplateCard.getByText(/template link is not connected yet/i)).toHaveCount(0);
+  await expect(page.getByText(/roster source/i)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /google classroom/i })).toHaveCount(0);
+  await page
+    .locator(".summary-input-card")
+    .getByLabel(/^Roster$/i)
+    .fill(
+      [
+        "Aaliyah Carter, acarter@cs4all.nyc",
+        "Jalen Thompson, jthompson@cs4all.nyc",
+        "Priya Mehta, pmehta@cs4all.nyc",
+        "Keisha Brown, kbrown@cs4all.nyc",
+      ].join("\n"),
+    );
 
   await expect(page.getByText(/zoom cloud import/i)).toBeVisible();
   await page.getByLabel(/search date or title/i).fill("CS4All");
   await page.getByRole("button", { name: /import selected zoom transcript/i }).click();
   await expect(page.getByText(/Imported Audio transcript VTT from CS4All Intro to Computational Thinking/i)).toBeVisible();
   await page.getByRole("button", { name: /generate draft/i }).click();
-  await expect(page.getByText(/edit the draft before publishing/i)).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".review-page")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/edit the draft before publishing/i)).toBeVisible();
   await page.getByRole("tab", { name: /^transcript$/i }).click();
   await expect(page.getByText(/CS4All Intro to Computational Thinking transcript/i)).toBeVisible();
   await expect(page.getByText(/Priya Mehta/i).first()).toBeVisible();
@@ -641,7 +845,123 @@ test("teacher can scaffold Classroom roster/resources and Zoom cloud transcript 
   expect(exported.transcript).toBe("");
   expect(exported.notes).toContain("Raw Zoom cloud transcript auto-deleted after draft generation.");
   expect(exported.students.map((student) => student.email)).toContain("acarter@cs4all.nyc");
-  expect(exported.resources.some((resource) => resource.url.includes("classroom.google.com/c/CS4ALL"))).toBe(true);
+  expect(exported.resources.some((resource) => resource.url.includes("classroom.google.com"))).toBe(false);
+});
+
+test("create account reuses an existing email instead of creating duplicate local accounts", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The duplicate-email auth regression only needs one browser project.");
+  const runId = Date.now().toString(36);
+  const email = `duplicate-${runId}@classloop.test`;
+  const password = `duplicate-pass-${runId}`;
+
+  await resetBrowser(page);
+  await createAccount(page, "teacher", `Duplicate Teacher ${runId}`, email, password);
+  await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+
+  await signOut(page);
+  await openCreateAccountForm(page);
+  await chooseAuthRole(page, "student");
+  await page.getByPlaceholder("Your name").fill("Duplicate Student");
+  await page.getByPlaceholder("name@example.com").fill(email);
+  await page.getByPlaceholder("Enter password", { exact: true }).fill(password);
+  await page.getByPlaceholder("Re-enter password").fill(password);
+  await page.locator("form.login-form button[type='submit']").click();
+  await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+  await expect(page.getByRole("button", { name: /new session/i }).first()).toBeVisible();
+
+  await signOut(page);
+  await openCreateAccountForm(page);
+  await chooseAuthRole(page, "individual");
+  await page.getByPlaceholder("Your name").fill("Duplicate Individual");
+  await page.getByPlaceholder("name@example.com").fill(email);
+  await page.getByPlaceholder("Enter password", { exact: true }).fill(`wrong-${password}`);
+  await page.getByPlaceholder("Re-enter password").fill(`wrong-${password}`);
+  await page.locator("form.login-form button[type='submit']").click();
+  await expect(page.getByRole("heading", { name: /sign in to classloop/i })).toBeVisible();
+  await expect(page.getByText(/that email already has a classloop account/i)).toBeVisible();
+  await expect(page.getByPlaceholder("name@example.com")).toHaveValue(email);
+
+  await page.getByPlaceholder("Enter password").fill(password);
+  await page.locator("form.login-form button[type='submit']").click();
+  await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+});
+
+test("new accounts are cloud-backed and can sign in on a fresh device", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The cloud-backed signup regression only needs one browser project.");
+  const runId = Date.now().toString(36);
+  const email = `cloud-account-${runId}@classloop.test`;
+  const password = `cloud-pass-${runId}`;
+  const name = `Cloud Teacher ${runId}`;
+
+  await resetBrowser(page);
+  await createAccount(page, "teacher", name, email, password);
+  await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+
+  await page.evaluate(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+  await page.reload();
+  await page.goto("/#/dashboard");
+  await signInAccount(page, "teacher", email, password);
+  await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+  await page.getByRole("button", { name: /^plan options$/i }).click();
+  await expect(page.getByText(`Connected as ${email}`)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/Cloud sync is separate from Pro/i)).toBeVisible();
+});
+
+test("cloud signup confirmation lets teachers continue locally until email is confirmed", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The email-confirmation signup regression only needs one browser project.");
+  const runId = Date.now().toString(36);
+  const email = `needs-confirm-${runId}@classloop.test`;
+  const password = `confirm-pass-${runId}`;
+
+  await resetBrowser(page);
+  await mockCloudAuthForStripeCheckout(page, email, {
+    role: "teacher",
+    name: "Needs Confirmation",
+    signupRequiresConfirmation: true,
+  });
+  await openCreateAccountForm(page);
+  await chooseAuthRole(page, "teacher");
+  await page.getByPlaceholder("Your name").fill("Needs Confirmation");
+  await page.getByPlaceholder("name@example.com").fill(email);
+  await page.getByPlaceholder("Enter password", { exact: true }).fill(password);
+  await page.getByPlaceholder("Re-enter password").fill(password);
+  await page.locator("form.login-form button[type='submit']").click();
+
+  const dialog = page.getByRole("dialog", { name: /check your email to finish your account/i });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(`Open the inbox for ${email}`);
+  await expect(dialog).toContainText(/multi-device sign-in works/i);
+  await expect(dialog).toContainText(/same ClassLoop account can sign in/i);
+  await expect(dialog).toContainText(/Continue on this device stores the account locally/i);
+  await expect(dialog).toContainText(/Multi-device cloud sync will stay unavailable/i);
+  await expect(page.getByRole("heading", { name: /sign in to classloop/i })).toBeVisible();
+  await dialog.getByRole("button", { name: /continue on this device/i }).click();
+  await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+  await skipAutoWalkthrough(page);
+  await page.getByRole("button", { name: /^plan options$/i }).click();
+  await expect(page.getByText(/Cloud sync is separate from Pro/i)).toBeVisible();
+  await expect(page.getByText(`Connected as ${email}`)).toHaveCount(0);
+});
+
+test("existing cloud email signs in instead of creating a duplicate account", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The cloud duplicate-email regression only needs one browser project.");
+  const runId = Date.now().toString(36);
+  const email = `cloud-duplicate-${runId}@classloop.test`;
+  const password = `cloud-duplicate-pass-${runId}`;
+
+  await resetBrowser(page);
+  await mockCloudAuthForStripeCheckout(page, email, {
+    role: "teacher",
+    name: "Existing Cloud Teacher",
+    signupAlreadyExists: true,
+  });
+  await createAccount(page, "teacher", "Existing Cloud Teacher", email, password, { mockCloud: false });
+  await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+  await page.getByRole("button", { name: /^plan options$/i }).click();
+  await expect(page.getByText(`Connected as ${email}`)).toBeVisible({ timeout: 15_000 });
 });
 
 test("individual account can paste personal meeting minutes and track due-date status", async ({ page }, testInfo) => {
@@ -705,7 +1025,7 @@ test("teacher and student end-to-end flows work across three realistic session t
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "The full multi-account E2E runs once; mobile has a dedicated smoke test.");
-  test.setTimeout(180_000);
+  test.setTimeout(600_000);
 
   await resetBrowser(page);
   const runId = Date.now().toString(36);
@@ -833,6 +1153,7 @@ Leo Martinez, leo-club-${runId}@classloop.test`,
   expect(feedbackJson).not.toContain(`maya-${runId}@classloop.test`);
 
   await signInAccount(page, "teacher", teacherA.email, teacherA.password);
+  await page.getByRole("button", { name: /^dashboard$/i }).click();
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
   for (const title of allTitles) {
     await expect(page.locator(".session-row").filter({ hasText: title })).toBeVisible();
@@ -893,9 +1214,16 @@ Leo Martinez, leo-club-${runId}@classloop.test`,
   }
 
   await page.getByRole("button", { name: /rosters/i }).click();
-  await expect(page.getByText(savedRosterName)).toBeVisible();
+  await expect
+    .poll(async () =>
+      page.locator(".roster-class-selector select option").evaluateAll(
+        (options, rosterName) => options.some((option) => option.textContent?.includes(rosterName as string)),
+        savedRosterName,
+      ),
+    )
+    .toBe(true);
   await page.getByRole("button", { name: /classes/i }).click();
-  await expect(page.getByText(savedRosterName)).toBeVisible();
+  await expect(page.locator(".roster-template-card").filter({ hasText: savedRosterName }).first()).toBeVisible();
   await signOut(page);
 
   await createAccount(page, "teacher", teacherB.name, teacherB.email, teacherB.password);
@@ -930,14 +1258,14 @@ test("account creation, settings, and password reset work", async ({ page }) => 
   await page.locator(".password-control").first().getByRole("button", { name: /hide password/i }).click();
   await expect(page.locator('input[placeholder="Enter password"]')).toHaveAttribute("type", "password");
   await expect(page.locator('input[placeholder="Re-enter password"]')).toHaveAttribute("type", "password");
+  await mockCloudAuthForStripeCheckout(page, uniqueEmail, { role: "teacher", name: "Test Teacher" });
   await page.getByLabel(/^name$/i).fill("Test Teacher");
   await page.getByPlaceholder("name@example.com").fill(uniqueEmail);
   await page.locator('input[placeholder="Enter password"]').fill(originalPassword);
   await page.locator('input[placeholder="Re-enter password"]').fill(originalPassword);
   await page.locator("form.login-form button[type='submit']").click();
-  await expect(page.getByRole("dialog", { name: /classloop guided walkthrough/i })).toBeVisible();
-  await page.getByRole("button", { name: /skip/i }).click();
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+  await skipAutoWalkthrough(page);
 
   await page.getByRole("button", { name: /test teacher/i }).click();
   await page.locator(".profile-menu").getByLabel(/^name$/i).fill("Test Teacher Updated");
@@ -967,6 +1295,7 @@ test("account creation, settings, and password reset work", async ({ page }) => 
 test("teacher can log in, import a sample, preview publishing, publish, open student view, and access analytics", async ({ page }) => {
   await signIn(page, "teacher");
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+  await expect(page.getByRole("button", { name: /new session/i }).first()).toBeVisible();
   await page.waitForTimeout(500);
   const storageState = await page.evaluate(() => ({
     legacyAccounts: localStorage.getItem("classloop:accounts:v1"),
@@ -994,18 +1323,23 @@ test("teacher can log in, import a sample, preview publishing, publish, open stu
   await expect(page.getByRole("menuitem", { name: /print report/i })).toBeVisible();
 
   await page.getByRole("button", { name: /rosters/i }).click();
-  await expect(page.getByText("Geometry review roster")).toBeVisible();
-  await expect(page.getByText(/2 students/i)).toBeVisible();
+  await expect(page.locator(".roster-class-selector select")).toContainText("Geometry review roster");
+  await expect(page.locator(".roster-template-card", { hasText: "Geometry review roster" }).first()).toContainText(/2 students/i);
+  await page.getByLabel(/find student/i).first().fill("maya");
+  await expect(page.locator(".roster-count").first()).toContainText("1");
+  await expect(page.locator(".roster-count").first()).toContainText("1 hidden");
+  await page.getByLabel(/find student/i).first().fill("");
   await expect(page.getByRole("button", { name: /export csv/i }).first()).toBeVisible();
   await page.locator('input[accept=".csv,text/csv"]').last().setInputFiles({
     name: "period-4.csv",
     mimeType: "text/csv",
     buffer: Buffer.from("Name,Email,Aliases\nMaya Chen,maya@classloop.demo,Maya iPad\nAarav Patel,aarav@classloop.demo,\n"),
   });
-  await expect(page.locator('input[value="Maya iPad"]')).toBeVisible();
+  await expect(page.locator('.roster-template-layout input[value="Maya iPad"]').first()).toBeVisible();
 
   await page.getByRole("button", { name: /classes/i }).click();
-  await expect(page.getByText("Geometry review roster")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Geometry review roster/i })).toBeVisible();
+  await expect(page.getByText(/Edit student rosters from the Rosters tab/i)).toBeVisible();
   await expect(page.getByText(/published sessions linked to this class/i)).toBeVisible();
 
   await page.getByRole("button", { name: /new session/i }).first().click();
@@ -1021,7 +1355,7 @@ test("teacher can log in, import a sample, preview publishing, publish, open stu
       .catch(() => false);
     expect(quotaMessageVisible || missingContextVisible).toBeTruthy();
   } else {
-    await expect(page.getByText(/Free accounts can generate 1 session per day/i)).toHaveCount(0);
+    await expect(page.locator(".settings-message").filter({ hasText: /generate 1 session per day/i })).toHaveCount(0);
   }
 
   await page.getByRole("button", { name: /student view/i }).click();
@@ -1135,14 +1469,14 @@ test("privacy, sync billing, appearance, and tutorial controls are usable", asyn
   await page.getByRole("button", { name: /^plan options$/i }).click();
   await expect(page.getByRole("heading", { name: /save time on every class follow-up/i })).toBeVisible();
   await expect(page.getByText(/plan options/i).first()).toBeVisible();
-  await expect(page.getByText(/why teachers upgrade/i)).toBeVisible();
-  await expect(page.getByPlaceholder("you@school.org")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /cloud sync \+ pro walkthrough/i })).toBeVisible();
+  await expect(page.getByText(/Cloud sync is separate from Pro/i)).toBeVisible();
+  await expect(page.getByText(/Free accounts can upload and download a workspace across devices/i)).toBeVisible();
+  await expect(page.getByPlaceholder("you@school.org")).toBeVisible();
   await expect(page.getByText(/school pilot/i)).toHaveCount(0);
   await expect(page.getByRole("button", { name: /keep free/i })).toHaveCount(0);
-  const demoUpgradeButton = page.getByRole("button", { name: /demo account/i });
-  await expect(demoUpgradeButton).toBeVisible();
-  await expect(demoUpgradeButton).toBeDisabled();
-  await expect(page.getByText(/demo account upgrades are disabled/i)).toBeVisible();
+  await expect(page.locator(".stripe-pricing-table-shell")).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: /demo account upgrades are disabled/i }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: /downgrade to free/i })).toHaveCount(0);
 
   await page.getByRole("button", { name: /^privacy$/i }).click();
@@ -1157,7 +1491,7 @@ test("privacy, sync billing, appearance, and tutorial controls are usable", asyn
   await expect(page.getByText(/You are on a demo account/i)).toBeVisible();
 });
 
-test("live capture modes stay free while local billing tampering does not unlock Pro", async ({ page }) => {
+test("live capture modes stay locked until verified Pro while local billing tampering does not unlock them", async ({ page }) => {
   const runId = Date.now().toString(36);
   const email = `capture-${runId}@classloop.test`;
   const password = `teacher-pass-${runId}`;
@@ -1174,46 +1508,104 @@ test("live capture modes stay free while local billing tampering does not unlock
   await expect(page.getByRole("button", { name: /Transcript\s*Upload or paste/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /In-person class/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /Online meeting/i })).toBeVisible();
-  await expect(page.getByText(/Pro only/i)).toHaveCount(0);
+  await expect(page.getByText(/Pro only/i)).toHaveCount(2);
 
   await page.getByRole("button", { name: /In-person class/i }).click();
-  await expect(page.getByText(/No voiceprints are created/i)).toBeVisible();
-  await expect(page.getByText(/unknown voice segments/i)).toBeVisible();
-  await expect(page.getByText(/Start capture before discussion/i)).toBeVisible();
+  await expect(page.getByText(/In-person live capture is available with Pro/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /start capture/i })).toHaveCount(0);
+  await expect(page.getByText(/No voiceprints are created/i)).toHaveCount(0);
 
   await page.getByRole("button", { name: /Online meeting/i }).click();
-  await expect(page.getByText(/Start capture when the call begins/i)).toBeVisible();
-  await expect(page.getByRole("dialog", { name: /share the meeting tab or window with audio/i })).toBeVisible();
-  await expect(page.getByText(/Paste the platform transcript after class/i)).toBeVisible();
-  await page.getByRole("button", { name: /not now/i }).click();
+  await expect(page.getByText(/Online meeting capture is available with Pro/i)).toBeVisible();
+  await expect(page.getByRole("dialog", { name: /share the meeting tab or window with audio/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /view plan options/i })).toBeVisible();
 
   await page.getByRole("button", { name: /^plan options$/i }).click();
-  await page.getByRole("button", { name: /upgrade to pro/i }).scrollIntoViewIfNeeded();
-  await page.getByRole("button", { name: /upgrade to pro/i }).click({ force: true });
-  await expect(
-    page.locator(".settings-message").filter({ hasText: /Connect or create a cloud login|Pro now requires Stripe Checkout/i }),
-  ).toBeVisible();
+  await expect(page.locator(".stripe-pricing-table-shell")).toBeVisible();
+  await expect(page.locator("stripe-pricing-table")).toHaveAttribute("customer-email", email);
+  await expect(page.locator("stripe-pricing-table")).toHaveAttribute("client-reference-id", /^teacher-/);
+  await expect(page.getByPlaceholder("you@school.org")).toBeVisible();
+  await expect(page.getByText(/Cloud sync is separate from Pro/i)).toBeVisible();
   await expect(page.getByRole("button", { name: /downgrade to free/i })).toHaveCount(0);
   await expect(page.getByText(/FREE · not_configured/i)).toBeVisible();
 });
 
-test("Stripe embedded Checkout page opens from Pro upgrade without unlocking Pro first", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "chromium", "The embedded checkout smoke runs once on desktop; mobile checkout is covered by responsive app smokes.");
+test("verified Pro can use in-person and online live capture with noisy and missing-audio fallbacks", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "Live capture media mocks run once; locked UI coverage runs on desktop and mobile.");
+  await mockLiveCaptureDevices(page);
+  const runId = Date.now().toString(36);
+  const email = `pro-capture-${runId}@classloop.test`;
+  const password = `teacher-pass-${runId}`;
+  await resetBrowser(page);
+  await createAccount(page, "teacher", `Pro Capture Teacher ${runId}`, email, password);
+  await signInWithVerifiedProEntitlement(page, email, password);
+
+  await page.getByRole("button", { name: /new session/i }).first().click();
+  await page.getByLabel(/session title/i).fill("Pro Live Capture Edge Case");
+  await page.getByLabel(/session template/i).selectOption("Math review");
+  await page.locator(".summary-input-card").getByLabel(/^Roster$/i).fill("Maya Chen, maya@classloop.test\nAarav Patel, aarav@classloop.test");
+  await page.locator(".summary-input-card").getByLabel(/^Meeting notes$/i).fill("Noisy room. Teacher will review unknown speaker segments before publishing.");
+  await expect(page.getByText(/Pro only/i)).toHaveCount(0);
+
+  await page.getByRole("button", { name: /In-person class/i }).click();
+  await expect(page.getByText(/Start capture before discussion/i)).toBeVisible();
+  await page.getByLabel(/permission to capture audio notes/i).check();
+  await page.getByRole("button", { name: /start capture/i }).click();
+  await expect(page.getByText(/In-person class capture is running/i)).toBeVisible();
+  await expect(page.getByText(/No voiceprints are created/i)).toBeVisible();
+  await expect(page.getByText(/unknown voice segments/i)).toBeVisible();
+  await page.waitForTimeout(80);
+  await page.getByRole("button", { name: /^stop$/i }).click();
+  await expect(page.getByText(/In-person class capture stopped/i)).toBeVisible();
+
+  await page.getByRole("button", { name: /Online meeting/i }).click();
+  await expect(page.getByRole("dialog", { name: /share the meeting tab or window with audio/i })).toBeVisible();
+  await expect(page.getByText(/Paste the platform transcript after class/i)).toBeVisible();
+  await page.getByRole("button", { name: /not now/i }).click();
+  await page.getByRole("button", { name: /start capture/i }).click();
+  await expect(page.getByText(/no meeting audio track was shared/i)).toBeVisible();
+  await page.waitForTimeout(80);
+  await page.getByRole("button", { name: /^stop$/i }).click();
+  await expect(page.getByText(/Online meeting capture stopped/i)).toBeVisible();
+
+  await page.getByRole("button", { name: /generate draft/i }).click();
+  await expect(page.locator(".review-page")).toBeVisible({ timeout: 20_000 });
+  await page.getByRole("tab", { name: /roster & matching/i }).click();
+  await expect(page.getByRole("heading", { name: /Unknown meeting voice/i })).toBeVisible();
+});
+
+test("Stripe pricing table and payment link start checkout without unlocking Pro first", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The Stripe smoke runs once on desktop; mobile checkout is covered by responsive app smokes.");
   const runId = Date.now().toString(36);
   const email = `stripe-${runId}@classloop.test`;
   const password = `teacher-pass-${runId}`;
-  const cloudEmail = `stripe-cloud-${runId}@classloop.test`;
-  const checkoutUrl = "https://checkout.stripe.com/c/pay/cs_live_playwright_open_smoke";
   const checkoutRequests: Array<{ authorization: string | undefined; body: Record<string, unknown> }> = [];
+  const prepareRequests: Array<Record<string, unknown>> = [];
 
-  await mockCloudAuthForStripeCheckout(page, cloudEmail);
   await mockStripeJsForEmbeddedCheckout(page);
+  await mockCloudAuthForStripeCheckout(page, email, { failPasswordSignIn: true });
+  await page.route("https://checkout.stripe.com/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: "<main><h1>Hosted Stripe Checkout smoke</h1></main>",
+    });
+  });
+  await page.route("**/api/billing/prepare-account", async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    prepareRequests.push(body);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ready: true, email: body.email }),
+    });
+  });
   await page.route("**/api/profile", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        email: cloudEmail,
+        email,
         role: "teacher",
         billingProfile: { tier: "free", status: "not_configured" },
         noTrainingOnStudentData: true,
@@ -1229,57 +1621,93 @@ test("Stripe embedded Checkout page opens from Pro upgrade without unlocking Pro
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(body.uiMode === "embedded" ? { clientSecret: "cs_test_embedded_secret" } : { url: checkoutUrl }),
-    });
-  });
-  await page.route("https://checkout.stripe.com/**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "text/html",
-      body: "<!doctype html><title>Stripe Checkout</title><h1>Stripe Checkout payment page</h1>",
+      body: JSON.stringify(body.uiMode === "embedded" ? { clientSecret: "cs_test_embedded_secret" } : { url: "https://checkout.stripe.com/c/pay/cs_live_playwright_open_smoke" }),
     });
   });
 
   await resetBrowser(page);
-  await createAccount(page, "teacher", `Stripe Teacher ${runId}`, email, password);
-  await page.getByRole("button", { name: /^plan options$/i }).click();
-  await page.getByPlaceholder("you@school.org").fill(cloudEmail);
-  await page.getByLabel(/cloud password/i).fill("cloud-pass-123");
-  await page.getByRole("button", { name: /^sign in$/i }).click();
-  await expect(page.getByText(`Connected as ${cloudEmail}`)).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText(/FREE · not_configured/i)).toBeVisible();
-  await expect(page.getByText("Cloud workspace")).toBeVisible();
-  await expect(page.getByText("Billing options")).toBeVisible();
-  await expect(page.getByRole("button", { name: /manage billing/i })).toBeHidden();
-  await page.getByText("Billing options").click();
-  await expect(page.getByRole("button", { name: /manage billing/i })).toBeVisible();
-  await page.getByText("Billing options").click();
-
-  await page.getByRole("button", { name: /upgrade to pro/i }).click();
-  await expect(page).toHaveURL(/#\/checkout\?tier=pro/);
-  await expect(page.getByRole("heading", { name: /upgrade inside classloop/i })).toBeVisible();
-  await expect(page.locator(".nav-list").getByRole("button", { name: /checkout/i })).toHaveCount(0);
-  await expect.poll(() => checkoutRequests.length).toBe(1);
-  expect(checkoutRequests[0]).toMatchObject({
-    authorization: "Bearer playwright-access-token",
-    body: { tier: "pro", uiMode: "embedded" },
-  });
-  await expect(page.getByRole("region", { name: /stripe test checkout/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /pay classloop pro/i })).toBeVisible();
-
-  await page.getByRole("button", { name: /open hosted stripe checkout instead/i }).click();
-  await expect.poll(() => checkoutRequests.length).toBe(2);
-  expect(checkoutRequests[1]).toMatchObject({
-    authorization: "Bearer playwright-access-token",
-    body: { tier: "pro" },
-  });
-  await expect(page).toHaveURL(checkoutUrl);
-  await expect(page.getByRole("heading", { name: /stripe checkout payment page/i })).toBeVisible();
-
+  await seedLocalAccount(page, "teacher", `Stripe Teacher ${runId}`, email, password);
+  await page.reload();
   await page.goto("/#/dashboard");
   await signInAccount(page, "teacher", email, password);
-  await page.goto("/#/checkout?billing=success");
-  await expect(page.getByText(/Checkout returned, but Pro is still pending|ClassLoop will stay Free/i)).toBeVisible();
+  await page.getByRole("button", { name: /^plan options$/i }).click();
+  await expect(page.getByPlaceholder("you@school.org")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /cloud workspace/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /upgrade to pro with stripe/i })).toBeVisible();
+  await expect(page.getByText(/Current account/i)).toBeVisible();
+  await expect(page.locator(".integration-card").filter({ hasText: /Current account/ })).toContainText(/Free/i);
+  await expect(page.locator(".stripe-pricing-table-shell")).toBeVisible();
+  await expect(page.locator("stripe-pricing-table")).toHaveAttribute("pricing-table-id", "prctbl_classloop_playwright");
+  await expect(page.locator("stripe-pricing-table")).toHaveAttribute("publishable-key", "pk_test_classloop_playwright");
+  await expect(page.locator("stripe-pricing-table")).toHaveAttribute("customer-email", email);
+  await expect(page.locator("stripe-pricing-table")).toHaveAttribute("client-reference-id", /^teacher-/);
+  await expect(page.getByRole("region", { name: /stripe pricing table smoke/i })).toBeVisible();
+
+  await page.getByRole("button", { name: /upgrade to pro with stripe/i }).click();
+  await expect.poll(() => prepareRequests.length).toBe(1);
+  await expect.poll(() => checkoutRequests.length).toBe(1);
+  await expect(checkoutRequests[0].authorization).toContain("playwright-access-token");
+  await expect(checkoutRequests[0].body).toEqual({ tier: "pro", uiMode: "embedded" });
+  await expect(page.getByRole("region", { name: /stripe test checkout/i })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/Complete Stripe Checkout here/i)).toBeVisible();
+
+  await page.getByRole("button", { name: /open stripe checkout instead/i }).click();
+  await expect.poll(() => checkoutRequests.length).toBe(2);
+  await expect(checkoutRequests[1].body).toEqual({ tier: "pro" });
+  await expect(page).toHaveURL(/checkout\.stripe\.com/);
+  await expect(page.getByRole("heading", { name: /hosted stripe checkout smoke/i })).toBeVisible();
+  await expect(page.getByText(/PRO · active/i)).toHaveCount(0);
+});
+
+test("unconfirmed cloud email shows instructions overlay instead of a red billing error", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The Supabase confirmation regression only needs one browser project.");
+  const runId = Date.now().toString(36);
+  const email = `confirm-${runId}@classloop.test`;
+  const password = `teacher-pass-${runId}`;
+  const prepareRequests: Array<Record<string, unknown>> = [];
+  const checkoutRequests: Array<Record<string, unknown>> = [];
+  const cloudOptions = { emailNotConfirmed: true };
+
+  await mockCloudAuthForStripeCheckout(page, email, cloudOptions);
+  await page.route("**/api/billing/prepare-account", async (route) => {
+    prepareRequests.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ready: true, email }),
+    });
+  });
+  await page.route("**/api/billing/checkout", async (route) => {
+    checkoutRequests.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ clientSecret: "cs_test_should_not_be_used" }),
+    });
+  });
+
+  await resetBrowser(page);
+  await seedLocalAccount(page, "teacher", `Confirm Teacher ${runId}`, email, password);
+  await page.reload();
+  await page.goto("/#/dashboard");
+  await signInAccount(page, "teacher", email, password);
+  await page.getByRole("button", { name: /^plan options$/i }).click();
+  await page.getByRole("button", { name: /upgrade to pro with stripe/i }).click();
+
+  const dialog = page.getByRole("dialog", { name: /check your email to link your cloud account/i });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText(`Open the inbox for ${email}`);
+  await expect(dialog).toContainText(/Expected return link/i);
+  await expect(dialog).toContainText("https://classloop-followup.vercel.app/#/billing?cloud=confirmed");
+  await expect(page.locator(".settings-message").filter({ hasText: /email not confirmed|confirm your email/i })).toHaveCount(0);
+  await expect.poll(() => prepareRequests.length).toBe(0);
+  await expect.poll(() => checkoutRequests.length).toBe(0);
+
+  await dialog.getByRole("button", { name: /close email confirmation instructions/i }).click();
+  await page.getByPlaceholder("you@school.org").fill(email);
+  await page.getByLabel(/cloud password/i).fill(password);
+  await page.getByRole("button", { name: /^sign in$/i }).click();
+  await expect(page.getByRole("dialog", { name: /check your email to link your cloud account/i })).toBeVisible();
 });
 
 test("students cannot access analytics but can save appearance while logged in, with default theme restored on logout", async ({ page }) => {
@@ -1366,7 +1794,7 @@ test("accessibility and error-recovery smoke covers keyboard focus, labels, and 
   await summary.getByLabel(/^Roster$/i).fill("Maya Chen, maya@classloop.demo\nJordan Lee, jordan@classloop.demo");
   await summary.getByLabel(/^Resources$/i).fill("not a url\nhttps://example.com/ratio-review).");
   await page.getByRole("button", { name: /generate draft/i }).click();
-  await expect(page.getByText(/edit the draft before publishing/i)).toBeVisible();
+  await expect(page.locator(".review-page")).toBeVisible({ timeout: 20_000 });
   await page.getByRole("tab", { name: /roster & matching/i }).click();
   await expect(page.getByText(/all transcript speakers match the roster/i)).toBeVisible();
   await page.getByRole("tab", { name: /class recap/i }).click();

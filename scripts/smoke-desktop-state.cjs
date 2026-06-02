@@ -53,16 +53,22 @@ async function close(app) {
 
 async function waitForSignInForm(page, timeoutMs) {
   const emailInput = page.getByPlaceholder("name@example.com");
-  try {
-    await emailInput.waitFor({ timeout: Math.min(5_000, timeoutMs) });
+  if (await emailInput.isVisible({ timeout: Math.min(5_000, timeoutMs) }).catch(() => false)) {
     return;
-  } catch {
-    const loginButton = page.getByRole("button", { name: /^log in$/i }).first();
-    if (await loginButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await loginButton.click();
-    }
-    await emailInput.waitFor({ timeout: timeoutMs });
   }
+
+  await page.waitForSelector(".auth-entry-actions, .auth-mode-link", { timeout: timeoutMs }).catch(() => undefined);
+  const entryLogin = page.locator(".auth-entry-actions").getByRole("button", { name: /^log in$/i });
+  if (await entryLogin.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await entryLogin.click();
+  } else {
+    const modeLogin = page.locator(".auth-mode-link").first();
+    if (await modeLogin.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await modeLogin.click();
+    }
+  }
+
+  await emailInput.waitFor({ timeout: timeoutMs });
 }
 
 async function launchClassLoop(userDataDir) {

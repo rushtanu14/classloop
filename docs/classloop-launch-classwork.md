@@ -19,20 +19,20 @@ Purpose: give Rushil a daily, due-date-driven path to get ClassLoop fully live, 
 | Due | Focus | Done Means |
 | --- | --- | --- |
 | 2026-05-18 | Deploy decision and hosted smoke | Done: deployed current ClassLoop to Vercel production, confirmed fingerprinted assets, and passed `npm run test:web`. |
-| 2026-05-19 | Legal/public signup readiness | Done: founder-authored Terms, Privacy Policy, Desktop EULA, Support, retention/deletion, and child-safety language are in repo/public routes; hosted durable signup remains gated/sample-only until attorney/district review. |
+| 2026-05-19 | Legal/public signup readiness | Done: founder-authored Terms, Privacy Policy, Desktop EULA, Support, retention/deletion, and child-safety language are in repo/public routes; demo-only routes remain sample-only and broad school/district hosted use remains gated until attorney/district review. |
 | 2026-05-20 | Desktop release package | Package macOS, generate checksums, confirm download fallback/URLs, and update install guidance for unsigned/ad-hoc builds. |
 | 2026-05-21 | Backend production config | Verify Supabase/Stripe env setup plan, webhook test path, credential-absent desktop behavior, and free-first external-services boundaries. |
 | 2026-05-22 | Support and privacy-safe logging | Confirm user-visible recovery for bad transcripts, malformed URLs, sync/API outage, package init failure, and storage corruption; confirm logs help support without classroom/account payloads. |
 | 2026-05-23 | Alpha field rehearsal | Run at least 3 realistic teacher + student scenarios: import, review, approve, publish, student dashboard, completion, and teacher review. |
 | 2026-05-24 | Fix alpha blockers | Fix any correctness or trust issues from alpha rehearsal, then run `npm run test:all` again. |
-| 2026-05-25 | Hosted PWA polish | Re-test landing, routes, downloads, add-to-home-screen flow, service worker, manifest, mobile readability, and sample-only demo boundaries. |
+| 2026-05-25 | Hosted PWA polish | Re-test landing, routes, downloads, add-to-home-screen flow, service worker, manifest, mobile readability, and demo-only boundaries. |
 | 2026-05-26 | Entitlements and billing | Verify free/paid boundaries, locked unpaid UI, upgrade/downgrade flows, and webhook-owned entitlement updates. |
 | 2026-05-27 | State resilience | Re-run encrypted local state, crash recovery, backup/restore, repeated imports, 100+ student roster, and no cross-user/project leakage checks. |
 | 2026-05-28 | Accessibility finish | Run keyboard navigation, focus order, contrast, labels/announcements, and phone-width readability checks. Fix anything that blocks classroom use. |
 | 2026-05-29 | Ops runbooks | Done: `npm run drill:ops` passed rollback and incident drills, including bad-release quarantine, sync/auth/billing outage behavior, parser regression response, and support triage coverage. |
-| 2026-05-30 | Public beta packet | Done: prepared `docs/public-beta-packet.md`, updated the teacher alpha script, and included teacher onboarding, release notes, support FAQ, download links/fallbacks, launch announcement, verification checklist, and blocker list. |
+| 2026-05-30 | Controlled pilot packet | Done: prepared `docs/public-beta-packet.md`, updated the teacher alpha script, and included teacher onboarding, release notes, support FAQ, download links/fallbacks, launch announcement, verification checklist, and blocker list. |
 | 2026-05-31 | Low-babysitting review | Confirm green gates, known limits, support loop, weekly maintenance cadence, and what still needs a human before broader public signups. |
-| 2026-06-01 | Ship or hold | If hosted smoke, package checks, legal gate, support loop, and alpha trust criteria are green, ship the public beta. Otherwise hold with a one-page blocker list. |
+| 2026-06-01 | Ship or hold | If hosted smoke, package checks, legal gate, support loop, and alpha trust criteria are green, keep the public demo live and start private controlled pilots. Otherwise hold with a one-page blocker list. |
 
 ## Daily Email Drafts
 
@@ -48,7 +48,7 @@ Today: decide whether to deploy the current ClassLoop project. If approved, depl
 
 Subject: ClassLoop launch work due today - legal/public signup readiness
 
-Today: founder-authored Terms, Privacy Policy, support contact, desktop EULA, retention/deletion expectations, and child-safety language are in place. Keep durable hosted signups gated/sample-only until attorney/district review.
+Today: founder-authored Terms, Privacy Policy, support contact, desktop EULA, retention/deletion expectations, and child-safety language are in place. Keep demo-only routes sample-only and broad school/district hosted use gated until attorney/district review.
 
 ### 2026-05-20
 
@@ -84,7 +84,7 @@ Today: fix correctness or trust issues found in rehearsal, then run the full loc
 
 Subject: ClassLoop launch work due today - hosted PWA polish
 
-Today: re-test landing routes, downloads, add-to-home-screen, service worker, manifest, mobile readability, and sample-only demo boundaries.
+Today: re-test landing routes, downloads, add-to-home-screen, service worker, manifest, mobile readability, and demo-only boundaries.
 
 ### 2026-05-26
 
@@ -112,9 +112,9 @@ Today: `npm run drill:ops` passed rollback and incident drills. Rerun before shi
 
 ### 2026-05-30
 
-Subject: ClassLoop launch work due today - public beta packet
+Subject: ClassLoop launch work due today - controlled pilot packet
 
-Today: public beta packet is prepared in `docs/public-beta-packet.md`. Verification passed for hosted smoke, release distribution, ops drills, and link checks against the current hosted/demo state, installer links, support path, and legal/public-signup gate.
+Today: controlled pilot packet is prepared in `docs/public-beta-packet.md`. Verification passed for hosted smoke, release distribution, ops drills, and link checks against the current hosted/demo state, installer links, support path, and legal/public-signup gate.
 
 ### 2026-05-31
 
@@ -126,4 +126,4 @@ Today: confirm green gates, known limits, support loop, weekly maintenance caden
 
 Subject: ClassLoop launch work due today - ship or hold
 
-Today: ship public beta only if hosted smoke, package checks, legal gate, support loop, and alpha trust criteria are green. Otherwise hold with a one-page blocker list.
+Today: keep the public demo live and start private controlled pilots only if hosted smoke, package checks, legal gate, support loop, and alpha trust criteria are green. Otherwise hold with a one-page blocker list.

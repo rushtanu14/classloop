@@ -63,7 +63,7 @@ const resourceSchema = {
 const actionItemSchema = {
   id: requiredTrimmed(160, looseIdPattern),
   title: requiredTrimmed(220),
-  description: optionalText(2_000, ""),
+  description: optionalText(2_000, undefined),
   ownerId: optionalTrimmed(160, undefined, looseIdPattern),
   dueDate: field.string({ max: 80 }),
   status: field.enum(taskStatuses),
@@ -270,6 +270,7 @@ const classGroupSchema = {
   id: requiredTrimmed(160, looseIdPattern),
   ownerEmail: field.string({ max: 320, pattern: emailPattern }),
   name: requiredTrimmed(220),
+  description: optionalText(2_000, ""),
   defaultSessionType: field.enum(sessionTypes),
   students: field.array(field.object(studentSchema), { max: 500 }),
   createdAt: requiredIsoDate,
@@ -372,6 +373,19 @@ export function validateCheckoutPayload(payload) {
   );
 }
 
+export function validateBillingAccountPayload(payload) {
+  return validateSchema(
+    payload,
+    {
+      email: field.string({ max: 320, pattern: emailPattern }),
+      password: field.string({ min: 8, max: 200 }),
+      role: field.enum(["teacher"]),
+      name: optionalTrimmed(160, ""),
+    },
+    { name: "billing account" },
+  );
+}
+
 export function validateEmailRecapPayload(payload) {
   return validateSchema(
     payload,
@@ -383,6 +397,7 @@ export function validateEmailRecapPayload(payload) {
         optional: true,
         defaultValue: undefined,
       }),
+      includeAccessInstructions: field.boolean({ optional: true, defaultValue: false }),
     },
     { name: "email recap request" },
   );

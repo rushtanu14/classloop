@@ -51,7 +51,7 @@ import {
   X,
 } from "lucide-react";
 import { loadStripe, type StripeEmbeddedCheckout } from "@stripe/stripe-js";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -67,18 +67,24 @@ import { createStructuredTranscriptFromSegments, createStructuredTranscriptFromT
 import {
   cloudRequest,
   createBillingPortalSession,
+  createCloudAccount,
   createCheckoutSession,
   createEmbeddedCheckoutSession,
-  createCloudAccount,
   getBackendStatus,
+  getCloudEmailRedirectUrl,
   getCloudProfile,
   getCloudSession,
+  getStripePricingTableConfig,
   getStripePublishableKey,
+  isManualProBillingProfile,
   isPaidPlan,
+  manualProBillingProfileForEmail,
   planCatalog,
+  prepareBillingCloudAccount,
   signIntoCloud,
   signOutCloud,
   type BillingProfile,
+  type CloudAuthResult,
   type PlanTier,
 } from "./cloud";
 import type {
@@ -144,14 +150,80 @@ type AuthSession = {
   name: string;
   studentId?: string;
   demo?: boolean;
+  multiDevicePending?: boolean;
 };
+
+type AuthResult = {
+  ok: boolean;
+  message?: string;
+  code?: "email_confirmation_required";
+  nextMode?: "signin";
+  role?: AuthRole;
+  email?: string;
+  redirectUrl?: string;
+};
+
+type LocalAuthSecret = {
+  accountId: string;
+  role: AuthRole;
+  email: string;
+  password: string;
+};
+
+type CloudConfirmationPrompt = {
+  email: string;
+  redirectUrl: string;
+  context: "account-create" | "checkout" | "cloud-login";
+};
+
+type AuditActor = Pick<AuthSession, "email" | "role"> &
+  Partial<Pick<AuthSession, "accountId" | "name" | "studentId" | "demo" | "multiDevicePending">>;
+
+type CloudEmailConfirmationOverlayProps = {
+  prompt: CloudConfirmationPrompt;
+  actionLabel: string;
+  onClose: () => void;
+  onAction: () => void;
+  secondaryActionLabel?: string;
+  secondaryActionHelper?: string;
+  onSecondaryAction?: () => void | Promise<void>;
+};
+
+type PendingLocalAccount = {
+  role: AuthRole;
+  name: string;
+  email: string;
+  password: string;
+};
+
+function cloudConfirmationFromResult(
+  result: CloudAuthResult,
+  fallbackEmail: string,
+  context: CloudConfirmationPrompt["context"],
+): CloudConfirmationPrompt | null {
+  if (result.code !== "email_confirmation_required") return null;
+  return {
+    email: result.email || normalizeEmail(fallbackEmail),
+    redirectUrl: result.redirectUrl || getCloudEmailRedirectUrl(context === "checkout" ? "billing" : "dashboard"),
+    context,
+  };
+}
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
 };
 
-type LandingPageKey = "home" | "features" | "screenshots" | "docs" | "privacy" | "terms" | "eula" | "support" | "download";
+type LandingPageKey =
+  | "home"
+  | "features"
+  | "screenshots"
+  | "docs"
+  | "privacy"
+  | "terms"
+  | "eula"
+  | "support"
+  | "download";
 type DesktopInstallerId = "macos" | "windows" | "linux";
 
 type ReleasePlatformManifest = {
@@ -414,18 +486,11 @@ function detectDesktopInstallerFromBrowser(): DesktopInstallerId | null {
 }
 
 function classLoopBuildMarker() {
-  const version = __CLASSLOOP_VERSION__ ? `v${__CLASSLOOP_VERSION__}` : "";
-  const sha = __CLASSLOOP_BUILD_SHA__ ? __CLASSLOOP_BUILD_SHA__.slice(0, 7) : "";
-  const env = __CLASSLOOP_BUILD_ENV__ && __CLASSLOOP_BUILD_ENV__ !== "production" ? __CLASSLOOP_BUILD_ENV__ : "";
-  return [version, sha, env].filter(Boolean).join(" · ");
+  return __CLASSLOOP_VERSION__ ? `v${__CLASSLOOP_VERSION__}` : "";
 }
 
 function classLoopBuildDetails() {
-  const parts: string[] = [];
-  if (__CLASSLOOP_BUILD_ENV__) parts.push(`env: ${__CLASSLOOP_BUILD_ENV__}`);
-  if (__CLASSLOOP_BUILD_TIME__) parts.push(`built: ${__CLASSLOOP_BUILD_TIME__}`);
-  if (__CLASSLOOP_BUILD_SHA__) parts.push(`sha: ${__CLASSLOOP_BUILD_SHA__}`);
-  return parts.join(" • ");
+  return "";
 }
 
 const navItems: NavItem[] = [
@@ -572,7 +637,7 @@ function workspaceBootSteps(phase: BootPhase, notice: WorkspaceNotice | null): B
     },
     {
       label: "Cloud sync readiness",
-      detail: "Authenticated Supabase sync is available from Plan options when a cloud account is connected.",
+      detail: "Cloud sync is available from Plan options when an account is connected.",
       status: phase === "ready" ? "complete" : "pending",
     },
     {
@@ -630,6 +695,22 @@ const defaultBillingProfile: BillingProfile = {
   tier: "free",
   status: "not_configured",
 };
+
+function billingProfileLabel(profile: BillingProfile) {
+  if (isPaidPlan(profile) || isManualProBillingProfile(profile)) return "Pro · Active";
+  if (profile.tier === "pro") {
+    if (profile.status === "trialing") return "Pro · Trial active";
+    if (profile.status === "past_due" || profile.status === "unpaid") return "Pro · Payment needs attention";
+    if (profile.status === "incomplete") return "Pro · Payment pending";
+    if (profile.status === "paused") return "Pro · Paused";
+    if (profile.status === "canceled" || profile.status === "incomplete_expired") return "Free";
+  }
+  if (profile.status === "past_due" || profile.status === "unpaid" || profile.status === "incomplete") {
+    return "Free · Payment needs attention";
+  }
+  if (profile.status === "not_configured") return "Free · not_configured";
+  return "Free";
+}
 
 function normalizeBillingProfile(profile?: Partial<BillingProfile> | null, options: { trusted?: boolean } = {}): BillingProfile {
   const candidate: BillingProfile = { ...defaultBillingProfile, ...(profile ?? {}) };
@@ -795,13 +876,13 @@ function isLandingHash() {
   );
 }
 
-function isPublicHostedDemo() {
-  const hostname = window.location.hostname;
-  return Boolean(hostname && !["localhost", "127.0.0.1", "::1"].includes(hostname));
-}
-
 function isDemoOnlyOverride() {
   return new URLSearchParams(window.location.search).get("demoOnly") === "1" || getParam("demoOnly") === "1";
+}
+
+function isLocalWorkspaceHost() {
+  const hostname = window.location.hostname;
+  return !hostname || hostname === "localhost" || hostname === "127.0.0.1";
 }
 
 function getParam(name: string): string | null {
@@ -855,24 +936,7 @@ const captureModeLabels: Record<SessionCaptureMode, string> = {
   online_meeting: "Online meeting capture",
 };
 
-type ClassroomSourceMode = "manual" | "classroom";
 type ClassroomPostType = "announcement" | "assignment" | "material";
-
-type ClassroomCourseOption = {
-  id: string;
-  name: string;
-  section: string;
-  courseCode: string;
-  roster: string;
-  resources: Array<{
-    id: string;
-    title: string;
-    type: "assignment" | "material";
-    url: string;
-    updatedAt: string;
-    keywordHint: string;
-  }>;
-};
 
 type ZoomCloudMeetingOption = {
   id: string;
@@ -885,63 +949,6 @@ type ZoomCloudMeetingOption = {
   }>;
 };
 
-const classroomCourseOptions: ClassroomCourseOption[] = [
-  {
-    id: "cs4all-period-4",
-    name: "CS4All Intro to Computational Thinking",
-    section: "Period 4",
-    courseCode: "CS4ALL-P4",
-    roster: `Aaliyah Carter, acarter@cs4all.nyc
-Danny Reyes, dreyes@cs4all.nyc
-Jalen Thompson, jthompson@cs4all.nyc
-Priya Mehta, pmehta@cs4all.nyc
-Keisha Brown, kbrown@cs4all.nyc
-Leo Fernandez, lfernandez@cs4all.nyc`,
-    resources: [
-      {
-        id: "algorithm-worksheet",
-        title: "Everyday Algorithms Worksheet",
-        type: "assignment",
-        url: "https://classroom.google.com/c/CS4ALL/a/algorithm-worksheet",
-        updatedAt: "2026-04-28",
-        keywordHint: "algorithm worksheet homework",
-      },
-      {
-        id: "decomposition-video",
-        title: "Problem Decomposition Video",
-        type: "material",
-        url: "https://classroom.google.com/c/CS4ALL/m/decomposition-video",
-        updatedAt: "2026-04-27",
-        keywordHint: "decomposition functions python",
-      },
-    ],
-  },
-  {
-    id: "geometry-period-2",
-    name: "Geometry Review",
-    section: "Period 2",
-    courseCode: "GEO-P2",
-    roster: sampleRoster,
-    resources: [
-      {
-        id: "similar-triangles-review",
-        title: "Similar Triangles Review",
-        type: "material",
-        url: "https://classroom.google.com/c/GEO-P2/m/similar-triangles-review",
-        updatedAt: "2026-05-20",
-        keywordHint: "similar triangles proportions review",
-      },
-      {
-        id: "error-analysis",
-        title: "Error Analysis Worksheet",
-        type: "assignment",
-        url: "https://classroom.google.com/c/GEO-P2/a/error-analysis",
-        updatedAt: "2026-05-19",
-        keywordHint: "algebra error analysis worksheet",
-      },
-    ],
-  },
-];
 
 const zoomCloudMeetingOptions: ZoomCloudMeetingOption[] = [
   {
@@ -1009,7 +1016,7 @@ async function transcribeRecordingWithWhisper(file: Blob, options: { filename: s
   if (!response.ok) {
     throw new Error(
       payload.error ||
-        "Whisper transcription endpoint is not available. Deploy the hosted API with OPENAI_API_KEY before using recording uploads.",
+        "Recording transcription is not available right now. Paste or upload a transcript instead.",
     );
   }
   const segments = Array.isArray(payload.segments) ? payload.segments : [];
@@ -1091,7 +1098,7 @@ function markSessionEmailsSent(session: Session, result: EmailDeliveryResult): S
     emailDelivery: {
       status: "sent",
       sentAt: result.sentAt,
-      provider: result.provider,
+      provider: "email",
       recipients: result.recipients,
       skipped: result.skipped,
       failed: result.failed,
@@ -1987,7 +1994,7 @@ function App() {
   const [walkthroughStepIndex, setWalkthroughStepIndex] = useState(0);
   const [landingMode, setLandingMode] = useState(isLandingHash);
   const [landingPage, setLandingPage] = useState<LandingPageKey>(getLandingPage);
-  const [publicDemoOnly] = useState(() => isPublicHostedDemo() || isDemoOnlyOverride());
+  const [publicDemoOnly] = useState(() => isDemoOnlyOverride());
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
   const [bootPhase, setBootPhase] = useState<BootPhase>("local");
   const [workspaceNotice, setWorkspaceNotice] = useState<WorkspaceNotice | null>(null);
@@ -1995,6 +2002,7 @@ function App() {
   const [passwordResetCodes, setPasswordResetCodes] = useState<Record<string, PasswordResetRecord>>({});
   const [celebrationMoment, setCelebrationMoment] = useState<CelebrationMoment | null>(null);
   const demoSessionRef = useRef(false);
+  const localAuthSecretRef = useRef<LocalAuthSecret | null>(null);
   const lastSharedJsonRef = useRef(
     sharedStateJson(persistableSharedState({
       accounts: demoAccounts,
@@ -2180,6 +2188,7 @@ function App() {
   }, [auth, route]);
 
   useEffect(() => {
+    const manualProProfile = manualProBillingProfileForEmail(auth?.email ?? "");
     if (!sharedReady || !auth || auth.demo) {
       if (!auth || auth?.demo) setBillingProfile(defaultBillingProfile);
       return;
@@ -2189,28 +2198,32 @@ function App() {
       return;
     }
 
+    if (manualProProfile) {
+      setBillingProfile(manualProProfile);
+    }
+
     let active = true;
     getCloudSession()
       .then((session) => {
         if (!session) {
-          if (active) setBillingProfile(defaultBillingProfile);
+          if (active) setBillingProfile(manualProProfile ?? defaultBillingProfile);
           return null;
         }
         return getCloudProfile();
       })
       .then((profile) => {
         if (active && profile) {
-          setBillingProfile(normalizeTrustedBillingProfile(profile.billingProfile));
+          setBillingProfile(manualProProfile ?? normalizeTrustedBillingProfile(profile.billingProfile));
         }
       })
       .catch(() => {
-        if (active) setBillingProfile(defaultBillingProfile);
+        if (active) setBillingProfile(manualProProfile ?? defaultBillingProfile);
       });
 
     return () => {
       active = false;
     };
-  }, [auth?.accountId, auth?.demo, auth?.role, sharedReady]);
+  }, [auth?.accountId, auth?.demo, auth?.email, auth?.role, sharedReady]);
 
   useEffect(() => {
     if (!auth || route !== "tutorial") return;
@@ -2259,7 +2272,11 @@ function App() {
     window.setTimeout(() => setWalkthroughOpen(true), 0);
   };
 
-  const appendAudit = (action: string, detail: string, actor: AuthSession | null = auth) => {
+  const appendAudit = (
+    action: string,
+    detail: string,
+    actor: AuditActor | null = auth,
+  ) => {
     if (!actor || !privacySettings.auditLogEnabled) return;
     if (actor.demo) return;
     setAuditLog((current) => [
@@ -2487,6 +2504,7 @@ function App() {
       id: `class-group-${Date.now().toString(36)}`,
       ownerEmail: auth.email,
       name: template.name,
+      description: "",
       defaultSessionType: template.sessionType,
       students: template.students,
       createdAt: now,
@@ -2632,17 +2650,8 @@ function App() {
     }
   };
 
-  const handleLogin = async (role: AuthRole, email: string, password: string) => {
-    const normalizedEmail = normalizeEmail(email);
-    const passwordHash = await hashSecret(password);
-    const account = accounts.find(
-      (item) => item.role === role && normalizeEmail(item.email) === normalizedEmail,
-    );
-
-    if (!account || account.passwordHash !== passwordHash) {
-      return { ok: false, message: "Email or password is incorrect." };
-    }
-
+  const signInAccount = async (account: Account): Promise<AuthResult> => {
+    const normalizedEmail = normalizeEmail(account.email);
     setAuthLoading(true);
     try {
       await wait(420);
@@ -2653,7 +2662,7 @@ function App() {
       if (account.demo) demoSessionRef.current = true;
       const demoSession = account.demo ? ensureDemoSession() : undefined;
 
-      if (role === "teacher") {
+      if (account.role === "teacher") {
         setTheme(account.theme ?? defaultTheme);
         setAuth({
           accountId: account.id,
@@ -2674,7 +2683,7 @@ function App() {
         return { ok: true };
       }
 
-      if (role === "individual") {
+      if (account.role === "individual") {
         setTheme(account.theme ?? defaultTheme);
         setAuth({
           accountId: account.id,
@@ -2723,48 +2732,276 @@ function App() {
     }
   };
 
-  const handleCreateAccount = async (role: AuthRole, name: string, email: string, password: string) => {
+  const roleFromCloudSession = (session: NonNullable<CloudAuthResult["session"]>, fallbackRole: AuthRole): AuthRole => {
+    const rawRole = (session.user.user_metadata as Record<string, unknown> | undefined)?.role;
+    return rawRole === "teacher" || rawRole === "student" || rawRole === "individual" ? rawRole : fallbackRole;
+  };
+
+  const nameFromCloudSession = (session: NonNullable<CloudAuthResult["session"]>, fallbackEmail: string) => {
+    const metadata = session.user.user_metadata as Record<string, unknown> | undefined;
+    const metadataName = typeof metadata?.name === "string" ? metadata.name.trim() : "";
+    if (metadataName) return metadataName;
+    const displayName = typeof metadata?.display_name === "string" ? metadata.display_name.trim() : "";
+    if (displayName) return displayName;
+    return fallbackEmail.split("@")[0] || "ClassLoop user";
+  };
+
+  const finishLocalAccountCreation = async (
+    role: AuthRole,
+    name: string,
+    email: string,
+    password: string,
+    options?: { startWalkthrough?: boolean; multiDevicePending?: boolean },
+  ) => {
+    const startWalkthroughAfterCreate = options?.startWalkthrough ?? role !== "individual";
+    const account: Account = {
+      id: makeAccountId(role),
+      role,
+      email,
+      name,
+      passwordHash: await hashSecret(password),
+      createdAt: new Date().toISOString(),
+      theme: defaultTheme,
+    };
+    setAccounts((current) => mergeAccounts([...current, account]));
+    localAuthSecretRef.current = {
+      accountId: account.id,
+      role,
+      email,
+      password,
+    };
+    setTheme(defaultTheme);
+    setAuth({ accountId: account.id, role, email, name, multiDevicePending: options?.multiDevicePending });
+    navigate(role === "teacher" ? "dashboard" : role === "individual" ? "personal-dashboard" : "student");
+    if (startWalkthroughAfterCreate) startWalkthrough();
+    return { ok: true };
+  };
+
+  const signInCloudBackedAccount = async (
+    requestedRole: AuthRole,
+    email: string,
+    password: string,
+    session: NonNullable<CloudAuthResult["session"]>,
+  ): Promise<AuthResult> => {
+    const existingAccount = accounts.find((item) => normalizeEmail(item.email) === email);
+    const role = existingAccount?.role ?? roleFromCloudSession(session, requestedRole);
+    const name = existingAccount?.name ?? nameFromCloudSession(session, email);
+    const passwordHash = await hashSecret(password);
+    const account: Account = existingAccount
+      ? { ...existingAccount, role, name, passwordHash }
+      : {
+          id: makeAccountId(role),
+          role,
+          email,
+          name,
+          passwordHash,
+          createdAt: new Date().toISOString(),
+          theme: defaultTheme,
+        };
+    setAccounts((current) =>
+      mergeAccounts([
+        ...current.filter((item) => item.id !== account.id && normalizeEmail(item.email) !== email),
+        account,
+      ]),
+    );
+    localAuthSecretRef.current = {
+      accountId: account.id,
+      role: account.role,
+      email,
+      password,
+    };
+    appendAudit("cloud_connect", `Signed in with cloud account for ${email}.`, {
+      accountId: account.id,
+      role: account.role,
+      email,
+      name: account.name,
+    });
+    return signInAccount(account);
+  };
+
+  const handleLogin = async (role: AuthRole, email: string, password: string): Promise<AuthResult> => {
+    const normalizedEmail = normalizeEmail(email);
+    const passwordHash = await hashSecret(password);
+    const account = accounts.find(
+      (item) => item.role === role && normalizeEmail(item.email) === normalizedEmail,
+    );
+
+    if (!account || account.passwordHash !== passwordHash) {
+      const existingAnyRole = accounts.find((item) => normalizeEmail(item.email) === normalizedEmail);
+      if (!existingAnyRole?.demo && getBackendStatus().supabaseConfigured) {
+        const cloudResult = await signIntoCloud(normalizedEmail, password);
+        if (cloudResult.code === "email_confirmation_required") {
+          return {
+            ok: false,
+            code: "email_confirmation_required",
+            message: cloudResult.message,
+            nextMode: "signin",
+            role,
+            email: normalizedEmail,
+            redirectUrl: cloudResult.redirectUrl,
+          };
+        }
+        if (cloudResult.ok && cloudResult.session) {
+          return signInCloudBackedAccount(role, normalizedEmail, password, cloudResult.session);
+        }
+      }
+      return { ok: false, message: "Email or password is incorrect." };
+    }
+
+    if (!account.demo) {
+      localAuthSecretRef.current = {
+        accountId: account.id,
+        role: account.role,
+        email: normalizedEmail,
+        password,
+      };
+    }
+    return signInAccount(account);
+  };
+
+  const handleCreateAccount = async (role: AuthRole, name: string, email: string, password: string): Promise<AuthResult> => {
     if (publicDemoOnly) {
-      return { ok: false, message: "Account creation is available in the desktop app. Use the sample accounts in the web demo." };
+      return { ok: false, message: "This demo is sample-only. Open the full ClassLoop app to create your own account." };
     }
 
     const normalizedEmail = normalizeEmail(email);
     const trimmedName = name.trim();
 
-    if (!trimmedName) return { ok: false, message: "Enter a name for the account." };
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       return { ok: false, message: "Enter a valid email address." };
     }
+    const existingAccount = accounts.find((account) => normalizeEmail(account.email) === normalizedEmail);
+    if (existingAccount) {
+      if (existingAccount.passwordHash === (await hashSecret(password))) {
+        if (!existingAccount.demo) {
+          localAuthSecretRef.current = {
+            accountId: existingAccount.id,
+            role: existingAccount.role,
+            email: normalizedEmail,
+            password,
+          };
+        }
+        return signInAccount(existingAccount);
+      }
+      return {
+        ok: false,
+        message: "That email already has a ClassLoop account. Sign in instead or reset the password.",
+        nextMode: "signin",
+        role: existingAccount.role,
+        email: normalizedEmail,
+      };
+    }
+    if (!trimmedName) return { ok: false, message: "Enter a name for the account." };
     if (password.length < 8) return { ok: false, message: "Use at least 8 characters for the password." };
-    if (
-      accounts.some(
-        (account) => account.role === role && normalizeEmail(account.email) === normalizedEmail,
-      )
-    ) {
-      return { ok: false, message: "An account with that email already exists for this role." };
+
+    if (manualProBillingProfileForEmail(normalizedEmail)) {
+      return finishLocalAccountCreation(role, trimmedName, normalizedEmail, password);
     }
 
-    setAuthLoading(true);
-    try {
-      await wait(420);
-      const account: Account = {
-        id: makeAccountId(role),
-        role,
-        email: normalizedEmail,
-        name: trimmedName,
-        passwordHash: await hashSecret(password),
-        createdAt: new Date().toISOString(),
-        theme: defaultTheme,
-      };
-      setAccounts((current) => mergeAccounts([...current, account]));
-      setTheme(defaultTheme);
-      setAuth({ accountId: account.id, role, email: normalizedEmail, name: trimmedName });
-      navigate(role === "teacher" ? "dashboard" : role === "individual" ? "personal-dashboard" : "student");
-      if (role !== "individual") startWalkthrough();
-      return { ok: true };
-    } finally {
-      setAuthLoading(false);
+    await wait(420);
+    if (getBackendStatus().supabaseConfigured) {
+        const cloudResult = await createCloudAccount(normalizedEmail, password, {
+          role,
+          name: trimmedName,
+          redirectRoute: "dashboard",
+        });
+        if (cloudResult.code === "email_confirmation_required") {
+          if (manualProBillingProfileForEmail(normalizedEmail)) {
+            return finishLocalAccountCreation(role, trimmedName, normalizedEmail, password);
+          }
+          return {
+            ok: false,
+            code: "email_confirmation_required",
+            message: cloudResult.message,
+            nextMode: "signin",
+            role,
+            email: normalizedEmail,
+            redirectUrl: cloudResult.redirectUrl,
+          };
+        }
+        if (!cloudResult.ok) {
+          if (/already|registered|exists/i.test(cloudResult.message)) {
+            const signInResult = await signIntoCloud(normalizedEmail, password);
+            if (signInResult.code === "email_confirmation_required") {
+              return {
+                ok: false,
+                code: "email_confirmation_required",
+                message: signInResult.message,
+                nextMode: "signin",
+                role,
+                email: normalizedEmail,
+                redirectUrl: signInResult.redirectUrl,
+              };
+            }
+            if (signInResult.ok && signInResult.session) {
+              return signInCloudBackedAccount(role, normalizedEmail, password, signInResult.session);
+            }
+            return {
+              ok: false,
+              message: "That email already has a ClassLoop cloud account. Sign in instead or reset the password.",
+              nextMode: "signin",
+              role,
+              email: normalizedEmail,
+            };
+          }
+          if (isLocalWorkspaceHost()) {
+            return finishLocalAccountCreation(role, trimmedName, normalizedEmail, password);
+          }
+          return { ok: false, message: cloudResult.message };
+        }
     }
+    return finishLocalAccountCreation(role, trimmedName, normalizedEmail, password, {
+      startWalkthrough: false,
+      multiDevicePending: true,
+    });
+  };
+
+  const handleCreateLocalAccount = async (role: AuthRole, name: string, email: string, password: string): Promise<AuthResult> => {
+    if (publicDemoOnly) {
+      return { ok: false, message: "This demo is sample-only. Open the full ClassLoop app to create your own account." };
+    }
+
+    const normalizedEmail = normalizeEmail(email);
+    const trimmedName = name.trim();
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      return { ok: false, message: "Enter a valid email address." };
+    }
+    if (!trimmedName) return { ok: false, message: "Enter a name for the account." };
+    if (password.length < 8) return { ok: false, message: "Use at least 8 characters for the password." };
+
+    const existingAccount = accounts.find((account) => normalizeEmail(account.email) === normalizedEmail);
+    if (existingAccount) {
+      if (existingAccount.passwordHash === (await hashSecret(password))) {
+        if (!existingAccount.demo) {
+          localAuthSecretRef.current = {
+            accountId: existingAccount.id,
+            role: existingAccount.role,
+            email: normalizedEmail,
+            password,
+          };
+        }
+        return signInAccount(existingAccount);
+      }
+      return {
+        ok: false,
+        message: "That email already has a ClassLoop account. Sign in instead or reset the password.",
+        nextMode: "signin",
+        role: existingAccount.role,
+        email: normalizedEmail,
+      };
+    }
+
+    appendAudit("cloud_connect", `Continued locally while cloud email confirmation is pending for ${normalizedEmail}.`, {
+      role,
+      email: normalizedEmail,
+      name: trimmedName,
+      multiDevicePending: true,
+    });
+    return finishLocalAccountCreation(role, trimmedName, normalizedEmail, password, {
+      startWalkthrough: false,
+      multiDevicePending: true,
+    });
   };
 
   const handleUpdateAccount = async (settings: AccountSettingsInput) => {
@@ -2806,6 +3043,14 @@ function App() {
 
     const nextAccount = { ...account, name: nextName, email: nextEmail, passwordHash };
     setAccounts((current) => current.map((item) => (item.id === account.id ? nextAccount : item)));
+    if (localAuthSecretRef.current?.accountId === account.id) {
+      localAuthSecretRef.current = {
+        accountId: account.id,
+        role: account.role,
+        email: nextEmail,
+        password: settings.newPassword || localAuthSecretRef.current.password,
+      };
+    }
     setAuth((current) =>
       current
         ? {
@@ -2888,6 +3133,7 @@ function App() {
     appendAudit("logout", "Signed out.");
     if (wasDemo) resetDemoWorkspaceAfterUse();
     demoSessionRef.current = false;
+    localAuthSecretRef.current = null;
     setAuth(null);
     setTheme(defaultTheme);
     navigate("dashboard");
@@ -2924,6 +3170,7 @@ function App() {
       <LoginPage
         onLogin={handleLogin}
         onCreateAccount={handleCreateAccount}
+        onCreateLocalAccount={handleCreateLocalAccount}
         onRequestPasswordReset={handleRequestPasswordReset}
         onCompletePasswordReset={handleCompletePasswordReset}
         demoOnly={publicDemoOnly}
@@ -3002,6 +3249,7 @@ function App() {
         {effectiveRoute === "rosters" && auth.role === "teacher" && (
           <RosterTemplatesPage
             templates={teacherRosterTemplates}
+            classGroups={teacherClassGroups}
             ownerEmail={auth.email}
             onCreate={(template) => {
               setRosterTemplates((current) => [template, ...current]);
@@ -3010,6 +3258,7 @@ function App() {
             onUpdate={updateRosterTemplate}
             onDelete={deleteRosterTemplate}
             onCreateClassGroup={createClassGroupFromTemplate}
+            onUpdateClassGroup={updateClassGroup}
           />
         )}
         {effectiveRoute === "new-session" && (
@@ -3024,7 +3273,7 @@ function App() {
             rosterTemplates={teacherRosterTemplates}
             classGroups={teacherClassGroups}
             canCreateSession={!freeLimitReached}
-            canUseLiveCapture={true}
+            canUseLiveCapture={hasPaidAccess}
             dailySessionsUsed={freeSessionsToday}
             planName={billingProfile.tier === "free" ? "Free" : "Pro"}
             classTemplateCopyUrl={templateLinks.classTemplateCopyUrl}
@@ -3101,10 +3350,17 @@ function App() {
             applyCloudState={applyCloudState}
             appendAudit={appendAudit}
             sessionCount={freeSessionsToday}
+            localAuthSecret={localAuthSecretRef.current}
           />
         )}
         {effectiveRoute === "checkout" && auth.role === "teacher" && (
-          <EmbeddedCheckoutPage auth={auth} billingProfile={billingProfile} setBillingProfile={setBillingProfile} />
+          <EmbeddedCheckoutPage
+            auth={auth}
+            billingProfile={billingProfile}
+            setBillingProfile={setBillingProfile}
+            localAuthSecret={localAuthSecretRef.current}
+            appendAudit={appendAudit}
+          />
         )}
         {effectiveRoute === "tutorial" &&
           (auth.role === "teacher" ? (
@@ -3707,21 +3963,30 @@ function LandingPage({
             <header className="landing-page-header">
               <h1>ClassLoop docs.</h1>
               <p>
-                Practical setup notes for teachers, testers, and future contributors. No magic required:
-                paste reliable inputs first, then add hosted sync only when it is configured.
+                Practical setup notes for teachers and pilots. Start with reliable classroom inputs,
+                then use cloud sync and Pro features when they are available for your account.
               </p>
             </header>
             <section className="landing-docs-layout" aria-label="ClassLoop documentation">
               <aside className="landing-docs-index" aria-label="Documentation index">
-                {["Quick start", "Import formats", "Publishing", "Mobile access", "Free install", "Release setup"].map((item) => (
+                {[
+                  "Quick start",
+                  "Import formats",
+                  "Publishing",
+                  "Business model",
+                  "Launch gates",
+                  "Mobile access",
+                  "Free install",
+                  "Release setup",
+                ].map((item) => (
                   <span key={item}>{item}</span>
                 ))}
               </aside>
               <div className="landing-doc-stack">
                 <article className="landing-doc-section">
                   <h2>Quick start</h2>
-                  <p>Open the web demo for a sample workspace, or use the desktop app when you want real saved accounts and local private data.</p>
-                  <code>npm run dev</code>
+                  <p>Open the sample demo to explore with safe data, or create your own ClassLoop account in the app. The desktop app keeps an encrypted local copy on this device.</p>
+                  <code>Sample demo - review draft - publish approved follow-ups</code>
                 </article>
                 <article className="landing-doc-section">
                   <h2>Import formats</h2>
@@ -3733,18 +3998,40 @@ function LandingPage({
                   <p>Teachers review generated drafts first. Students only see the recap, tasks, resources, due dates, and status intended for them.</p>
                 </article>
                 <article className="landing-doc-section">
+                  <h2>Business model</h2>
+                  <p>
+                    ClassLoop follows a predictable teacher subscription path: Free proves the classroom workflow, Pro
+                    unlocks weekly-use depth, and school/team pilots come later with admin and privacy controls.
+                  </p>
+                  <ul className="landing-doc-list">
+                    <li><strong>Free:</strong> one generated session per day, transcript import, roster tools, student preview, local encrypted storage, and multi-device cloud sync.</li>
+                    <li><strong>Teacher Pro:</strong> $3.99/month for unlimited sessions, live in-person/online capture, analytics, delivery proof, and exports.</li>
+                    <li><strong>School/team later:</strong> per-teacher seats with SSO, retention controls, audit/export, admin policy, and reviewed student-data agreements.</li>
+                  </ul>
+                  <p>No per-minute transcript pricing. Long classes and messy transcripts should not punish teachers.</p>
+                  <code>Free trust -&gt; Teacher Pro habit -&gt; School pilot governance</code>
+                </article>
+                <article className="landing-doc-section">
+                  <h2>Launch gates</h2>
+                  <p>
+                    Demo routes use sample accounts only. Real public accounts should open only after privacy,
+                    support, installer, payment, and teacher rehearsal checks are complete.
+                  </p>
+                  <code>Sample data stays separate from real classroom work.</code>
+                </article>
+                <article className="landing-doc-section">
                   <h2>Mobile access</h2>
                   <p>The hosted shell includes a manifest and service worker, so students can add ClassLoop to a phone home screen from the browser menu.</p>
                 </article>
                 <article className="landing-doc-section">
                   <h2>Free desktop install</h2>
-                  <p>ClassLoop can ship as a free unsigned/ad-hoc desktop build. Publish checksums with the installer and label macOS builds honestly so users expect the Open Anyway prompt.</p>
-                  <code>npm run package:mac && npm run release:checksums</code>
+                  <p>ClassLoop desktop installers include platform notes and checksums so teachers can verify the download before opening the app.</p>
+                  <code>Verify checksum - open app - start with sample data</code>
                 </article>
                 <article className="landing-doc-section">
                   <h2>Release setup</h2>
-                  <p>Set platform download URLs after the installer is uploaded. Missing URLs stay visibly marked as packaging pending, and checksums can be linked separately.</p>
-                  <code>public/classloop-downloads.json</code>
+                  <p>Download buttons appear only for installers that are ready. If a platform is still being packaged, ClassLoop says that plainly.</p>
+                  <code>Installers appear when verified.</code>
                 </article>
               </div>
             </section>
@@ -3756,8 +4043,8 @@ function LandingPage({
             <header className="landing-page-header">
               <h1>ClassLoop Privacy Policy.</h1>
               <p>
-                ClassLoop handles classroom records, so privacy starts with teacher review, local-first desktop storage,
-                sample-only hosted demos, and hosted sync only when credentials are intentionally configured.
+                ClassLoop handles classroom records, so privacy starts with teacher review, local-first encrypted storage,
+                demo-only sample workspaces, and cloud sync only when it is intentionally enabled.
               </p>
             </header>
             <section className="landing-feature-band" aria-label="ClassLoop privacy principles">
@@ -3779,7 +4066,7 @@ function LandingPage({
               <article>
                 <MessageSquare size={24} />
                 <h2>Creator product feedback</h2>
-                <p>Optional student usefulness ratings go to the ClassLoop creator for product debugging, not to teacher analytics.</p>
+                <p>Optional student usefulness ratings go to ClassLoop support for product improvement, not to teacher analytics.</p>
               </article>
             </section>
             <section className="landing-policy-panel">
@@ -3790,21 +4077,20 @@ function LandingPage({
                 messages, installer reports, and optional product feedback.
               </p>
               <p>
-                Hosted sync, when configured, uses Supabase Auth and workspace authorization. Billing, when configured,
-                uses Stripe Checkout and server-owned entitlement updates. Support and installer feedback should include
-                only the information needed to debug the issue.
+                Cloud sync uses account sign-in and workspace authorization. Billing uses a payment processor.
+                Support and installer feedback should include only the information needed to resolve the issue.
               </p>
             </section>
             <section className="landing-policy-panel">
               <h2>Hosted demo boundary and school readiness</h2>
               <p>
-                Public hosted demos use sample accounts only. Durable saved workspaces belong in the downloaded app
-                or in hosted sync after Supabase, billing, retention/deletion SLAs, and school data terms are intentionally configured.
+                Demo-only routes use sample accounts only. Durable saved workspaces can sync through ClassLoop
+                cloud accounts when retention, deletion, support, and school data terms are in place.
               </p>
               <p>
-                Retention is teacher-controlled in the desktop app. For hosted pilots, classroom workspace data should
-                be deleted on request, demo data remains sample-only, and product feedback is retained only while it is
-                useful for debugging, support, security, or accounting records.
+                Retention is teacher-controlled in the app. For hosted pilots, classroom workspace data should
+                be deleted on request, demo-only data remains sample-only, and product feedback is retained only while it is
+                useful for support, security, billing, or required records.
               </p>
               <p>
                 ClassLoop should not invite children to create unsupervised public accounts. Real student data should use
@@ -3835,7 +4121,7 @@ function LandingPage({
               <h1>ClassLoop Terms of Use.</h1>
               <p>
                 These founder-authored terms cover the ClassLoop demo, desktop downloads, support, billing paths, and
-                future hosted sync. They are not legal advice and should be reviewed before durable hosted public signups
+                future cloud sync. They are not legal advice and should be reviewed before durable public signups
                 use real student data.
               </p>
             </header>
@@ -3847,9 +4133,9 @@ function LandingPage({
                 ["Teacher review responsibility", "ClassLoop generates drafts. A teacher or authorized school staff member must review, edit, and approve generated recaps, matches, tasks, resources, and follow-ups before sharing them with students."],
                 ["Acceptable use", "Do not use ClassLoop to harass, shame, rank publicly, surveil, discriminate, collect unnecessary sensitive data, bypass school policy, or make automated high-stakes decisions about students."],
                 ["Content and permissions", "Only upload records you are allowed to process for classroom follow-up. You keep ownership of your classroom content and give ClassLoop limited permission to operate the app, save workspace state, provide support, and protect the service."],
-                ["Accounts and billing", "Free desktop use remains useful without paid services. Pro billing, when enabled, is processed through Stripe Checkout and subscription status is updated server-side by signed webhooks."],
-                ["Support and feedback", "Installer reports, pilot feedback, and optional student usefulness ratings may be sent to the ClassLoop creator for debugging and product improvement. Avoid sending unnecessary student data in support notes."],
-                ["Changes and suspension", "ClassLoop may update these terms or suspend hosted access for abuse, security risk, payment failure, legal compliance, or operational risk. Material changes should be reflected before new durable hosted signups open."],
+                ["Accounts and billing", "Free desktop use remains useful without paid services. Pro billing is handled by a payment processor, and plan changes apply after payment confirmation."],
+                ["Support and feedback", "Installer reports, pilot feedback, and optional student usefulness ratings may be sent to ClassLoop support for product improvement. Avoid sending unnecessary student data in support notes."],
+                ["Changes and suspension", "ClassLoop may update these terms or suspend hosted access for abuse, security risk, payment failure, legal compliance, or operational risk. Material changes should be reflected before broad school or district-managed hosted signups open."],
               ].map(([title, body]) => (
                 <article key={title}>
                   <h2>{title}</h2>
@@ -3946,7 +4232,7 @@ function LandingPage({
                 <h2>Retention and deletion</h2>
                 <p>
                   Desktop users can export and delete local workspace data in the app. Hosted pilot users can request
-                  deletion by email; support feedback is retained only as long as needed for debugging, safety, accounting,
+                  deletion by email; support feedback is retained only as long as needed for support, safety, billing,
                   or required records.
                 </p>
               </article>
@@ -4106,7 +4392,7 @@ function LandingPage({
             </section>
             <section className="landing-policy-panel">
               <h2>Safe demo path</h2>
-              <p>Hosted demo data is sample-only and resettable. Create durable teacher or student accounts in the downloaded desktop app.</p>
+              <p>Demo data is sample-only and resettable. Real teacher or student accounts use ClassLoop account sign-in when cloud accounts are enabled.</p>
               <div className="landing-actions compact">
                 <button className="landing-secondary" type="button" onClick={onOpenApp}>
                   Open web demo
@@ -4189,7 +4475,7 @@ function InstallerFeedbackForm({
       setStatus(result.notified === false ? "saved" : "sent");
       setMessage(
         result.notified === false
-          ? `Report saved. Email notification is not configured yet, so email ${supportEmail} for urgent installer problems.`
+          ? `Report saved. Email ${supportEmail} for urgent installer problems.`
           : "Thanks, installer report sent to ClassLoop support.",
       );
       setDetails("");
@@ -4285,18 +4571,25 @@ function InstallerFeedbackForm({
 function LoginPage({
   onLogin,
   onCreateAccount,
+  onCreateLocalAccount,
   onRequestPasswordReset,
   onCompletePasswordReset,
   demoOnly,
   workspaceNotice,
 }: {
-  onLogin: (role: AuthRole, email: string, password: string) => Promise<{ ok: boolean; message?: string }>;
+  onLogin: (role: AuthRole, email: string, password: string) => Promise<AuthResult>;
   onCreateAccount: (
     role: AuthRole,
     name: string,
     email: string,
     password: string,
-  ) => Promise<{ ok: boolean; message?: string }>;
+  ) => Promise<AuthResult>;
+  onCreateLocalAccount: (
+    role: AuthRole,
+    name: string,
+    email: string,
+    password: string,
+  ) => Promise<AuthResult>;
   onRequestPasswordReset: (
     role: AuthRole,
     email: string,
@@ -4328,6 +4621,8 @@ function LoginPage({
   const [resetMessage, setResetMessage] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [cloudConfirmation, setCloudConfirmation] = useState<CloudConfirmationPrompt | null>(null);
+  const [pendingLocalAccount, setPendingLocalAccount] = useState<PendingLocalAccount | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const classRole = role === "student" ? "student" : "teacher";
   const demoEmail = classRole === "teacher" ? demoTeacherEmail : demoStudentEmail;
@@ -4350,6 +4645,8 @@ function LoginPage({
     setAccountPath(nextRole === "individual" ? "individual" : "class");
     setError("");
     setNotice("");
+    setCloudConfirmation(null);
+    setPendingLocalAccount(null);
     setResetMessage("");
   };
 
@@ -4358,6 +4655,8 @@ function LoginPage({
     setRole(nextPath === "individual" ? "individual" : "teacher");
     setError("");
     setNotice("");
+    setCloudConfirmation(null);
+    setPendingLocalAccount(null);
     setResetMessage("");
   };
 
@@ -4372,6 +4671,8 @@ function LoginPage({
     setAccountPath("class");
     setError("");
     setNotice("");
+    setCloudConfirmation(null);
+    setPendingLocalAccount(null);
     setPassword(demoOnly ? "classloop-teacher" : "");
     setConfirmPassword("");
     setShowPassword(false);
@@ -4390,6 +4691,22 @@ function LoginPage({
     setShowPassword(false);
     setError("");
     setNotice("");
+    setCloudConfirmation(null);
+    setPendingLocalAccount(null);
+  };
+
+  const closeCloudConfirmation = () => {
+    setCloudConfirmation(null);
+    setPendingLocalAccount(null);
+  };
+
+  const backToSignInFromCloudConfirmation = () => {
+    setCloudConfirmation(null);
+    setPendingLocalAccount(null);
+    setAuthScreen("form");
+    setMode("signin");
+    setName("");
+    setConfirmPassword("");
   };
 
   const closeResetModal = () => {
@@ -4463,6 +4780,7 @@ function LoginPage({
     setIsSubmitting(true);
     setError("");
     setNotice("");
+    setPendingLocalAccount(null);
     if (!role) {
       setError("Choose Individual, Teacher, or Student before continuing.");
       setIsSubmitting(false);
@@ -4478,9 +4796,84 @@ function LoginPage({
         mode === "signin"
           ? await onLogin(role, email, password)
           : await onCreateAccount(role, name, email, password);
-      if (!result.ok) setError(result.message ?? "Unable to sign in.");
+      if (result.nextMode === "signin") {
+        setMode("signin");
+        setName("");
+        setConfirmPassword("");
+        setResetOpen(false);
+        if (result.email) setEmail(result.email);
+        if (result.role) {
+          setRole(result.role);
+          setAccountPath(result.role === "individual" ? "individual" : "class");
+        }
+      }
+      if (result.code === "email_confirmation_required") {
+        if (mode === "create") {
+          setPendingLocalAccount({
+            role,
+            name: name.trim(),
+            email: result.email || normalizeEmail(email),
+            password,
+          });
+        }
+        setCloudConfirmation({
+          email: result.email || normalizeEmail(email),
+          redirectUrl: result.redirectUrl || getCloudEmailRedirectUrl("dashboard"),
+          context: mode === "create" ? "account-create" : "cloud-login",
+        });
+        setNotice(result.message ?? "Confirm your email, then sign in to ClassLoop.");
+        return;
+      }
+      if (!result.ok) {
+        if (result.nextMode === "signin") {
+          setNotice(result.message ?? "That email already has a ClassLoop account. Sign in instead.");
+        } else {
+          setError(result.message ?? "Unable to sign in.");
+        }
+      }
     } catch {
       setError("Unable to verify credentials in this browser.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const continueOnThisDevice = async () => {
+    if (!pendingLocalAccount) {
+      setCloudConfirmation(null);
+      setError("Start account creation again if you want to continue without confirming email.");
+      return;
+    }
+    setIsSubmitting(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await onCreateLocalAccount(
+        pendingLocalAccount.role,
+        pendingLocalAccount.name,
+        pendingLocalAccount.email,
+        pendingLocalAccount.password,
+      );
+      if (result.ok) {
+        setCloudConfirmation(null);
+        setPendingLocalAccount(null);
+        return;
+      }
+      if (result.nextMode === "signin") {
+        setMode("signin");
+        setName("");
+        setConfirmPassword("");
+        if (result.email) setEmail(result.email);
+        if (result.role) {
+          setRole(result.role);
+          setAccountPath(result.role === "individual" ? "individual" : "class");
+        }
+        setNotice(result.message ?? "That email already has a ClassLoop account. Sign in instead.");
+      } else {
+        setError(result.message ?? "Unable to continue on this device.");
+      }
+    } catch {
+      setError("Unable to continue on this device.");
     } finally {
       setIsSubmitting(false);
     }
@@ -4586,6 +4979,17 @@ function LoginPage({
           </div>
           {workspaceNotice && <WorkspaceRecoveryNotice notice={workspaceNotice} />}
         </section>
+        {cloudConfirmation && (
+          <CloudEmailConfirmationOverlay
+            prompt={cloudConfirmation}
+            actionLabel="Back to sign in"
+            onClose={closeCloudConfirmation}
+            onAction={backToSignInFromCloudConfirmation}
+            secondaryActionLabel={pendingLocalAccount ? (isSubmitting ? "Continuing..." : "Continue on this device") : undefined}
+            secondaryActionHelper="You can use ClassLoop locally now. Multi-device sync stays unavailable until this email is confirmed."
+            onSecondaryAction={continueOnThisDevice}
+          />
+        )}
       </main>
     );
   }
@@ -4765,6 +5169,17 @@ function LoginPage({
             </button>
           )}
         </form>
+        {cloudConfirmation && (
+          <CloudEmailConfirmationOverlay
+            prompt={cloudConfirmation}
+            actionLabel="Back to sign in"
+            onClose={closeCloudConfirmation}
+            onAction={backToSignInFromCloudConfirmation}
+            secondaryActionLabel={pendingLocalAccount ? (isSubmitting ? "Continuing..." : "Continue on this device") : undefined}
+            secondaryActionHelper="You can use ClassLoop locally now. Multi-device sync stays unavailable until this email is confirmed."
+            onSecondaryAction={continueOnThisDevice}
+          />
+        )}
         {mode === "create" && (
           <div className="login-help sample-account-panel">
             <strong>Want to look around first?</strong>
@@ -5556,23 +5971,165 @@ function TeacherDashboard({
   const quietStudents = latest?.participationEvents.filter((event) => event.approved && event.type === "quiet") ?? [];
   const hasAttention = absentStudents.length > 0 || quietStudents.length > 0 || overdue.length > 0;
   const currentPlanTier: PlanTier = isPaidPlan(billingProfile) ? "pro" : "free";
+  const reviewDraft = draft?.status === "draft" ? draft : null;
+  const draftNeedsReview = Boolean(reviewDraft);
+  const draftBlockingWarnings = reviewDraft ? unresolvedBlockingImportWarnings(reviewDraft).length : 0;
+  const submittedCheckIns = latest?.submissions?.filter((submission) => submission.status === "submitted").length ?? 0;
+  const sessionsToday =
+    sessions.filter((session) => localDayKey(session.date) === localDayKey()).length +
+    (reviewDraft && localDayKey(reviewDraft.date) === localDayKey() ? 1 : 0);
+  const freeLimitReached = currentPlanTier === "free" && sessionsToday >= 1;
+  const supportSignalCount = absentStudents.length + quietStudents.length;
+  const publishedCompletionRate = completionRate(published);
+  const assistantBrief = buildTeacherAssistantBrief({
+    hasSessions,
+    latestTitle: latest?.title,
+    reviewDraftTitle: reviewDraft?.title,
+    draftBlockingWarnings,
+    submittedCheckIns,
+    overdueCount: overdue.length,
+    supportSignalCount,
+    freeLimitReached,
+    publishedCount: published.length,
+    completionRate: publishedCompletionRate,
+  });
+  const assistantActions: TeacherAssistantAction[] = [];
+  const assistantDrafts = buildTeacherAssistantDrafts({
+    latest,
+    reviewDraft,
+    overdue,
+    absentStudents,
+    quietStudents,
+  });
+  const [draftCopyMessage, setDraftCopyMessage] = useState("");
+
+  const copyAssistantDraft = async (assistantDraft: TeacherAssistantDraft) => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(assistantDraft.body);
+      setDraftCopyMessage(`${assistantDraft.title} copied.`);
+      window.setTimeout(() => setDraftCopyMessage(""), 2200);
+    } catch {
+      setDraftCopyMessage("Copy was blocked. Select the draft text and copy it manually.");
+    }
+  };
+
+  if (reviewDraft) {
+    assistantActions.push({
+      id: "review-draft",
+      icon: draftBlockingWarnings > 0 ? CircleAlert : Sparkles,
+      title: draftBlockingWarnings > 0 ? "Review import warnings before publishing" : "Finish the current class draft",
+      detail:
+        draftBlockingWarnings > 0
+          ? `${draftBlockingWarnings} import ${draftBlockingWarnings === 1 ? "warning needs" : "warnings need"} a teacher decision before students see it.`
+          : `${reviewDraft.title} is ready for recap, due-date, and student follow-up review.`,
+      action: "Review draft",
+      onAction: () => navigate("review"),
+      tone: draftBlockingWarnings > 0 ? "warning" : "primary",
+    });
+  }
+
+  if (!hasSessions && !draftNeedsReview) {
+    assistantActions.push({
+      id: "first-session",
+      icon: Wand2,
+      title: "Create the first class follow-up",
+      detail: "Paste a transcript or notes so every student gets a reviewed recap, tasks, and resources.",
+      action: "Start",
+      onAction: () => navigate("new-session"),
+      tone: "primary",
+    });
+  }
+
+  if (submittedCheckIns > 0 && latest) {
+    assistantActions.push({
+      id: "review-submissions",
+      icon: CheckCircle2,
+      title: `Review ${submittedCheckIns} submitted ${submittedCheckIns === 1 ? "check-in" : "check-ins"}`,
+      detail: `${latest.title} has student work ready for teacher feedback.`,
+      action: "Open",
+      onAction: () => navigate("student-session", { session: latest.id }),
+      tone: "primary",
+    });
+  }
+
+  if (overdue.length > 0 && latest) {
+    assistantActions.push({
+      id: "overdue-followups",
+      icon: Clock3,
+      title: `Review ${overdue.length} overdue ${overdue.length === 1 ? "follow-up" : "follow-ups"}`,
+      detail: `${latest.title} has reminders that may need a quick teacher nudge.`,
+      action: "Open",
+      onAction: () => navigate("student-session", { session: latest.id }),
+      tone: "warning",
+    });
+  }
+
+  if (supportSignalCount > 0 && latest) {
+    assistantActions.push({
+      id: "support-signals",
+      icon: AlertTriangle,
+      title: `Check ${supportSignalCount} support ${supportSignalCount === 1 ? "signal" : "signals"}`,
+      detail: "Quiet and absent signals are grouped for a fast teacher touchpoint before the next class.",
+      action: "Analytics",
+      onAction: () => navigate("analytics"),
+      tone: "warning",
+    });
+  }
+
+  if (freeLimitReached && assistantActions.length < 3) {
+    assistantActions.push({
+      id: "free-limit",
+      icon: ShieldCheck,
+      title: "Today's free session is used",
+      detail: "Keep reviewing today's class now; Pro unlocks unlimited daily processing when you are ready.",
+      action: "View plan",
+      onAction: () => navigate("billing"),
+      tone: "calm",
+    });
+  }
+
+  if (hasSessions && !freeLimitReached && assistantActions.length < 3) {
+    assistantActions.push({
+      id: "next-session",
+      icon: PlusCircle,
+      title: "Capture the next class record",
+      detail: "Start a fresh transcript or notes pass with your saved classroom context close by.",
+      action: "New session",
+      onAction: () => navigate("new-session"),
+      tone: "calm",
+    });
+  }
+
+  if (published.length > 0 && assistantActions.length < 3) {
+    assistantActions.push({
+      id: "trend-review",
+      icon: LineChart,
+      title: "Scan the follow-through trend",
+      detail: "Use completion and participation patterns to plan the next support pass.",
+      action: "Analytics",
+      onAction: () => navigate("analytics"),
+      tone: "calm",
+    });
+  }
+
+  const visibleAssistantActions = assistantActions.slice(0, 3);
 
   return (
     <div className="page-stack">
       <section className="dashboard-hero">
         <div className="hero-copy">
           <span className="eyebrow">Live class follow-up loop</span>
-          <h2>Turn messy class records into edited recaps, personal tasks, and completion check-ins.</h2>
+          <h2>Turn class records into reviewed recaps, tasks, and check-ins.</h2>
           <p>
-            You stay in control while ClassLoop extracts what happened, who needs support, and what should happen
-            next.
+            Review what happened, who needs support, and what should happen next before students see it.
           </p>
           <div className="hero-actions" data-tour="dashboard-hero">
             <button className="primary-button large" onClick={() => navigate("new-session")}>
               <Wand2 size={19} />
               Create a session
             </button>
-            {draft && (
+            {draftNeedsReview && (
               <button className="ghost-button large" onClick={() => navigate("review")}>
                 <Sparkles size={18} />
                 Continue draft
@@ -5595,7 +6152,7 @@ function TeacherDashboard({
           <MetricCard
             icon={Target}
             label="Follow-through"
-            value={`${completionRate(published)}%`}
+            value={`${publishedCompletionRate}%`}
             detail="Completed student check-ins"
             accent="blue"
           />
@@ -5615,6 +6172,47 @@ function TeacherDashboard({
           />
         </section>
       )}
+
+      <Panel title="Assistant next steps" icon={BrainCircuit}>
+        <section className={`assistant-brief ${assistantBrief.tone}`} aria-label="Teacher assistant brief">
+          <div className="assistant-brief-main">
+            <span className="eyebrow">Teacher assistant brief</span>
+            <strong>{assistantBrief.title}</strong>
+            <p>{assistantBrief.detail}</p>
+          </div>
+          <div className="assistant-brief-facts">
+            {assistantBrief.facts.map((fact) => (
+              <div className="assistant-brief-fact" key={fact.label}>
+                <span>{fact.label}</span>
+                <strong>{fact.value}</strong>
+                <small>{fact.detail}</small>
+              </div>
+            ))}
+          </div>
+        </section>
+        <div className="assistant-action-list">
+          {visibleAssistantActions.map((action) => (
+            <AssistantActionItem key={action.id} action={action} />
+          ))}
+        </div>
+      </Panel>
+
+      <Panel title="Assistant drafts" icon={ClipboardCheck}>
+        <section className="assistant-draft-list" aria-label="Copy-ready assistant drafts">
+          {assistantDrafts.map((assistantDraft) => (
+            <AssistantDraftCard
+              key={assistantDraft.id}
+              assistantDraft={assistantDraft}
+              onCopy={() => void copyAssistantDraft(assistantDraft)}
+            />
+          ))}
+        </section>
+        {draftCopyMessage && (
+          <p className="settings-message success" role="status">
+            {draftCopyMessage}
+          </p>
+        )}
+      </Panel>
 
       <section className="content-grid two-columns">
         <Panel title="Recent sessions" icon={CalendarDays} action="View report" onAction={() => navigate("report")}>
@@ -5722,6 +6320,265 @@ function TeacherDashboard({
       </section>
     </div>
   );
+}
+
+type TeacherAssistantAction = {
+  id: string;
+  icon: typeof LayoutDashboard;
+  title: string;
+  detail: string;
+  action: string;
+  onAction: () => void;
+  tone: "primary" | "warning" | "calm";
+};
+
+type TeacherAssistantDraft = {
+  id: string;
+  icon: typeof LayoutDashboard;
+  title: string;
+  label: string;
+  body: string;
+  tone: "primary" | "warning" | "calm";
+};
+
+type TeacherAssistantBrief = {
+  title: string;
+  detail: string;
+  tone: "primary" | "warning" | "calm";
+  facts: Array<{
+    label: string;
+    value: string;
+    detail: string;
+  }>;
+};
+
+function buildTeacherAssistantBrief({
+  hasSessions,
+  latestTitle,
+  reviewDraftTitle,
+  draftBlockingWarnings,
+  submittedCheckIns,
+  overdueCount,
+  supportSignalCount,
+  freeLimitReached,
+  publishedCount,
+  completionRate,
+}: {
+  hasSessions: boolean;
+  latestTitle?: string;
+  reviewDraftTitle?: string;
+  draftBlockingWarnings: number;
+  submittedCheckIns: number;
+  overdueCount: number;
+  supportSignalCount: number;
+  freeLimitReached: boolean;
+  publishedCount: number;
+  completionRate: number;
+}): TeacherAssistantBrief {
+  const openSupportCount = overdueCount + supportSignalCount;
+  const facts = [
+    {
+      label: "Drafts",
+      value: reviewDraftTitle ? "1" : "0",
+      detail: reviewDraftTitle ? "Needs review" : "None waiting",
+    },
+    {
+      label: "Check-ins",
+      value: submittedCheckIns.toString(),
+      detail: submittedCheckIns ? "Ready to review" : "No submissions",
+    },
+    {
+      label: "Support",
+      value: openSupportCount.toString(),
+      detail: openSupportCount ? "Needs a touchpoint" : "No urgent flags",
+    },
+    {
+      label: "Completion",
+      value: `${completionRate}%`,
+      detail: publishedCount ? "Across published sessions" : "Starts after publish",
+    },
+  ];
+
+  if (reviewDraftTitle && draftBlockingWarnings > 0) {
+    return {
+      title: "Publish is paused until warnings are reviewed.",
+      detail: `${reviewDraftTitle} has ${draftBlockingWarnings} unresolved ${draftBlockingWarnings === 1 ? "warning" : "warnings"}, so the safest next move is a quick teacher decision before any student view changes.`,
+      tone: "warning",
+      facts,
+    };
+  }
+
+  if (reviewDraftTitle) {
+    return {
+      title: "A class draft is ready for teacher review.",
+      detail: `${reviewDraftTitle} already has the recap, tasks, resources, and student follow-ups drafted. Review the student preview before publishing.`,
+      tone: "primary",
+      facts,
+    };
+  }
+
+  if (submittedCheckIns > 0) {
+    return {
+      title: "Students are waiting on feedback.",
+      detail: `${submittedCheckIns} submitted ${submittedCheckIns === 1 ? "check-in is" : "check-ins are"} ready. Reviewing them now closes the loop while the class is still fresh.`,
+      tone: "primary",
+      facts,
+    };
+  }
+
+  if (openSupportCount > 0 && latestTitle) {
+    return {
+      title: "Run a quick support pass before the next class.",
+      detail: `${latestTitle} has ${openSupportCount} quiet, absent, or overdue ${openSupportCount === 1 ? "signal" : "signals"} grouped for a fast follow-up pass.`,
+      tone: "warning",
+      facts,
+    };
+  }
+
+  if (!hasSessions) {
+    return {
+      title: "Start by giving ClassLoop one messy class record.",
+      detail: "Paste a transcript, notes, roster, and links. ClassLoop will turn them into a teacher-reviewed follow-up loop instead of a blank dashboard.",
+      tone: "primary",
+      facts,
+    };
+  }
+
+  if (freeLimitReached) {
+    return {
+      title: "Today's free generation is used, but review work can continue.",
+      detail: "You can still edit, publish, check student views, and scan support signals. Pro is only needed when repeated daily generation becomes the workflow.",
+      tone: "calm",
+      facts,
+    };
+  }
+
+  return {
+    title: "Today's class loop is clear.",
+    detail: "No draft, submitted check-in, or urgent support signal is waiting. Capture the next class record when the next session ends.",
+    tone: "calm",
+    facts,
+  };
+}
+
+function compactDraftSentence(value: string | undefined, fallback: string) {
+  const cleaned = (value || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return fallback;
+  const sentence = cleaned.match(/^(.{24,220}?[.!?])(?:\s|$)/)?.[1];
+  return (sentence || cleaned.slice(0, 220)).trim();
+}
+
+function dueTextForDraft(dueDate: string | undefined) {
+  if (!dueDate?.trim()) return "next class";
+  return /^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? formatDate(dueDate) : dueDate;
+}
+
+function studentFirstName(student: Student) {
+  return student.name.split(/\s+/).filter(Boolean)[0] || student.name;
+}
+
+function buildTeacherAssistantDrafts({
+  latest,
+  reviewDraft,
+  overdue,
+  absentStudents,
+  quietStudents,
+}: {
+  latest?: Session;
+  reviewDraft: Session | null;
+  overdue: StudentFollowUp[];
+  absentStudents: Array<[string, AttendanceStatus]>;
+  quietStudents: ParticipationEvent[];
+}): TeacherAssistantDraft[] {
+  const drafts: TeacherAssistantDraft[] = [];
+
+  if (reviewDraft) {
+    const warningCount = unresolvedBlockingImportWarnings(reviewDraft).length;
+    const actionSummary =
+      reviewDraft.actionItems
+        .slice(0, 2)
+        .map((item) => item.title)
+        .join(", ") || "student tasks";
+    drafts.push({
+      id: "draft-review-brief",
+      icon: ClipboardCheck,
+      title: "Draft review brief",
+      label: "Teacher checklist",
+      tone: warningCount > 0 ? "warning" : "primary",
+      body: `Review ${reviewDraft.title} before publishing.\n\nCheck: ${compactDraftSentence(reviewDraft.recap, "the generated recap")}\nConfirm: ${actionSummary}\nStudent safety: ${warningCount > 0 ? `${warningCount} warning(s) need a teacher decision first.` : "preview student follow-ups before publishing."}`,
+    });
+  }
+
+  if (latest) {
+    const recapLine = compactDraftSentence(latest.recap, "we reviewed the main class ideas and next steps.");
+    const nextQuestion = latest.essentialQuestions[0] || latest.actionItems[0]?.title || "the part that felt hardest last time";
+    const nextTask =
+      latest.actionItems[0]?.title ||
+      latest.followUps.find((followUp) => followUp.tasks.length > 0)?.tasks[0] ||
+      "the follow-up task";
+    const supportCount = overdue.length + absentStudents.length + quietStudents.length;
+
+    drafts.push({
+      id: "next-class-opener",
+      icon: CalendarDays,
+      title: "Next-class opener",
+      label: "Say first",
+      tone: supportCount > 0 ? "warning" : "calm",
+      body: `Opening for the next class:\n\nLast time in ${latest.title}, ${recapLine}\nStart today by checking: ${nextQuestion}.\nThen give everyone 3 minutes to find ${nextTask} and mark what they need help with.`,
+    });
+
+    const overdueFollowUp = overdue[0];
+    const absentStudentId = absentStudents[0]?.[0];
+    const quietEvent = quietStudents[0];
+    const targetStudent = overdueFollowUp
+      ? studentById(overdueFollowUp.studentId, latest.students)
+      : absentStudentId
+        ? studentById(absentStudentId, latest.students)
+        : quietEvent
+          ? studentById(quietEvent.studentId, latest.students)
+          : null;
+
+    if (targetStudent && (overdueFollowUp || absentStudentId || quietEvent)) {
+      const touchpointReason = overdueFollowUp
+        ? `${overdueFollowUp.reminder} Due: ${dueTextForDraft(overdueFollowUp.dueDate)}.`
+        : absentStudentId
+          ? `You were marked absent for ${latest.title}. Start with the recap and resources, then reply with the part you want me to review.`
+          : `I noticed you were quiet during ${latest.title}. Try one quick check-in: what part feels clear, and what part should we revisit?`;
+      drafts.push({
+        id: "student-touchpoint",
+        icon: MessageSquare,
+        title: "Student touchpoint",
+        label: targetStudent.name,
+        tone: overdueFollowUp || absentStudentId ? "warning" : "calm",
+        body: `Hi ${studentFirstName(targetStudent)},\n\n${touchpointReason}\n\nI am checking in before the next class so you have a clear next step. Send me one question or mark the task when you are done.`,
+      });
+    }
+
+    const resourceSummary = latest.resources[0]
+      ? `Resource to mention: ${latest.resources[0].title} (${latest.resources[0].url}).`
+      : "Resource to mention: use the session resources already attached in ClassLoop.";
+    drafts.push({
+      id: "class-followup-post",
+      icon: Mail,
+      title: "Class follow-up post",
+      label: "Class-wide",
+      tone: "primary",
+      body: `Class follow-up for ${latest.title}:\n\n${recapLine}\n\nNext step: ${nextTask}.\n${resourceSummary}\n\nPlease check your ClassLoop follow-up and mark anything that needs teacher help.`,
+    });
+  }
+
+  if (drafts.length === 0) {
+    drafts.push({
+      id: "first-session-prompt",
+      icon: Wand2,
+      title: "First-session prompt",
+      label: "Start here",
+      tone: "primary",
+      body: "Paste one transcript, roster, notes, and resource link. ClassLoop will draft the recap, tasks, student follow-ups, and support signals for teacher review.",
+    });
+  }
+
+  return drafts.slice(0, 3);
 }
 
 function PersonalDashboard({ meetings }: { meetings: PersonalMeeting[] }) {
@@ -5894,7 +6751,7 @@ function NewPersonalMeeting({
     }
 
     try {
-      setWhisperStatus(`Transcribing ${file.name} with Whisper...`);
+      setWhisperStatus(`Transcribing ${file.name}...`);
       const nextTranscript = await transcribeRecordingWithWhisper(file, {
         filename: file.name,
         source: transcriptSourceForFile(file),
@@ -5902,9 +6759,9 @@ function NewPersonalMeeting({
       });
       setMinutes(nextTranscript.text);
       setStructuredTranscript(nextTranscript);
-      setWhisperStatus("Whisper transcript ready. Review speaker labels before generating.");
+      setWhisperStatus("Transcript ready. Review speaker labels before generating.");
     } catch (error) {
-      setWhisperStatus(error instanceof Error ? error.message : "Whisper transcription failed.");
+      setWhisperStatus(error instanceof Error ? error.message : "Recording transcription failed.");
     }
   };
 
@@ -5926,7 +6783,7 @@ function NewPersonalMeeting({
             <label className="upload-zone wide">
               <UploadCloud size={24} />
               <strong>{uploadedRecordingName || "Upload meeting audio, screen recording, or transcript"}</strong>
-              <small>Audio and video are transcribed with Whisper when the hosted API is configured.</small>
+              <small>Audio and video can be transcribed when recording transcription is available.</small>
               <input
                 type="file"
                 accept=".txt,.vtt,.srt,audio/*,video/*,.mp3,.mp4,.m4a,.wav,.webm,.mov"
@@ -6429,6 +7286,60 @@ function AttentionItem({
   );
 }
 
+function AssistantActionItem({ action }: { action: TeacherAssistantAction }) {
+  const Icon = action.icon;
+  return (
+    <article className={`assistant-action ${action.tone}`}>
+      <span>
+        <Icon size={17} />
+      </span>
+      <div>
+        <strong>{action.title}</strong>
+        <small>{action.detail}</small>
+      </div>
+      <button className="text-button" type="button" onClick={action.onAction}>
+        {action.action}
+        <ChevronRight size={16} />
+      </button>
+    </article>
+  );
+}
+
+function AssistantDraftCard({
+  assistantDraft,
+  onCopy,
+}: {
+  assistantDraft: TeacherAssistantDraft;
+  onCopy: () => void;
+}) {
+  const Icon = assistantDraft.icon;
+  return (
+    <article className={`assistant-draft ${assistantDraft.tone}`}>
+      <span>
+        <Icon size={17} />
+      </span>
+      <div className="assistant-draft-content">
+        <div className="assistant-draft-header">
+          <div>
+            <small>{assistantDraft.label}</small>
+            <strong>{assistantDraft.title}</strong>
+          </div>
+          <button
+            className="text-button"
+            type="button"
+            onClick={onCopy}
+            aria-label={`Copy ${assistantDraft.title}`}
+          >
+            Copy
+            <ClipboardCheck size={15} />
+          </button>
+        </div>
+        <p className="assistant-draft-body">{assistantDraft.body}</p>
+      </div>
+    </article>
+  );
+}
+
 function PlanRow({
   tier,
   detail,
@@ -6452,6 +7363,149 @@ function PlanRow({
   );
 }
 
+const stripePricingTableScriptId = "classloop-stripe-pricing-table";
+const stripePricingTableScriptSrc = "https://js.stripe.com/v3/pricing-table.js";
+
+function StripePricingTableEmbed({ customerEmail, clientReferenceId }: { customerEmail: string; clientReferenceId: string }) {
+  const { pricingTableId, publishableKey } = getStripePricingTableConfig();
+  const configured = Boolean(pricingTableId && publishableKey);
+
+  useEffect(() => {
+    if (!pricingTableId || !publishableKey) return;
+    if (document.getElementById(stripePricingTableScriptId)) return;
+    const script = document.createElement("script");
+    script.id = stripePricingTableScriptId;
+    script.async = true;
+    script.src = stripePricingTableScriptSrc;
+    document.head.appendChild(script);
+  }, [pricingTableId, publishableKey]);
+
+  if (!configured) {
+    return (
+      <div className="stripe-pricing-table-shell placeholder" role="status">
+        <div className="integration-card">
+          <span>
+            <strong>Online payment is not available right now.</strong>
+            <small>Use Upgrade to Pro again later or contact ClassLoop support if this keeps happening.</small>
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const pricingTableAttributes: Record<string, string> = {
+    "pricing-table-id": pricingTableId,
+    "publishable-key": publishableKey,
+    "customer-email": customerEmail,
+  };
+  const safeClientReferenceId = clientReferenceId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 200);
+  if (safeClientReferenceId) pricingTableAttributes["client-reference-id"] = safeClientReferenceId;
+
+  return (
+    <div className="stripe-pricing-table-shell" role="region" aria-label="Payment plans">
+      {createElement("stripe-pricing-table", pricingTableAttributes)}
+    </div>
+  );
+}
+
+function CloudEmailConfirmationOverlay({
+  prompt,
+  actionLabel,
+  onClose,
+  onAction,
+  secondaryActionLabel,
+  secondaryActionHelper,
+  onSecondaryAction,
+}: CloudEmailConfirmationOverlayProps) {
+  const isAccountCreation = prompt.context === "account-create";
+
+  return (
+    <div className="modal-backdrop cloud-confirmation-backdrop" role="dialog" aria-modal="true" aria-labelledby="cloud-confirmation-title">
+      <section className="cloud-confirmation-modal">
+        <div className="modal-header">
+          <div>
+            <span className="eyebrow">Cloud account confirmation</span>
+            <h2 id="cloud-confirmation-title">
+              {isAccountCreation ? "Check your email to finish your account." : "Check your email to link your cloud account."}
+            </h2>
+            <p>
+              {isAccountCreation
+                ? `ClassLoop created an account for ${prompt.email}. Confirm the address before multi-device sign-in works.`
+                : `ClassLoop sent a confirmation email to ${prompt.email}. Confirm the address to finish linking this account.`}
+            </p>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close email confirmation instructions">
+            <X size={18} />
+          </button>
+        </div>
+
+        <ol className="cloud-confirmation-steps">
+          <li>
+            <span>
+              <Mail size={18} aria-hidden="true" />
+            </span>
+            <div>
+              <strong>Open the inbox for {prompt.email}</strong>
+              <small>Look for a ClassLoop confirmation email. Check Updates, Promotions, Spam, and school-filtered mail if it is not in the main inbox.</small>
+            </div>
+          </li>
+          <li>
+            <span>
+              <ShieldCheck size={18} aria-hidden="true" />
+            </span>
+            <div>
+              <strong>Click the confirmation button in that email</strong>
+              <small>
+                {isAccountCreation
+                  ? "The email verifies your address so multi-device sign-in works with the same ClassLoop account. The same ClassLoop account can sign in on desktop, browser, and phone."
+                  : "The email verifies your address so ClassLoop can safely link this login to your cloud account."}
+              </small>
+            </div>
+          </li>
+          <li>
+            <span>
+              <RefreshCw size={18} aria-hidden="true" />
+            </span>
+            <div>
+              <strong>Return to ClassLoop and continue</strong>
+              <small>After confirming your email, return here and use the same email and password to continue.</small>
+            </div>
+          </li>
+        </ol>
+
+        <p className="cloud-confirmation-note">
+          If the email opens the wrong page, return to ClassLoop and request a fresh confirmation email.
+        </p>
+        <p className="cloud-confirmation-note">
+          <strong>Expected return link:</strong> {prompt.redirectUrl}
+        </p>
+
+        {secondaryActionLabel && (
+          <p className="cloud-confirmation-note">
+            Need to keep working now? Continue on this device stores the account locally. Multi-device cloud sync will stay unavailable until you confirm the email and sign in again.
+          </p>
+        )}
+
+        <div className="button-row">
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Close
+          </button>
+          {secondaryActionLabel && onSecondaryAction && (
+            <button type="button" className="ghost-button" onClick={onSecondaryAction} title={secondaryActionHelper}>
+              <Smartphone size={17} />
+              {secondaryActionLabel}
+            </button>
+          )}
+          <button type="button" className="primary-button" onClick={onAction}>
+            <RefreshCw size={17} />
+            {actionLabel}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 let embeddedCheckoutSessionCache:
   | {
       userId: string;
@@ -6468,7 +7522,7 @@ function embeddedCheckoutClientSecretFor(userId: string) {
 
   const promise = createEmbeddedCheckoutSession("pro")
     .then((session) => {
-      if (!session.clientSecret) throw new Error("Stripe did not return an embedded checkout client secret.");
+      if (!session.clientSecret) throw new Error("Payment form could not be prepared.");
       return session.clientSecret;
     })
     .catch((error) => {
@@ -6483,10 +7537,14 @@ function EmbeddedCheckoutPage({
   auth,
   billingProfile,
   setBillingProfile,
+  localAuthSecret,
+  appendAudit,
 }: {
   auth: AuthSession;
   billingProfile: BillingProfile;
   setBillingProfile: (profile: BillingProfile) => void;
+  localAuthSecret: LocalAuthSecret | null;
+  appendAudit: (action: string, detail: string, actor?: AuthSession | null) => void;
 }) {
   const backendStatus = getBackendStatus();
   const publishableKey = getStripePublishableKey();
@@ -6495,8 +7553,58 @@ function EmbeddedCheckoutPage({
   const [message, setMessage] = useState("Preparing secure checkout...");
   const [status, setStatus] = useState<"loading" | "ready" | "error" | "verifying" | "success">("loading");
   const [connectedEmail, setConnectedEmail] = useState("");
+  const [cloudConfirmation, setCloudConfirmation] = useState<CloudConfirmationPrompt | null>(null);
   const isDemoAccount = Boolean(auth.demo);
   const hasPro = isPaidPlan(billingProfile);
+
+  const showEmailConfirmation = useCallback((result: CloudAuthResult, fallbackEmail: string) => {
+    const prompt = cloudConfirmationFromResult(result, fallbackEmail, "checkout");
+    if (!prompt) return false;
+    setCloudConfirmation(prompt);
+    setStatus("loading");
+    setMessage("Confirm your email before checkout continues.");
+    return true;
+  }, []);
+
+  const ensureCheckoutCloudSession = useCallback(async () => {
+    const existingSession = await getCloudSession();
+    if (existingSession) {
+      const email = existingSession.user.email ?? "";
+      setConnectedEmail(email);
+      return existingSession;
+    }
+
+    const normalizedAuthEmail = normalizeEmail(auth.email);
+    const secretMatchesCurrentAccount =
+      localAuthSecret?.accountId === auth.accountId &&
+      localAuthSecret.role === auth.role &&
+      normalizeEmail(localAuthSecret.email) === normalizedAuthEmail;
+
+    if (!secretMatchesCurrentAccount || !localAuthSecret?.password) {
+      throw new Error("Sign in again, then Upgrade to Pro will continue with this account.");
+    }
+
+    setStatus("loading");
+    setMessage("Preparing your ClassLoop account for payment...");
+    let result = await signIntoCloud(normalizedAuthEmail, localAuthSecret.password);
+    if (showEmailConfirmation(result, normalizedAuthEmail)) return null;
+    if (!result.ok) {
+      await prepareBillingCloudAccount(normalizedAuthEmail, localAuthSecret.password, "teacher", auth.name);
+      result = await signIntoCloud(normalizedAuthEmail, localAuthSecret.password);
+      if (showEmailConfirmation(result, normalizedAuthEmail)) return null;
+    }
+    if (!result.ok || !result.session) {
+      throw new Error(
+        result.message ||
+          "Unable to prepare payment for this account. Sign in again, then retry Upgrade to Pro.",
+      );
+    }
+
+    const email = result.session.user.email ?? normalizedAuthEmail;
+    setConnectedEmail(email);
+    appendAudit("cloud_connect", `Prepared payment account for ${email}.`, auth);
+    return result.session;
+  }, [appendAudit, auth, localAuthSecret, showEmailConfirmation]);
 
   useEffect(() => {
     getCloudSession().then((session) => setConnectedEmail(session?.user.email ?? ""));
@@ -6510,7 +7618,7 @@ function EmbeddedCheckoutPage({
     const verifyPaidProfile = async (attempt = 1) => {
       if (!active) return;
       setStatus("verifying");
-      setMessage("Stripe returned to ClassLoop. Verifying the paid subscription before Pro unlocks...");
+      setMessage("Payment complete. Checking your plan before Pro turns on...");
       try {
         const profile = await getCloudProfile();
         const verifiedProfile = normalizeTrustedBillingProfile(profile.billingProfile);
@@ -6518,16 +7626,16 @@ function EmbeddedCheckoutPage({
         setBillingProfile(verifiedProfile);
         if (isPaidPlan(verifiedProfile)) {
           setStatus("success");
-          setMessage("Payment verified by Stripe. Pro is active on this cloud account.");
+          setMessage("Payment confirmed. Pro is active.");
           return;
         }
         if (attempt < 5) {
-          setMessage("Checkout was submitted. Waiting for the Stripe webhook to confirm payment before Pro unlocks...");
+          setMessage("Payment was submitted. Waiting for confirmation before Pro turns on...");
           retryTimer = window.setTimeout(() => void verifyPaidProfile(attempt + 1), 1500);
           return;
         }
         setStatus("error");
-        setMessage("Checkout returned, but Pro is still pending. ClassLoop will stay Free until Stripe confirms payment.");
+        setMessage("Payment is still pending. ClassLoop will stay Free until payment is confirmed.");
       } catch (error) {
         if (!active) return;
         if (attempt < 5) {
@@ -6535,7 +7643,7 @@ function EmbeddedCheckoutPage({
           return;
         }
         setStatus("error");
-        setMessage(error instanceof Error ? error.message : "Unable to verify the Stripe payment yet.");
+        setMessage(error instanceof Error ? error.message : "Unable to verify the payment yet.");
       }
     };
 
@@ -6555,30 +7663,26 @@ function EmbeddedCheckoutPage({
       try {
         if (isDemoAccount) {
           setStatus("error");
-          setMessage("Demo account upgrades are disabled. Create your own account or sign in with a hosted teacher account to upgrade.");
+          setMessage("Demo account upgrades are disabled. Create your own account to upgrade.");
           return;
         }
-        if (!backendStatus.webReady) {
+        if (!backendStatus.supabaseConfigured) {
           setStatus("error");
-          setMessage("Stripe Checkout needs hosted Supabase and Stripe environment variables before upgrades can start.");
+          setMessage("Online upgrades are unavailable right now. Try again later or contact ClassLoop support.");
           return;
         }
-        const session = await getCloudSession();
-        if (!session) {
-          setStatus("error");
-          setMessage("Connect or create a cloud login on Plan options first. Stripe uses that account to verify Pro access.");
-          return;
-        }
+        const session = await ensureCheckoutCloudSession();
+        if (!session) return;
         setConnectedEmail(session.user.email ?? "");
         if (!backendStatus.stripeEmbeddedConfigured || !publishableKey) {
           setStatus("error");
-          setMessage("Embedded Checkout needs VITE_STRIPE_PUBLISHABLE_KEY. You can still open hosted Stripe Checkout from this page.");
+          setMessage("The payment form is unavailable right now. Try again later or contact ClassLoop support.");
           return;
         }
         setStatus("loading");
-        setMessage("Loading Stripe's embedded checkout form...");
+        setMessage("Loading the secure payment form...");
         const stripe = await loadStripe(publishableKey);
-        if (!stripe) throw new Error("Stripe.js could not load. Check your network or publishable key.");
+        if (!stripe) throw new Error("Payment form could not load. Check your connection and try again.");
         const clientSecret = await embeddedCheckoutClientSecretFor(session.user.id);
         if (!active || !checkoutContainerRef.current) return;
         checkout = await stripe.createEmbeddedCheckoutPage({ clientSecret });
@@ -6588,11 +7692,11 @@ function EmbeddedCheckoutPage({
         }
         checkout?.mount(checkoutContainerRef.current);
         setStatus("ready");
-        setMessage("Complete Stripe Checkout here. Pro turns on only after the webhook verifies payment.");
+        setMessage("Complete Stripe Checkout here. Pro turns on after payment is confirmed.");
       } catch (error) {
         if (!active) return;
         setStatus("error");
-        setMessage(error instanceof Error ? error.message : "Unable to load embedded Stripe Checkout.");
+        setMessage(error instanceof Error ? error.message : "Unable to load the payment form.");
       }
     };
 
@@ -6601,7 +7705,15 @@ function EmbeddedCheckoutPage({
       active = false;
       checkout?.destroy();
     };
-  }, [backendStatus.stripeEmbeddedConfigured, backendStatus.webReady, billingReturnStatus, hasPro, isDemoAccount, publishableKey]);
+  }, [
+    backendStatus.stripeEmbeddedConfigured,
+    backendStatus.supabaseConfigured,
+    billingReturnStatus,
+    ensureCheckoutCloudSession,
+    hasPro,
+    isDemoAccount,
+    publishableKey,
+  ]);
 
   const openHostedCheckout = async () => {
     try {
@@ -6609,36 +7721,44 @@ function EmbeddedCheckoutPage({
         setMessage("Demo account upgrades are disabled.");
         return;
       }
-      const session = await getCloudSession();
-      if (!backendStatus.webReady || !session) {
-        setMessage("Connect cloud login on Plan options before opening hosted Stripe Checkout.");
+      if (!backendStatus.supabaseConfigured) {
+        setMessage("Online upgrades are unavailable right now. Try again later or contact ClassLoop support.");
         return;
       }
-      setMessage("Opening hosted Stripe Checkout in this tab...");
+      const session = await ensureCheckoutCloudSession();
+      if (!session) return;
+      setMessage("Opening the secure payment page...");
       const checkout = await createCheckoutSession("pro");
       if (!checkout.url || new URL(checkout.url).hostname !== "checkout.stripe.com") {
-        throw new Error("Stripe Checkout did not return a valid checkout.stripe.com payment URL.");
+        throw new Error("Payment page did not open correctly. Try again later.");
       }
       window.location.href = checkout.url;
     } catch (error) {
       setStatus("error");
-      setMessage(error instanceof Error ? error.message : "Hosted Stripe Checkout is not configured yet.");
+      setMessage(error instanceof Error ? error.message : "Online payment is not available right now.");
     }
   };
 
   if (hasPro) {
+    const manualPro = isManualProBillingProfile(billingProfile);
     return (
       <div className="page-stack">
         <section className="review-banner">
           <div>
             <span className="eyebrow">Pro checkout</span>
             <h2>Pro is already active.</h2>
-            <p>This account has a Stripe-verified Pro subscription. Manage billing from Plan options.</p>
+            <p>
+              {manualPro
+                ? "This ClassLoop owner account already has Pro enabled."
+                : "This account has an active Pro subscription. Manage billing from Plan options."}
+            </p>
           </div>
         </section>
         <Panel title="Subscription verified" icon={ShieldCheck}>
           <div className="settings-stack">
-            <p className="settings-message success">Payment verified by Stripe. Pro is active on this cloud account.</p>
+            <p className="settings-message success">
+              {manualPro ? "Pro is active for this account." : "Payment confirmed. Pro is active."}
+            </p>
             <button className="primary-button" type="button" onClick={() => navigate("billing")}>
               Back to Plan options
             </button>
@@ -6655,13 +7775,13 @@ function EmbeddedCheckoutPage({
           <span className="eyebrow">Pro checkout</span>
           <h2>Upgrade inside ClassLoop.</h2>
           <p>
-            This hidden checkout page is linked from Plan options and does not appear in the left navigation. Stripe stays in charge of payment, receipts, and subscription verification.
+            Pay securely inside ClassLoop. Pro turns on only after payment is confirmed.
           </p>
         </div>
       </section>
 
       <section className="content-grid two-columns align-start">
-        <Panel title="Stripe embedded checkout" icon={ShieldCheck}>
+        <Panel title="Secure payment" icon={ShieldCheck}>
           <div className="settings-stack">
             <div className={`integration-card ${status === "ready" || status === "success" ? "active" : ""}`}>
               <span>
@@ -6681,7 +7801,7 @@ function EmbeddedCheckoutPage({
             <div
               ref={checkoutContainerRef}
               className={status === "error" || status === "success" || status === "verifying" ? "stripe-checkout-shell inactive" : "stripe-checkout-shell"}
-              aria-label="Stripe embedded checkout"
+              aria-label="Secure payment form"
             />
           </div>
         </Panel>
@@ -6690,19 +7810,31 @@ function EmbeddedCheckoutPage({
           <div className="settings-stack">
             <div className="integration-card">
               <span>
-                <strong>Server-owned unlock</strong>
-                <small>ClassLoop stays Free until Stripe sends the paid webhook and the cloud profile refreshes.</small>
+                <strong>Plan protection</strong>
+                <small>ClassLoop stays Free until payment is confirmed for this account.</small>
               </span>
             </div>
             <button className="primary-button" type="button" onClick={() => navigate("billing")}>
               Back to Plan options
             </button>
-            <button className="ghost-button" type="button" onClick={openHostedCheckout} disabled={isDemoAccount || !backendStatus.webReady}>
-              Open hosted Stripe Checkout instead
+            <button className="ghost-button" type="button" onClick={openHostedCheckout} disabled={isDemoAccount || !backendStatus.supabaseConfigured}>
+              Open Stripe Checkout instead
             </button>
           </div>
         </Panel>
       </section>
+
+      {cloudConfirmation && (
+        <CloudEmailConfirmationOverlay
+          prompt={cloudConfirmation}
+          actionLabel="Back to Plan options"
+          onClose={() => setCloudConfirmation(null)}
+          onAction={() => {
+            setCloudConfirmation(null);
+            navigate("billing");
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -6715,6 +7847,7 @@ function SyncBillingPage({
   applyCloudState,
   appendAudit,
   sessionCount,
+  localAuthSecret,
 }: {
   auth: AuthSession;
   billingProfile: BillingProfile;
@@ -6723,19 +7856,18 @@ function SyncBillingPage({
   applyCloudState: (state: Partial<SharedState>) => void;
   appendAudit: (action: string, detail: string, actor?: AuthSession | null) => void;
   sessionCount: number;
+  localAuthSecret: LocalAuthSecret | null;
 }) {
   const backendStatus = getBackendStatus();
   const [cloudEmail, setCloudEmail] = useState("");
   const [cloudPassword, setCloudPassword] = useState("");
   const [message, setMessage] = useState("");
   const [connectedEmail, setConnectedEmail] = useState("");
-  const currentPlanTier: PlanTier = isPaidPlan(billingProfile) ? "pro" : "free";
-  const hasPro = currentPlanTier === "pro";
+  const [cloudConfirmation, setCloudConfirmation] = useState<CloudConfirmationPrompt | null>(null);
   const isDemoAccount = Boolean(auth.demo);
-  const showCloudAccountPanel = hasPro || (backendStatus.webReady && !isDemoAccount);
   const billingReturnStatus = getParam("billing");
   const demoBillingMessage =
-    "Demo account upgrades are disabled. Create your own account in the desktop app or sign in with a hosted teacher account to upgrade.";
+    "Demo account upgrades are disabled. Create your own ClassLoop account to upgrade.";
 
   useEffect(() => {
     getCloudSession().then((session) => setConnectedEmail(session?.user.email ?? ""));
@@ -6744,7 +7876,7 @@ function SyncBillingPage({
   useEffect(() => {
     if (isDemoAccount) return;
     if (billingReturnStatus === "canceled") {
-      setMessage("Stripe Checkout was canceled. Your plan was not changed.");
+      setMessage("Checkout was canceled. Your plan was not changed.");
       return;
     }
     if (billingReturnStatus !== "success") return;
@@ -6754,23 +7886,23 @@ function SyncBillingPage({
 
     const verifyPaidProfile = async (attempt = 1) => {
       if (!active) return;
-      setMessage("Stripe sent you back to ClassLoop. Verifying the paid subscription before Pro unlocks...");
+      setMessage("Payment complete. Checking your plan before Pro turns on...");
       try {
         const profile = await getCloudProfile();
         const verifiedProfile = normalizeTrustedBillingProfile(profile.billingProfile);
         if (!active) return;
         setBillingProfile(verifiedProfile);
         if (isPaidPlan(verifiedProfile)) {
-          setMessage("Payment verified by Stripe. Pro is active on this cloud account.");
+          setMessage("Payment confirmed. Pro is active.");
           return;
         }
         if (attempt < 5) {
-          setMessage("Checkout was submitted. Waiting for the Stripe webhook to confirm payment before Pro unlocks...");
+          setMessage("Payment was submitted. Waiting for confirmation before Pro turns on...");
           retryTimer = window.setTimeout(() => void verifyPaidProfile(attempt + 1), 1500);
           return;
         }
         setMessage(
-          "Checkout returned, but Pro is still pending. ClassLoop will stay Free until Stripe confirms payment; click Refresh plan after the receipt/webhook finishes.",
+          "Payment is still pending. ClassLoop will stay Free until payment is confirmed. Click Refresh plan if Pro is still pending after your receipt arrives.",
         );
       } catch (error) {
         if (!active) return;
@@ -6778,7 +7910,7 @@ function SyncBillingPage({
           retryTimer = window.setTimeout(() => void verifyPaidProfile(attempt + 1), 1500);
           return;
         }
-        setMessage(error instanceof Error ? error.message : "Unable to verify the Stripe payment yet. Sign in to cloud and click Refresh plan.");
+        setMessage(error instanceof Error ? error.message : "Unable to verify the payment yet. Sign in and click Refresh plan.");
       }
     };
 
@@ -6793,30 +7925,78 @@ function SyncBillingPage({
     try {
       const profile = await getCloudProfile();
       setBillingProfile(normalizeTrustedBillingProfile(profile.billingProfile));
-      setMessage("Account plan refreshed from hosted sync.");
+      setMessage("Plan refreshed.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to refresh account plan.");
     }
   };
 
-  const connectCloud = async (mode: "signin" | "signup") => {
-    const result =
-      mode === "signin"
-        ? await signIntoCloud(cloudEmail, cloudPassword)
-        : await createCloudAccount(cloudEmail, cloudPassword);
+  const showEmailConfirmation = (result: CloudAuthResult, fallbackEmail: string, context: CloudConfirmationPrompt["context"]) => {
+    const prompt = cloudConfirmationFromResult(result, fallbackEmail, context);
+    if (!prompt) return false;
+    setCloudConfirmation(prompt);
+    setMessage("");
+    return true;
+  };
+
+  const connectCloud = async () => {
+    const result = await signIntoCloud(cloudEmail, cloudPassword);
+    if (showEmailConfirmation(result, cloudEmail, "cloud-login")) return;
     setMessage(result.message);
     setConnectedEmail(result.session?.user.email ?? "");
     if (result.ok) {
-      appendAudit("cloud_connect", `Connected hosted sync for ${cloudEmail}.`);
+      appendAudit("cloud_connect", `Connected cloud sync for ${cloudEmail}.`);
       await refreshProfile();
     }
+  };
+
+  const ensureCheckoutCloudSession = async () => {
+    const existingSession = await getCloudSession();
+    if (existingSession) {
+      const email = existingSession.user.email ?? "";
+      setConnectedEmail(email);
+      return true;
+    }
+
+    const normalizedAuthEmail = normalizeEmail(auth.email);
+    const secretMatchesCurrentAccount =
+      localAuthSecret?.accountId === auth.accountId &&
+      localAuthSecret.role === auth.role &&
+      normalizeEmail(localAuthSecret.email) === normalizedAuthEmail;
+
+    if (!secretMatchesCurrentAccount || !localAuthSecret?.password) {
+      setMessage("Sign in again, then Upgrade to Pro will continue with this account.");
+      return false;
+    }
+
+    setMessage("Preparing your ClassLoop account for payment...");
+    const signInResult = await signIntoCloud(normalizedAuthEmail, localAuthSecret.password);
+    if (showEmailConfirmation(signInResult, normalizedAuthEmail, "checkout")) return false;
+    let result = signInResult;
+    if (!result.ok) {
+      await prepareBillingCloudAccount(normalizedAuthEmail, localAuthSecret.password, "teacher", auth.name);
+      result = await signIntoCloud(normalizedAuthEmail, localAuthSecret.password);
+      if (showEmailConfirmation(result, normalizedAuthEmail, "checkout")) return false;
+    }
+    if (!result.ok || !result.session) {
+      setMessage(
+        result.message ||
+          "Unable to prepare payment for this account. Sign in again, then retry Upgrade to Pro.",
+      );
+      return false;
+    }
+
+    const email = result.session.user.email ?? normalizedAuthEmail;
+    setConnectedEmail(email);
+    appendAudit("cloud_connect", `Prepared payment account for ${email}.`);
+    return true;
   };
 
   const uploadCloud = async () => {
     try {
       await cloudRequest("/api/cloud-state", { method: "PUT", body: JSON.stringify(currentState()) });
-      setMessage("Uploaded this device's ClassLoop workspace to hosted sync.");
-      appendAudit("cloud_upload", "Uploaded workspace to hosted sync.");
+      setMessage("Uploaded this workspace to cloud sync.");
+      appendAudit("cloud_upload", "Uploaded workspace to cloud sync.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Cloud upload failed.");
     }
@@ -6826,12 +8006,12 @@ function SyncBillingPage({
     try {
       const state = await cloudRequest<Partial<SharedState> | null>("/api/cloud-state");
       if (!state) {
-        setMessage("No hosted workspace has been saved yet.");
+        setMessage("No cloud workspace has been saved yet.");
         return;
       }
       applyCloudState(state);
-      setMessage("Downloaded hosted workspace to this device.");
-      appendAudit("cloud_download", "Downloaded workspace from hosted sync.");
+      setMessage("Downloaded the cloud workspace to this device.");
+      appendAudit("cloud_download", "Downloaded workspace from cloud sync.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Cloud download failed.");
     }
@@ -6843,33 +8023,35 @@ function SyncBillingPage({
         setMessage(demoBillingMessage);
         return;
       }
-      if (!backendStatus.webReady) {
-        setMessage("Pro now requires Stripe Checkout. Finish live Supabase and Stripe env vars before starting an upgrade.");
+      if (!backendStatus.supabaseConfigured) {
+        setMessage("Online upgrades are unavailable right now. Try again later or contact ClassLoop support.");
         return;
       }
-      if (!connectedEmail) {
-        setMessage(
-          "Connect or create a cloud login first. Cloud login is your multi-device account, and Stripe uses it to verify paid Pro access.",
-        );
+      const checkoutReady = await ensureCheckoutCloudSession();
+      if (!checkoutReady) {
         return;
       }
-      setMessage("Opening the linked Pro checkout page. Pro turns on only after payment succeeds and ClassLoop refreshes your plan.");
+      setMessage("Opening the Pro checkout page. Pro turns on after payment is confirmed.");
       navigate("checkout", { tier });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Stripe Checkout is not configured yet.");
+      setMessage(error instanceof Error ? error.message : "Online payment is not available right now.");
     }
   };
 
   const openBillingPortal = async () => {
     try {
-      if (!backendStatus.webReady || !connectedEmail) {
-        setMessage("Stripe billing management appears after Pro is connected to a cloud account and Stripe Checkout is complete.");
+      if (isManualProBillingProfile(billingProfile)) {
+        setMessage("Billing management is not available for this account.");
+        return;
+      }
+      if (!backendStatus.supabaseConfigured || !connectedEmail) {
+        setMessage("Billing management appears after Pro is active on this account.");
         return;
       }
       const portal = await createBillingPortalSession();
       window.location.href = portal.url;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Stripe Billing Portal is not configured yet.");
+      setMessage(error instanceof Error ? error.message : "Billing management is not available right now.");
     }
   };
 
@@ -6878,14 +8060,37 @@ function SyncBillingPage({
       setMessage(demoBillingMessage);
       return;
     }
-    setMessage("Use Manage billing to cancel or change a Stripe subscription. ClassLoop updates Pro after the Stripe webhook verifies the account.");
+    setMessage("Use Manage billing to cancel or change your subscription. ClassLoop updates the plan after payment changes are confirmed.");
   };
 
   const disconnect = async () => {
     await signOutCloud();
     setConnectedEmail("");
-    setMessage("Hosted sync disconnected on this device.");
+    setMessage("Cloud sync disconnected on this device.");
   };
+
+  const cloudProSteps = [
+    {
+      icon: KeyRound,
+      title: "Create a cloud account",
+      detail: "New ClassLoop accounts are cloud-backed by default. If ClassLoop asks for confirmation, click the email link before signing in elsewhere.",
+    },
+    {
+      icon: RefreshCw,
+      title: "Use any device",
+      detail: "Free accounts can upload this workspace to cloud sync, then download it on desktop, browser, or phone.",
+    },
+    {
+      icon: Sparkles,
+      title: "Upgrade only for Pro features",
+      detail: "Pro is for unlimited daily generation, advanced reports, and the two live class capture modes.",
+    },
+    {
+      icon: Mic2,
+      title: "Capture live classes",
+      detail: "Pro unlocks in-person class capture and online meeting capture; transcript upload remains the reliable Free path.",
+    },
+  ];
 
   return (
     <div className="page-stack">
@@ -6894,28 +8099,45 @@ function SyncBillingPage({
           <span className="eyebrow">Plan options</span>
           <h2>Save time on every class follow-up.</h2>
           <p>
-            Free includes the classroom workflow and integrations. Pro is for teachers who want unlimited sessions,
-            analytics, and report exports without the one-session-per-day cap.
+            Free includes transcript import, student follow-ups, and multi-device cloud sync. Pro is for teachers who want unlimited sessions,
+            in-person capture, online meeting capture, analytics, and exports without the one-session-per-day cap.
           </p>
         </div>
       </section>
 
+      <Panel title="Cloud sync + Pro walkthrough" icon={Sparkles}>
+        <div className="pro-step-carousel" aria-label="Cloud and Pro setup steps">
+          {cloudProSteps.map((step, index) => {
+            const StepIcon = step.icon;
+            return (
+              <article className="pro-step-card" key={step.title}>
+                <span className="pro-step-number">Step {index + 1}</span>
+                <span className="pro-step-icon">
+                  <StepIcon size={20} aria-hidden="true" />
+                </span>
+                <strong>{step.title}</strong>
+                <small>{step.detail}</small>
+              </article>
+            );
+          })}
+        </div>
+      </Panel>
+
       <section className="content-grid two-columns align-start">
-        {showCloudAccountPanel ? (
-          <Panel title={hasPro ? "Pro cloud sync" : "Cloud login for multiple devices"} icon={RefreshCw}>
+        <Panel title="Cloud workspace" icon={RefreshCw}>
             <div className="settings-stack">
               <div className="integration-card">
-                <strong>{backendStatus.supabaseConfigured ? "Cloud account ready" : "Cloud keys needed"}</strong>
+                <strong>{backendStatus.supabaseConfigured ? "Cloud account ready" : "Cloud sync unavailable"}</strong>
                 <small>
                   {backendStatus.supabaseConfigured
-                    ? "Sign in or create an account here before Stripe Checkout. This is the account that follows you across desktop, browser, and phone PWA sessions."
-                    : "Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable multi-device Pro login."}
+                    ? "Use the same ClassLoop account on desktop, browser, and phone. Free accounts can sync workspaces too."
+                    : "Cloud sync is not available in this build. You can keep working on this device."}
                 </small>
               </div>
               <div className="integration-card soft-note">
-                <strong>Local login vs cloud login</strong>
+                <strong>Cloud sync is separate from Pro</strong>
                 <small>
-                  Local login opens the account saved on this device. Cloud login syncs the same workspace across devices and gives Stripe one account to verify before Pro unlocks.
+                  Free accounts can upload and download a workspace across devices. Pro only changes session limits, reports, and classroom capture tools.
                 </small>
               </div>
               <label className="field compact">
@@ -6927,11 +8149,8 @@ function SyncBillingPage({
                 <input type="password" value={cloudPassword} onChange={(event) => setCloudPassword(event.target.value)} />
               </label>
               <div className="button-row">
-                <button className="primary-button" type="button" onClick={() => connectCloud("signin")}>
+                <button className="primary-button" type="button" onClick={connectCloud}>
                   Sign in
-                </button>
-                <button className="ghost-button" type="button" onClick={() => connectCloud("signup")}>
-                  Create cloud account
                 </button>
               </div>
               {connectedEmail && <p className="settings-message success">Connected as {connectedEmail}</p>}
@@ -6949,7 +8168,7 @@ function SyncBillingPage({
                       <UploadCloud size={18} aria-hidden="true" />
                       <span>
                         <strong>Upload this device</strong>
-                        <small>Replace the hosted workspace with this device.</small>
+                        <small>Replace the cloud workspace with this device.</small>
                       </span>
                       <ChevronRight size={16} aria-hidden="true" />
                     </button>
@@ -6957,7 +8176,7 @@ function SyncBillingPage({
                       <Download size={18} aria-hidden="true" />
                       <span>
                         <strong>Download cloud copy</strong>
-                        <small>Bring the hosted workspace onto this device.</small>
+                        <small>Bring the cloud workspace onto this device.</small>
                       </span>
                       <ChevronRight size={16} aria-hidden="true" />
                     </button>
@@ -6965,7 +8184,7 @@ function SyncBillingPage({
                       <LogOut size={18} aria-hidden="true" />
                       <span>
                         <strong>Disconnect cloud login</strong>
-                        <small>Sign out of hosted sync on this device only.</small>
+                        <small>Sign out of cloud sync on this device only.</small>
                       </span>
                       <ChevronRight size={16} aria-hidden="true" />
                     </button>
@@ -6975,7 +8194,7 @@ function SyncBillingPage({
                   <summary>
                     <span>
                       <strong>Billing options</strong>
-                      <small>Stripe handles plan changes, receipts, and subscription management.</small>
+                      <small>Manage receipts, cards, cancellation, and plan changes.</small>
                     </span>
                     <ChevronDown size={18} aria-hidden="true" />
                   </summary>
@@ -6984,7 +8203,7 @@ function SyncBillingPage({
                       <RefreshCw size={18} aria-hidden="true" />
                       <span>
                         <strong>Refresh plan</strong>
-                        <small>Check whether Stripe has verified a recent payment.</small>
+                        <small>Check whether a recent payment has been confirmed.</small>
                       </span>
                       <ChevronRight size={16} aria-hidden="true" />
                     </button>
@@ -6992,7 +8211,7 @@ function SyncBillingPage({
                       <Settings2 size={18} aria-hidden="true" />
                       <span>
                         <strong>Manage billing</strong>
-                        <small>Open Stripe for invoices, cards, cancellation, and plan changes.</small>
+                        <small>Open billing management for invoices, cards, cancellation, and plan changes.</small>
                       </span>
                       <ChevronRight size={16} aria-hidden="true" />
                     </button>
@@ -7002,74 +8221,29 @@ function SyncBillingPage({
               {message && <p className="settings-message">{message}</p>}
             </div>
           </Panel>
-        ) : (
-          <Panel title="Why teachers upgrade" icon={Clock3}>
-            <div className="settings-stack">
-              <div className="integration-card active">
-                <strong>Save the repeat work</strong>
-                <small>Generate more than one class follow-up per day, reuse rosters, and avoid rebuilding student tasks manually.</small>
-              </div>
-              <div className="integration-card">
-                <strong>Keep integrations free</strong>
-                <small>Google Classroom, Zoom transcript import, student accounts, and recap email delivery stay in the Free workflow.</small>
-              </div>
-              <div className="integration-card">
-                <strong>Pay for scale, not setup</strong>
-                <small>
-                  Upgrade when the one-session-per-day cap or teacher analytics/report export limits get in the way.
-                </small>
-              </div>
-              {isDemoAccount && (
-                <p className="settings-message" role="status">
-                  {demoBillingMessage}
-                </p>
-              )}
-              {message && <p className="settings-message">{message}</p>}
-            </div>
-          </Panel>
-        )}
 
         <Panel title="Plan options" icon={ShieldCheck}>
-          <div className="plan-stack">
-            {planCatalog.map((plan) => (
-              <div key={plan.tier} className={currentPlanTier === plan.tier ? "plan-row current" : "plan-row"}>
-                <strong>
-                  {plan.name} <span>{plan.price}</span>
-                </strong>
-                <span>{plan.detail}</span>
-                {plan.tier === "free" ? (
-                  <>
-                    <small>Today: {Math.min(sessionCount, 1)}/1 Free session used.</small>
-                    {isPaidPlan(billingProfile) && (
-                      <button className="text-button" type="button" onClick={downgradeToFree}>
-                        Downgrade to Free
-                        <ChevronRight size={16} />
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <button
-                    className="text-button"
-                    type="button"
-                    onClick={() => startCheckout(plan.tier)}
-                    disabled={isDemoAccount || (currentPlanTier === plan.tier && isPaidPlan(billingProfile))}
-                  >
-                    {isDemoAccount
-                      ? "Demo account"
-                      : currentPlanTier === plan.tier && isPaidPlan(billingProfile)
-                        ? "Current plan"
-                        : `Upgrade to ${plan.name}`}
-                    <ChevronRight size={16} />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="integration-card">
+          {isDemoAccount ? (
+            <div className="integration-card" role="status">
+              <span>
+                <strong>Demo account</strong>
+                <small>{demoBillingMessage}</small>
+              </span>
+            </div>
+          ) : (
+            <div className="settings-stack">
+              <button className="primary-button full" type="button" onClick={() => void startCheckout("pro")}>
+                <ShieldCheck size={17} />
+                Upgrade to Pro with Stripe
+              </button>
+              <StripePricingTableEmbed customerEmail={auth.email} clientReferenceId={auth.accountId} />
+            </div>
+          )}
+          <div className="integration-card plan-card">
             <span>
               <strong>Current account</strong>
               <small>
-                {currentPlanTier.toUpperCase()} · {billingProfile.status}
+                {billingProfileLabel(billingProfile)}
               </small>
             </span>
           </div>
@@ -7079,25 +8253,42 @@ function SyncBillingPage({
       <Panel title="What Pro unlocks after payment" icon={Sparkles}>
         <div className="settings-stack">
           <div className="integration-card active">
-            <strong>1. Stripe verifies the upgrade</strong>
-            <small>
-              The app no longer flips Pro on for testing. Checkout has to complete, the webhook updates your cloud profile, and Refresh plan pulls that verified status back into ClassLoop.
-            </small>
-          </div>
-          <div className="integration-card">
-            <strong>2. Unlimited generated sessions</strong>
+            <strong>Unlimited generated sessions</strong>
             <small>
               Create more than one class follow-up per day and keep reusable rosters, published student dashboards, and teacher reports moving without the Free daily cap.
             </small>
           </div>
           <div className="integration-card">
-            <strong>3. Analytics and report exports</strong>
+            <strong>Live capture modes</strong>
+            <small>
+              Use in-person class capture or online meeting capture when Pro is active. Transcript upload remains available on Free.
+            </small>
+          </div>
+          <div className="integration-card">
+            <strong>Private analytics and report exports</strong>
             <small>
               Private analytics, JSON/CSV/print report exports, and trend views are the paid review layer for repeated classroom use.
             </small>
           </div>
         </div>
       </Panel>
+
+      {cloudConfirmation && (
+        <CloudEmailConfirmationOverlay
+          prompt={cloudConfirmation}
+          actionLabel={cloudConfirmation.context === "cloud-login" ? "Try cloud sign-in again" : "Try upgrade again"}
+          onClose={() => setCloudConfirmation(null)}
+          onAction={() => {
+            const context = cloudConfirmation.context;
+            setCloudConfirmation(null);
+            if (context === "cloud-login") {
+              void connectCloud();
+              return;
+            }
+            void startCheckout("pro");
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -7186,12 +8377,6 @@ function ImportSession({
   const [resources, setResources] = useState("");
   const [fileName, setFileName] = useState("");
   const [templateDetails, setTemplateDetails] = useState<Record<string, string>>({});
-  const [rosterSource, setRosterSource] = useState<ClassroomSourceMode>("manual");
-  const [selectedClassroomCourseId, setSelectedClassroomCourseId] = useState(classroomCourseOptions[0]?.id ?? "");
-  const [selectedClassroomResourceIds, setSelectedClassroomResourceIds] = useState<string[]>(
-    classroomCourseOptions[0]?.resources.map((resource) => resource.id) ?? [],
-  );
-  const [classroomMessage, setClassroomMessage] = useState("");
   const [zoomSearch, setZoomSearch] = useState("");
   const [selectedZoomMeetingId, setSelectedZoomMeetingId] = useState(zoomCloudMeetingOptions[0]?.id ?? "");
   const [selectedZoomTranscriptFileId, setSelectedZoomTranscriptFileId] = useState(zoomCloudMeetingOptions[0]?.files[0]?.id ?? "");
@@ -7218,11 +8403,6 @@ function ImportSession({
   const captureStartedAtRef = useRef<number | null>(null);
   const liveSegmentCountRef = useRef(0);
   const activeTemplateFields = templateDetailFields[template];
-  const selectedClassroomCourse =
-    classroomCourseOptions.find((course) => course.id === selectedClassroomCourseId) ?? classroomCourseOptions[0];
-  const selectedClassroomResources = selectedClassroomCourse?.resources.filter((resource) =>
-    selectedClassroomResourceIds.includes(resource.id),
-  ) ?? [];
   const filteredZoomMeetings = useMemo(() => {
     const query = zoomSearch.trim().toLowerCase();
     if (!query) return zoomCloudMeetingOptions;
@@ -7273,11 +8453,6 @@ function ImportSession({
       (malformedResourceLineCount === 1 ? "line needs" : "lines need") +
       " http:// or https://. ClassLoop will ignore malformed links until corrected."
     : "";
-
-  useEffect(() => {
-    if (!selectedClassroomCourse) return;
-    setSelectedClassroomResourceIds(selectedClassroomCourse.resources.map((resource) => resource.id));
-  }, [selectedClassroomCourseId]);
 
   useEffect(() => {
     if (!selectedZoomMeeting) return;
@@ -7459,7 +8634,6 @@ function ImportSession({
     setTemplate("Math review");
     setCaptureMode("transcript");
     setZoomCloudImported(false);
-    setRosterSource("manual");
     setTranscript(sampleTranscript);
     setStructuredTranscript(
       createStructuredTranscriptFromText(sampleTranscript, {
@@ -7476,30 +8650,6 @@ function ImportSession({
       commonMistakes: "Cross-multiplication order and matching the wrong sides",
     });
     onUseDemo();
-  };
-
-  const importClassroomCourse = () => {
-    if (!selectedClassroomCourse) return;
-    setRosterSource("classroom");
-    setRoster(selectedClassroomCourse.roster);
-    setLoadedRosterTemplateId("");
-    setLoadedClassGroupId("");
-    if (!title.trim()) setTitle(`${selectedClassroomCourse.name} - ${selectedClassroomCourse.section}`);
-    const courseNote = [
-      `Google Classroom course: ${selectedClassroomCourse.name}`,
-      `Section/period: ${selectedClassroomCourse.section}`,
-      `Course code: ${selectedClassroomCourse.courseCode}`,
-      "Imported Classroom items are suggestions; teacher confirms what attaches to the recap.",
-    ].join("\n");
-    setNotes((current) => appendCapturedText(current, courseNote));
-    if (selectedClassroomResources.length) {
-      setResources((current) =>
-        [current.trim(), ...selectedClassroomResources.map((resource) => resource.url)].filter(Boolean).join("\n"),
-      );
-    }
-    setClassroomMessage(
-      `Imported ${selectedClassroomCourse.roster.split(/\r?\n/).filter(Boolean).length} students from ${selectedClassroomCourse.name}.`,
-    );
   };
 
   const importZoomCloudTranscript = () => {
@@ -7539,7 +8689,7 @@ function ImportSession({
     }
 
     try {
-      setWhisperStatus(`Transcribing ${file.name} with Whisper...`);
+      setWhisperStatus(`Transcribing ${file.name}...`);
       const nextTranscript = await transcribeRecordingWithWhisper(file, {
         filename: file.name,
         source: transcriptSourceForFile(file),
@@ -7547,17 +8697,17 @@ function ImportSession({
       });
       setStructuredTranscript(nextTranscript);
       setTranscript(nextTranscript.text);
-      setWhisperStatus("Whisper transcript ready. Review speakers before generating.");
+      setWhisperStatus("Transcript ready. Review speakers before generating.");
       setCaptureMessage(`Transcribed ${file.name}.`);
     } catch (error) {
-      setWhisperStatus(error instanceof Error ? error.message : "Whisper transcription failed.");
+      setWhisperStatus(error instanceof Error ? error.message : "Recording transcription failed.");
     }
   };
 
   const transcribeRecordedCapture = async () => {
     if (!recordedAudioBlob) return;
     try {
-      setWhisperStatus("Transcribing captured audio with Whisper...");
+      setWhisperStatus("Transcribing captured audio...");
       const nextTranscript = await transcribeRecordingWithWhisper(recordedAudioBlob, {
         filename: `${captureMode}-${Date.now().toString(36)}.webm`,
         source: "whisper_transcription",
@@ -7565,9 +8715,9 @@ function ImportSession({
       });
       setStructuredTranscript(nextTranscript);
       setTranscript((current) => appendCapturedText(current, nextTranscript.text));
-      setWhisperStatus("Whisper transcript added. Review unknown speakers before publishing.");
+      setWhisperStatus("Transcript added. Review unknown speakers before publishing.");
     } catch (error) {
-      setWhisperStatus(error instanceof Error ? error.message : "Whisper transcription failed.");
+      setWhisperStatus(error instanceof Error ? error.message : "Recording transcription failed.");
     }
   };
 
@@ -7722,6 +8872,10 @@ function ImportSession({
               </select>
               <small className="field-helper">{templateDescriptions[template]}</small>
             </label>
+            <p className="field-helper wide">
+              Drafts use a pasted roster, a saved class roster, or a saved roster template. Import and manage external
+              class data from the Classes or Rosters pages.
+            </p>
             {(matchingRosterTemplates.length > 0 || matchingClassGroups.length > 0) && (
               <div className="saved-roster-row wide">
                 {matchingClassGroups.length > 0 && (
@@ -7752,85 +8906,6 @@ function ImportSession({
                 )}
               </div>
             )}
-            <div className="capture-panel wide" aria-label="Roster source options">
-              <div>
-                <span className="eyebrow">Roster source</span>
-                <h3>Choose manual roster or one Google Classroom course.</h3>
-                <p>
-                  Manual paste stays available. When Classroom is connected, pick one course, import roster and course
-                  metadata once, then confirm suggested assignments and resources.
-                </p>
-              </div>
-              <div className="capture-mode-grid">
-                <button
-                  type="button"
-                  className={rosterSource === "manual" ? "capture-mode-card active" : "capture-mode-card"}
-                  onClick={() => setRosterSource("manual")}
-                >
-                  <Users size={18} />
-                  <strong>Manual roster</strong>
-                  <small>Paste names, emails, aliases, or a CSV export.</small>
-                </button>
-                <button
-                  type="button"
-                  className={rosterSource === "classroom" ? "capture-mode-card active" : "capture-mode-card"}
-                  onClick={() => setRosterSource("classroom")}
-                >
-                  <GraduationCap size={18} />
-                  <strong>Google Classroom</strong>
-                  <small>Pick one course and import roster, metadata, assignments, and resources.</small>
-                </button>
-              </div>
-              {rosterSource === "classroom" && selectedClassroomCourse && (
-                <div className="integration-card integration-card-stack">
-                  <label className="field compact">
-                    <span>Classroom course</span>
-                    <select
-                      value={selectedClassroomCourseId}
-                      onChange={(event) => setSelectedClassroomCourseId(event.target.value)}
-                    >
-                      {classroomCourseOptions.map((course) => (
-                        <option key={course.id} value={course.id}>
-                          {course.name} · {course.section}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <small>
-                    {selectedClassroomCourse.courseCode} · {selectedClassroomCourse.roster.split(/\r?\n/).filter(Boolean).length} students ·
-                    {` ${selectedClassroomCourse.resources.length} recent Classroom items`}
-                  </small>
-                  <div className="integration-checkbox-list" aria-label="Suggested Classroom assignments and resources">
-                    {selectedClassroomCourse.resources.map((resource) => (
-                      <label key={resource.id} className="switch-row">
-                        <input
-                          type="checkbox"
-                          checked={selectedClassroomResourceIds.includes(resource.id)}
-                          onChange={(event) =>
-                            setSelectedClassroomResourceIds((current) =>
-                              event.target.checked
-                                ? uniqueText([...current, resource.id])
-                                : current.filter((id) => id !== resource.id),
-                            )
-                          }
-                        />
-                        <span>
-                          <strong>{resource.title}</strong>
-                          <small>
-                            {resource.type} · recent same-course item · keyword match: {resource.keywordHint}
-                          </small>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                  <button className="primary-button" type="button" onClick={importClassroomCourse}>
-                    <Download size={17} />
-                    Import selected Classroom course
-                  </button>
-                  {classroomMessage && <p className="settings-message success">{classroomMessage}</p>}
-                </div>
-              )}
-            </div>
             {activeTemplateFields.length > 0 && (
               <div className="template-detail-card wide">
                 <div>
@@ -7972,7 +9047,7 @@ function ImportSession({
                   <audio controls src={recordedAudioUrl} />
                   <button className="ghost-button" type="button" onClick={transcribeRecordedCapture} disabled={!recordedAudioBlob}>
                     <Sparkles size={17} />
-                    Transcribe with Whisper
+                    Transcribe recording
                   </button>
                 </div>
               )}
@@ -8050,7 +9125,7 @@ function ImportSession({
                 <label className="upload-zone wide">
                   <UploadCloud size={24} />
                   <strong>{fileName || "Upload transcript, audio, or screen recording"}</strong>
-                  <small>Text files load directly. Audio and video recordings are transcribed with Whisper.</small>
+                  <small>Text files load directly. Audio and video recordings are transcribed when the service is available.</small>
                   <input
                     type="file"
                     accept=".txt,.vtt,.srt,audio/*,video/*,.mp3,.mp4,.m4a,.wav,.webm,.mov"
@@ -8171,23 +9246,28 @@ function ImportSession({
   );
 }
 
+const processingSteps = [
+  "Reading transcript and notes",
+  "Finding participation signals",
+  "Drafting student follow-ups",
+  "Preparing teacher review",
+];
+
 function Processing({ draft }: { draft: Session | null }) {
   const [step, setStep] = useState(0);
-  const steps = [
-    "Reading transcript and notes",
-    "Finding participation signals",
-    "Drafting student follow-ups",
-    "Preparing teacher review",
-  ];
+  const steps = processingSteps;
 
   useEffect(() => {
+    setStep(0);
     const timers = steps.map((_, index) => window.setTimeout(() => setStep(index), index * 520));
-    const finish = window.setTimeout(() => navigate("review"), 2500);
-    return () => {
-      timers.forEach(window.clearTimeout);
-      window.clearTimeout(finish);
-    };
-  }, []);
+    return () => timers.forEach(window.clearTimeout);
+  }, [draft?.id, steps]);
+
+  useEffect(() => {
+    if (step < steps.length - 1) return undefined;
+    const finish = window.setTimeout(() => navigate("review"), 650);
+    return () => window.clearTimeout(finish);
+  }, [step, steps.length]);
 
   return (
     <div className="processing-page">
@@ -8393,7 +9473,7 @@ function ReviewDraft({
         <section className="content-grid align-start">
           <StructuredTranscriptPanel
             transcript={draft.structuredTranscript}
-            emptyDetail="Paste a transcript or transcribe a recording with Whisper to keep a cleaned, speaker-labeled meeting transcript."
+            emptyDetail="Paste a transcript or transcribe a recording to keep a cleaned, speaker-labeled meeting transcript."
           />
         </section>
       )}
@@ -8556,6 +9636,15 @@ function RosterManager({
   showCsvActions?: boolean;
 }) {
   const csvInputRef = useRef<HTMLInputElement | null>(null);
+  const [rosterSearch, setRosterSearch] = useState("");
+  const visibleStudents = useMemo(() => {
+    const query = rosterSearch.trim().toLowerCase();
+    if (!query) return students;
+    return students.filter((student) =>
+      [student.name, student.email, ...(student.aliases ?? [])].some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [rosterSearch, students]);
+  const hiddenStudentCount = students.length - visibleStudents.length;
   const updateStudent = (studentId: string, changes: Partial<Student>) => {
     onStudentsChange(students.map((student) => (student.id === studentId ? { ...student, ...changes } : student)));
   };
@@ -8583,7 +9672,7 @@ function RosterManager({
 
   const content = (
     <div className="roster-manager">
-        {showCsvActions && (
+      {showCsvActions && (
         <div className="roster-template-actions">
           <input
             ref={csvInputRef}
@@ -8605,8 +9694,28 @@ function RosterManager({
             Export CSV
           </button>
         </div>
-        )}
-        {students.map((student, index) => (
+      )}
+      <div className="roster-manager-toolbar">
+        <label className="field compact roster-search-field">
+          <span>Find student</span>
+          <input
+            value={rosterSearch}
+            onChange={(event) => setRosterSearch(event.target.value)}
+            placeholder="Search name, email, or Zoom alias"
+          />
+        </label>
+        <div className="roster-count" aria-live="polite">
+          <strong>{visibleStudents.length}</strong>
+          <span>
+            shown of {students.length}
+            {hiddenStudentCount > 0 ? ` · ${hiddenStudentCount} hidden` : ""}
+          </span>
+        </div>
+      </div>
+      <div className="roster-editor-list">
+        {visibleStudents.map((student) => {
+          const index = Math.max(0, students.findIndex((item) => item.id === student.id));
+          return (
           <article key={student.id} className={showAttendance ? "roster-row" : "roster-row without-attendance"}>
             <Avatar student={student} />
             <label className="field compact roster-name-field">
@@ -8671,12 +9780,25 @@ function RosterManager({
               <Trash2 size={17} />
             </button>
           </article>
-        ))}
-        <button className="ghost-button full" type="button" onClick={addStudent}>
-          <UserPlus size={17} />
-          Add student
-        </button>
+          );
+        })}
       </div>
+      {!visibleStudents.length && students.length > 0 && (
+        <div className="inline-empty compact-empty">
+          <span>
+            <Search size={18} />
+          </span>
+          <div>
+            <strong>No roster matches</strong>
+            <p>Clear the search or try a student email, first name, last name, or Zoom alias.</p>
+          </div>
+        </div>
+      )}
+      <button className="ghost-button full" type="button" onClick={addStudent}>
+        <UserPlus size={17} />
+        Add student
+      </button>
+    </div>
   );
 
   if (!wrapPanel) return content;
@@ -8709,13 +9831,7 @@ function ClassGroupsPage({
   onDelete: (groupId: string) => void;
 }) {
   const [activeGroupId, setActiveGroupId] = useState(groups[0]?.id ?? "");
-  const csvInputRef = useRef<HTMLInputElement | null>(null);
   const activeGroup = groups.find((group) => group.id === activeGroupId) ?? groups[0];
-  const activeAttendance =
-    activeGroup?.students.reduce<Record<string, AttendanceStatus>>((acc, student) => {
-      acc[student.id] = "present";
-      return acc;
-    }, {}) ?? {};
   const groupSessions = activeGroup
     ? sessions.filter((session) => session.classGroupId === activeGroup.id || session.classGroupName === activeGroup.name)
     : [];
@@ -8731,6 +9847,7 @@ function ClassGroupsPage({
       id: `class-group-${Date.now().toString(36)}`,
       ownerEmail,
       name: "New class",
+      description: "",
       defaultSessionType: "General classroom",
       students: [],
       createdAt: now,
@@ -8738,13 +9855,6 @@ function ClassGroupsPage({
     };
     onCreateBlank(group);
     setActiveGroupId(group.id);
-  };
-
-  const importCsvIntoActiveGroup = async (file?: File) => {
-    if (!file || !activeGroup) return;
-    const students = rosterStudentsFromCsv(await file.text());
-    if (students.length) onUpdate(activeGroup.id, { students });
-    if (csvInputRef.current) csvInputRef.current.value = "";
   };
 
   if (!groups.length) {
@@ -8765,7 +9875,7 @@ function ClassGroupsPage({
           <EmptyState
             icon={BookOpen}
             title="No classes yet"
-            detail="Create a class or save one from a roster after publishing your first session."
+            detail="Create a class here, then manage its roster from the Rosters tab."
             action="Create class"
             onAction={createBlankClass}
           />
@@ -8793,7 +9903,7 @@ function ClassGroupsPage({
         <div>
           <span className="eyebrow">Class manager</span>
           <h2>Reusable classes and course rosters.</h2>
-          <p>Each class keeps a roster, Zoom-name aliases, a default template, and its past published sessions.</p>
+          <p>Use this page for class details and linked sessions. Edit student rosters from the Rosters tab.</p>
         </div>
         <button className="primary-button" type="button" onClick={createBlankClass}>
           <UserPlus size={17} />
@@ -8838,32 +9948,23 @@ function ClassGroupsPage({
                 ))}
               </select>
             </label>
+            <label className="field compact class-description-field">
+              <span>Description</span>
+              <textarea
+                value={activeGroup.description ?? ""}
+                onChange={(event) => onUpdate(activeGroup.id, { description: event.target.value })}
+                placeholder="Period, subject, room, norms, support notes, or context for this class"
+              />
+            </label>
+            <div className="class-history-card">
+              <strong>{activeGroup.students.length}</strong>
+              <span>students in roster</span>
+            </div>
             <div className="class-history-card">
               <strong>{groupSessions.length}</strong>
               <span>published sessions linked to this class</span>
             </div>
             <div className="roster-template-actions">
-              <input
-                ref={csvInputRef}
-                type="file"
-                accept=".csv,text/csv"
-                onChange={(event) => importCsvIntoActiveGroup(event.target.files?.[0])}
-                hidden
-              />
-              <button className="ghost-button" type="button" onClick={() => csvInputRef.current?.click()}>
-                <UploadCloud size={17} />
-                Import CSV
-              </button>
-              <button
-                className="ghost-button"
-                type="button"
-                onClick={() =>
-                  downloadTextFile(`${slugify(activeGroup.name, "classloop-class")}.csv`, rosterToCsv(activeGroup.students), "text/csv")
-                }
-              >
-                <ArrowUpRight size={17} />
-                Export CSV
-              </button>
               <button className="ghost-button danger" type="button" onClick={() => onDelete(activeGroup.id)}>
                 <Trash2 size={17} />
                 Delete class
@@ -8872,19 +9973,40 @@ function ClassGroupsPage({
                 <Save size={17} />
                 Add roster template
               </button>
+              <button className="text-button" type="button" onClick={() => navigate("rosters")}>
+                Manage roster
+                <ChevronRight size={16} />
+              </button>
             </div>
           </div>
-          <RosterManager
-            students={activeGroup.students}
-            attendance={activeAttendance}
-            studentAccountEmails={[]}
-            sessionTitle={activeGroup.name}
-            onStudentsChange={(students) => onUpdate(activeGroup.id, { students })}
-            onAttendanceChange={() => undefined}
-            showAttendance={false}
-            wrapPanel={false}
-            showCsvActions={false}
-          />
+          <div className="class-session-list">
+            {groupSessions.length ? (
+              groupSessions.slice(0, 8).map((session) => (
+                <button
+                  key={session.id}
+                  className="class-session-row"
+                  type="button"
+                  onClick={() => navigate("report", { session: session.id })}
+                >
+                  <span>
+                    <strong>{session.title}</strong>
+                    <small>{formatDate(session.date)} · {session.followUps.length} follow-ups</small>
+                  </span>
+                  <ChevronRight size={16} />
+                </button>
+              ))
+            ) : (
+              <div className="inline-empty compact-empty">
+                <span>
+                  <BookOpen size={18} />
+                </span>
+                <div>
+                  <strong>No linked sessions yet</strong>
+                  <p>Create a session from this saved class to build class history here.</p>
+                </div>
+              </div>
+            )}
+          </div>
         </Panel>
       </section>
     </div>
@@ -8893,24 +10015,35 @@ function ClassGroupsPage({
 
 function RosterTemplatesPage({
   templates,
+  classGroups,
   ownerEmail,
   onCreate,
   onUpdate,
   onDelete,
   onCreateClassGroup,
+  onUpdateClassGroup,
 }: {
   templates: RosterTemplate[];
+  classGroups: ClassGroup[];
   ownerEmail: string;
   onCreate: (template: RosterTemplate) => void;
   onUpdate: (templateId: string, changes: Partial<RosterTemplate>) => void;
   onDelete: (templateId: string) => void;
   onCreateClassGroup: (template: RosterTemplate) => void;
+  onUpdateClassGroup: (groupId: string, changes: Partial<ClassGroup>) => void;
 }) {
   const [activeTemplateId, setActiveTemplateId] = useState(templates[0]?.id ?? "");
+  const [activeClassGroupId, setActiveClassGroupId] = useState(classGroups[0]?.id ?? "");
   const csvInputRef = useRef<HTMLInputElement | null>(null);
   const activeTemplate = templates.find((template) => template.id === activeTemplateId) ?? templates[0];
+  const activeClassGroup = classGroups.find((group) => group.id === activeClassGroupId) ?? classGroups[0];
   const activeAttendance =
     activeTemplate?.students.reduce<Record<string, AttendanceStatus>>((acc, student) => {
+      acc[student.id] = "present";
+      return acc;
+    }, {}) ?? {};
+  const activeClassAttendance =
+    activeClassGroup?.students.reduce<Record<string, AttendanceStatus>>((acc, student) => {
       acc[student.id] = "present";
       return acc;
     }, {}) ?? {};
@@ -8923,6 +10056,15 @@ function RosterTemplatesPage({
       setActiveTemplateId("");
     }
   }, [activeTemplateId, templates]);
+
+  useEffect(() => {
+    if (classGroups.length && !classGroups.some((group) => group.id === activeClassGroupId)) {
+      setActiveClassGroupId(classGroups[0].id);
+    }
+    if (!classGroups.length && activeClassGroupId) {
+      setActiveClassGroupId("");
+    }
+  }, [activeClassGroupId, classGroups]);
 
   const createTemplate = () => {
     const now = new Date().toISOString();
@@ -8948,14 +10090,14 @@ function RosterTemplatesPage({
     if (csvInputRef.current) csvInputRef.current.value = "";
   };
 
-  if (!templates.length) {
+  if (!templates.length && !classGroups.length) {
     return (
       <div className="page-stack roster-template-page">
         <section className="review-banner">
           <div>
             <span className="eyebrow">Roster manager</span>
             <h2>Save rosters once, reuse them later.</h2>
-            <p>After you publish a session, ClassLoop can save that class roster for future sessions with the same template.</p>
+            <p>Create a saved roster here, or create a class first and manage the class roster from this tab.</p>
           </div>
           <button className="primary-button" type="button" onClick={createTemplate}>
             <UserPlus size={17} />
@@ -8978,15 +10120,61 @@ function RosterTemplatesPage({
       <section className="review-banner">
         <div>
           <span className="eyebrow">Roster manager</span>
-          <h2>Saved class rosters.</h2>
-          <p>Pick a roster here, then ClassLoop will offer it automatically when you create a matching session type.</p>
+          <h2>Class and saved rosters.</h2>
+          <p>Select a class roster at the top for day-to-day editing. Saved roster templates stay reusable for new sessions.</p>
         </div>
         <button className="primary-button" type="button" onClick={createTemplate}>
           <UserPlus size={17} />
-          New roster
+          New saved roster
         </button>
       </section>
 
+      {activeClassGroup && (
+        <Panel title="Class roster" icon={BookOpen}>
+          <div className="roster-class-selector">
+            <label className="field compact">
+              <span>Class</span>
+              <select value={activeClassGroup.id} onChange={(event) => setActiveClassGroupId(event.target.value)}>
+                {classGroups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name} · {group.students.length} students
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="class-history-card">
+              <strong>{activeClassGroup.students.length}</strong>
+              <span>students in this class roster</span>
+            </div>
+            <button className="text-button" type="button" onClick={() => navigate("classes")}>
+              Edit class details
+              <ChevronRight size={16} />
+            </button>
+          </div>
+          <RosterManager
+            students={activeClassGroup.students}
+            attendance={activeClassAttendance}
+            studentAccountEmails={[]}
+            sessionTitle={activeClassGroup.name}
+            onStudentsChange={(students) => onUpdateClassGroup(activeClassGroup.id, { students })}
+            onAttendanceChange={() => undefined}
+            showAttendance={false}
+            wrapPanel={false}
+          />
+        </Panel>
+      )}
+
+      {!templates.length && (
+        <EmptyState
+          icon={Users}
+          title="No saved roster templates yet"
+          detail="Your class roster is editable above. Add a saved roster template only when you want a reusable roster that is not tied to one class."
+          action="Create saved roster"
+          onAction={createTemplate}
+        />
+      )}
+
+      {templates.length > 0 && (
       <section className="content-grid roster-template-layout align-start">
         <Panel title="Saved rosters" icon={Users}>
           <div className="roster-template-list">
@@ -9076,6 +10264,7 @@ function RosterTemplatesPage({
           />
         </Panel>
       </section>
+      )}
     </div>
   );
 }
@@ -9227,7 +10416,8 @@ function ParticipantResolutionPanel({
                 <span className="eyebrow">Zoom name found</span>
                 <h4>{participant.name}</h4>
                 <p>
-                  Add this exact display name as a new student, or link it to an existing roster student for future sessions.
+                  Add to roster creates one new student for this speaker only. Link name attaches this Zoom display name to
+                  an existing roster student for future sessions.
                 </p>
                 {participant.lines[0] && <small>{participant.lines[0]}</small>}
               </div>
@@ -9414,7 +10604,7 @@ function PublishPreview({
   };
   const previewClassroomPost = () => {
     setClassroomPostMessage(
-      `Edited ${classroomPostType} is ready. Connect Google Classroom OAuth to post this class-wide recap, resources, and tasks.`,
+      `Edited ${classroomPostType} is ready. Classroom posting is not connected yet, so copy this draft into your classroom tool.`,
     );
   };
   const sendStudentEmails = async () => {
@@ -9428,10 +10618,15 @@ function PublishPreview({
     try {
       const result = await apiJson<EmailDeliveryResult>("/api/email/send-recaps", {
         method: "POST",
-        body: JSON.stringify({ sessionId: draft.id, ownerEmail: draft.ownerEmail, recipients: selectedEmailRecipients }),
+        body: JSON.stringify({
+          sessionId: draft.id,
+          ownerEmail: draft.ownerEmail,
+          recipients: selectedEmailRecipients,
+          includeAccessInstructions: magicLinksEnabled,
+        }),
       });
       updateDraft((current) => markSessionEmailsSent(current, result));
-      setDeliveryMessage(`Sent through ${result.provider} to ${result.recipients.length} students.`);
+      setDeliveryMessage(`Sent recap emails to ${result.recipients.length} students.`);
     } catch (error) {
       setDeliveryMessage(error instanceof Error ? error.message : "Unable to send recap emails.");
     } finally {
@@ -9449,10 +10644,14 @@ function PublishPreview({
             version looks right.
           </p>
         </div>
-        <div className="review-actions">
+        <div className="review-actions publish-actions">
           <button className="ghost-button" onClick={() => navigate("review")}>
-            <ChevronRight size={17} />
-            Back to edit
+            <Settings2 size={17} />
+            Edit session
+          </button>
+          <button className="ghost-button" onClick={() => navigate("dashboard")}>
+            <Save size={17} />
+            Save and close
           </button>
           <button className="primary-button" onClick={() => publishDraft()} disabled={blockingImportWarnings.length > 0}>
             <Send size={17} />
@@ -9483,7 +10682,7 @@ function PublishPreview({
               )}
               {!emailSent && integrationStatus && !integrationStatus.email?.configured && (
                 <small>
-                  Configure a ClassLoop-owned Gmail/SMTP sender in .env.local before sending recap emails.
+                  Email delivery is not available right now. Export or print the recap instead.
                 </small>
               )}
               {!emailSent && (
@@ -9511,15 +10710,22 @@ function PublishPreview({
                     onChange={(event) => setMagicLinksEnabled(event.target.checked)}
                   />
                   <span>
-                    <strong>Include magic link or email code when auth email is configured</strong>
+                    <strong>Include student sign-in instructions</strong>
                     <small>
-                      Recaps use the ClassLoop-owned sender; hosted sign-in links use Supabase/Auth email delivery when connected.
+                      Recap emails can include the roster email, student sign-in path, and ClassLoop access instructions when email delivery is available.
                     </small>
                   </span>
                 </label>
               )}
-              {magicLinksEnabled && !integrationStatus?.email?.configured && (
-                <small>Magic-link copy is previewed only until hosted auth email is configured.</small>
+              {magicLinksEnabled && (
+                <div className="magic-link-preview-list" aria-label="Student access instruction preview">
+                  <strong>Access instructions will be added for {recipientCount} recipients.</strong>
+                  <small>
+                    {integrationStatus?.email?.configured
+                      ? "Recap email delivery is available. ClassLoop will include student access instructions when the account supports them."
+                      : "Email delivery is not available right now, so this is a preview."}
+                  </small>
+                </div>
               )}
               {delivery.skipped.length > 0 && <small>Skipped: {delivery.skipped.join(", ")}</small>}
               {delivery.failed?.length ? <small>Failed: {delivery.failed.join("; ")}</small> : null}
@@ -9582,14 +10788,13 @@ function PublishPreview({
               <div>
                 <strong>Integration status</strong>
                 <small>
-                  Google Classroom OAuth is not connected in this local scaffold. The composer preserves teacher review
-                  and is ready for the real API boundary.
+                  Classroom posting is not connected yet. Review the draft here, then copy it into your classroom tool.
                 </small>
               </div>
             </div>
             <button className="ghost-button full" type="button" onClick={previewClassroomPost}>
               <Send size={17} />
-              Post to Classroom
+              Prepare Classroom post
             </button>
             {classroomPostMessage && <small>{classroomPostMessage}</small>}
           </div>
@@ -9776,7 +10981,7 @@ function SessionReport({
         <div className="report-actions">
           <button className="ghost-button" onClick={() => editSession(session)}>
             <Settings2 size={17} />
-            Edit draft
+            Edit session
           </button>
           <div className="report-export">
             <button
@@ -10741,7 +11946,7 @@ function TeacherAnalytics({ sessions }: { sessions: Session[] }) {
               <div key={student.id} className="analytics-bar-row">
                 <span>{student.name.split(" ")[0]}</span>
                 <div>
-                  <i style={{ width: `${Math.max(eventCount * 22, 6)}%` }} />
+                  <i style={{ width: eventCount > 0 ? `${Math.min(eventCount * 22, 100)}%` : "0%" }} />
                 </div>
                 <small>{eventCount} signals</small>
                 {(quiet > 0 || absent > 0) && (
@@ -10756,6 +11961,11 @@ function TeacherAnalytics({ sessions }: { sessions: Session[] }) {
           </div>
         </Panel>
         <Panel title="Follow-through readiness" icon={LineChart}>
+          <p className="panel-helper">
+            Readiness starts at 52% for present students, 45% for late students, and 22% for absent students. ClassLoop
+            adds 6 for useful chat, 7 for asking a question, and 13 for answering. It subtracts 18 for quiet and 16 for
+            a possible misconception. The analytics page averages those session scores for each student.
+          </p>
           <div className="readiness-list">
             {participationTotals.map(({ student, avgScore }) => (
               <div key={student.id} className="readiness-row">
@@ -11383,10 +12593,11 @@ function Avatar({ student }: { student: Student }) {
 }
 
 function ProgressBar({ value }: { value: number }) {
+  const clampedValue = Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : 0;
   return (
-    <div className="progress-bar" aria-label={`${value}%`}>
-      <span style={{ width: `${Math.max(4, Math.min(100, value))}%` }} />
-      <small>{value}%</small>
+    <div className="progress-bar" aria-label={`${clampedValue}%`}>
+      <span style={{ width: `${clampedValue}%` }} />
+      <small>{clampedValue}%</small>
     </div>
   );
 }

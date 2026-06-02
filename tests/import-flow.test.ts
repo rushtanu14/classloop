@@ -604,6 +604,9 @@ Danny Reyes
 I can summarize the homework.
 
 Speaker - Jalen Thompson: Is the worksheet due Thursday?
+29: This count label should not become a student.
+2s: Timer noise should not become a student.
+-Class: Metadata label should not become a student.
 Ms. Rivera: Teacher directions should not become an estimated student.`,
   notes: "",
   roster: "",
@@ -617,6 +620,9 @@ assert(transcriptOnlyNames.includes("Danny Reyes"), "transcript-only estimates s
 assert(transcriptOnlyNames.includes("Jalen Thompson"), "transcript-only estimates should strip generic speaker prefixes");
 assert(!transcriptOnlyNames.includes("Student (Aaliyah Carter)"), "transcript-only estimates should avoid duplicate generic labels");
 assert(!transcriptOnlyNames.includes("Ms. Rivera"), "transcript-only estimates should exclude teacher-like speakers");
+assert(!transcriptOnlyNames.includes("29"), "transcript-only estimates should ignore numeric labels");
+assert(!transcriptOnlyNames.includes("2s"), "transcript-only estimates should ignore timer/status labels");
+assert(!transcriptOnlyNames.includes("-Class"), "transcript-only estimates should ignore class metadata labels");
 assert(
   transcriptOnlySession.students.every((student) => student.email === ""),
   "transcript-only estimated students should keep blank emails until imported or manually added",
@@ -957,4 +963,89 @@ assert(personalWhisperMeeting.docsSummary?.body.includes("## Transcript Highligh
 assert(
   personalWhisperMeeting.emailDraft?.recipients.includes("teammate@classloop.test") ?? false,
   "individual email drafts should extract recipients but still wait for UI permission",
+);
+
+const liveCaptureRoster = "Maya Chen, maya@classloop.test\nAarav Patel, aarav@classloop.test";
+
+const noisyInPersonCaptureSession = createGeneratedSession({
+  title: "Noisy In-Person Capture",
+  template: "Math review",
+  captureMode: "in_person",
+  captureSourceLabel: "In-person class capture",
+  captureDurationSeconds: 74,
+  transcriptSource: "live_transcription",
+  transcript: [
+    "Unknown in-person voice 1: um uh like the ratio is maybe six over x and audio unclear near the projector.",
+    "Maya Chen: Is the similar triangles practice due Friday?",
+    "Aarav Patel: I can explain the scale factor if the room is quiet.",
+    "Unknown in-person voice 2: [inaudible] homework problem seven maybe okay so yeah.",
+  ].join("\n"),
+  notes: "Noisy room. Teacher will review unknown speaker segments before publishing.",
+  roster: liveCaptureRoster,
+  resources: "https://example.com/noisy-capture-review",
+});
+assertEqual(noisyInPersonCaptureSession.capture?.mode, "in_person", "in-person capture should preserve capture mode");
+assertEqual(noisyInPersonCaptureSession.capture?.transcriptSource, "live_transcription", "in-person capture should mark live transcript source");
+assertEqual(noisyInPersonCaptureSession.capture?.durationSeconds, 74, "in-person capture should preserve duration for review context");
+assert(
+  noisyInPersonCaptureSession.importWarnings?.some((warning) => warning.id === "noisy-asr" && warning.severity === "blocking") ?? false,
+  "noisy in-person live capture should require teacher review before publishing",
+);
+assert(
+  (noisyInPersonCaptureSession.unmatchedParticipants ?? []).some((participant) =>
+    /Unknown in-person voice/i.test(participant.name),
+  ),
+  "unknown in-person live capture segments should stay unmatched until the teacher links them",
+);
+assert(
+  noisyInPersonCaptureSession.participationEvents.every((event) => event.approved === false || event.reviewRequired),
+  "noisy live-capture participation should not auto-approve student-specific signals",
+);
+
+const transcriptOnlyNoiseLabelsSession = createGeneratedSession({
+  title: "Transcript-only noisy labels",
+  template: "General classroom",
+  transcript: [
+    "29: screen share timer started before class.",
+    "-Class: worksheet copied into the chat.",
+    "2s: short audio artifact from the transcript export.",
+    "Student (Maya Chen): I can explain the first step.",
+  ].join("\n"),
+  notes: "",
+  roster: "",
+  resources: "",
+});
+const estimatedNames = transcriptOnlyNoiseLabelsSession.students.map((student) => student.name);
+assert(
+  estimatedNames.includes("Maya Chen"),
+  "transcript-only mode should still estimate real student speakers",
+);
+assert(
+  !estimatedNames.includes("29") && !estimatedNames.includes("-Class") && !estimatedNames.includes("2s"),
+  "numeric, class metadata, and timer-like transcript labels should not become students",
+);
+
+const onlineMeetingCaptureSession = createGeneratedSession({
+  title: "Online Meeting Capture Missing Audio",
+  template: "Study group",
+  captureMode: "online_meeting",
+  captureSourceLabel: "Online meeting capture",
+  captureDurationSeconds: 53,
+  transcriptSource: "audio_recording",
+  transcript: "",
+  notes:
+    "Online meeting capture ran without a shared meeting-audio track. Teacher pasted no platform transcript yet and should add notes before publishing.",
+  roster: liveCaptureRoster,
+  resources: "",
+});
+assertEqual(onlineMeetingCaptureSession.capture?.mode, "online_meeting", "online meeting capture should preserve capture mode");
+assertEqual(
+  onlineMeetingCaptureSession.capture?.transcriptSource,
+  "audio_recording",
+  "online meeting capture without live text should fall back to audio recording source",
+);
+assertEqual(onlineMeetingCaptureSession.followUps.length, 2, "online meeting audio fallback should still create reviewable follow-ups");
+assert(
+  onlineMeetingCaptureSession.recap.length > 0 && onlineMeetingCaptureSession.actionItems.length > 0,
+  "online meeting audio fallback should produce a teacher-reviewable draft instead of crashing",
 );

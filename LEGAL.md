@@ -2,11 +2,11 @@
 
 Last updated: 2026-05-24
 
-This is founder-authored launch language for ClassLoop. It is not legal advice and does not create an attorney-client relationship. Public Terms of Use, Privacy Policy, Desktop EULA, and Support pages exist in the web app at `#/terms`, `#/privacy`, `#/eula`, and `#/support`. Have qualified counsel review final production language, school data-processing agreements, and hosted retention/deletion SLAs before enabling durable hosted public signups with real student data.
+This is founder-authored launch language for ClassLoop. It is not legal advice and does not create an attorney-client relationship. Public Terms of Use, Privacy Policy, Desktop EULA, and Support pages exist in the web app at `#/terms`, `#/privacy`, `#/eula`, and `#/support`. Have qualified counsel review final production language, school data-processing agreements, and hosted retention/deletion SLAs before broad school use or district-managed hosted accounts with real student data.
 
 ## Public Signup Status
 
-Hosted ClassLoop should stay sample-only until the public legal pages, privacy controls, support contact, school data terms, and hosted retention/deletion process are reviewed for production use. Teachers can create durable local accounts in the downloaded desktop app. The public hosted demo should use sample accounts only and clearly banner demo data as unsaved.
+Cloud-backed account signup may be enabled when Supabase Auth, public legal pages, privacy controls, support contact, and a hosted retention/deletion process are configured. Demo-only routes should use sample accounts only and clearly banner demo data as unsaved.
 
 ## Terms Of Use
 
@@ -32,7 +32,7 @@ Do not use ClassLoop to harass, shame, rank publicly, surveil, discriminate, col
 
 ### Accounts, Sync, And Billing
 
-The local desktop app must remain useful without Supabase or Stripe credentials. Hosted sync, when configured, uses authenticated accounts and workspace authorization. Pro billing, when enabled, is processed through Stripe Checkout; subscription status is updated by signed Stripe webhooks and stored server-side.
+The local desktop app must remain useful without Supabase or Stripe credentials. Hosted sync, when configured, uses authenticated accounts and workspace authorization and can be available on Free accounts. Pro billing, when enabled, is processed through Stripe Checkout; subscription status is updated by signed Stripe webhooks and stored server-side.
 
 ### Support And Feedback
 
@@ -40,7 +40,7 @@ Installer reports, pilot feedback, and optional student usefulness ratings may b
 
 ### Suspension And Changes
 
-ClassLoop may suspend hosted access for abuse, security risk, payment failure, legal compliance, or operational risk. These terms may change as the product moves from demo to pilot to broader availability. Material changes should be reflected on the public pages before new durable hosted signups are opened.
+ClassLoop may suspend hosted access for abuse, security risk, payment failure, legal compliance, or operational risk. These terms may change as the product moves from demo to pilot to broader availability. Material changes should be reflected on the public pages before broad school or district-managed hosted signups are opened.
 
 ### Disclaimers
 
@@ -64,7 +64,7 @@ Desktop data is local-first. Electron state is encrypted with ClassLoop's prompt
 
 ### Hosted Demo And Hosted Sync
 
-The public hosted demo is sample-only and should not be used for real student records unless a separate pilot agreement is in place. Hosted sync, when configured, uses Supabase Auth and Row Level Security so each account can access only its own workspace state. Durable hosted public signups should remain gated until legal review, retention/deletion SLAs, and school data terms are ready.
+Demo-only hosted routes are sample-only and should not be used for real student records. Hosted sync, when configured, uses Supabase Auth and Row Level Security so each account can access only its own workspace state. Broad school or district-managed hosted use should remain gated until legal review, retention/deletion SLAs, and school data terms are ready.
 
 ### Third-Party Processors
 
@@ -76,13 +76,13 @@ ClassLoop's default posture is no training on student data. Do not use student r
 
 ### Data Retention, Export, And Deletion
 
-Default teacher retention setting: 365 days. Teachers can export workspace data and delete class sessions/drafts from the privacy area. Hosted pilot users can request deletion by support email. Hosted production retention and deletion SLAs must be legally reviewed before durable public hosted accounts are enabled.
+Default teacher retention setting: 365 days. Teachers can export workspace data and delete class sessions/drafts from the privacy area. Hosted pilot users can request deletion by support email. Hosted production retention and deletion SLAs must be legally reviewed before broad school or district-managed hosted accounts are enabled.
 
 Alpha trackers and support notes should store anonymized examples and counts, not raw transcripts or full student rosters. Support feedback is retained only as long as needed for debugging, safety, accounting, legal, or operational records.
 
 ### Security
 
-ClassLoop uses local encryption, trusted-origin local desktop APIs, sample-only hosted demo boundaries, server-side entitlement handling, privacy-safe logging checks, IP and authenticated-user API rate limits, strict JSON content-type checks, request-size caps, schema validation, and safe API error responses. Server-only credentials must stay in server environment variables, and exposed or misplaced keys should be rotated before further use.
+ClassLoop uses local encryption, trusted-origin local desktop APIs, demo-only hosted boundaries, server-side entitlement handling, privacy-safe logging checks, IP and authenticated-user API rate limits, strict JSON content-type checks, request-size caps, schema validation, and safe API error responses. Server-only credentials must stay in server environment variables, and exposed or misplaced keys should be rotated before further use.
 
 No software or policy text can guarantee perfect security or prevent legal claims. Treat these controls as a launch baseline for engineering review, not a substitute for qualified legal/security review. Report suspected security or privacy issues to the support contact below.
 

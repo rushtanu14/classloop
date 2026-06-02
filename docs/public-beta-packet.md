@@ -1,18 +1,19 @@
-# ClassLoop Public Beta Packet
+# ClassLoop Controlled Pilot Packet
 
 Last updated: 2026-05-30
 
-This packet is the teacher-facing handoff for a small ClassLoop public beta or alpha rehearsal. It is ready for controlled teacher testing, not broad real-student hosted signup.
+This packet is the internal handoff for controlled ClassLoop teacher pilots and alpha rehearsals. It is not a public website page, public signup flow, or broad real-student hosted launch.
 
-## Current Beta Boundary
+## Current Pilot Boundary
 
 - Live site: https://classloop-followup.vercel.app
 - Public routes: `#/features`, `#/screenshots`, `#/docs`, `#/privacy`, `#/terms`, `#/eula`, `#/support`, and `#/download`
+- No public beta route: do not publish a `#/beta` page or link to one from promo content.
 - Demo accounts:
   - Teacher: `teacher@classloop.demo` / `classloop-teacher`
   - Student: `maya@classloop.demo` / `classloop-student`
 - Durable hosted public signups: hold until legal/public signup review, hosted retention/deletion SLAs, backend credentials, and live billing proof are complete.
-- Real classroom artifacts: use the desktop app or a reviewed cloud pilot. Keep the hosted web demo sample-only unless a separate pilot agreement allows real data.
+- Real classroom artifacts: use a real cloud-backed account when Supabase is configured, or the desktop app's local encrypted workspace. Demo-only routes stay sample-only.
 
 ## Teacher Onboarding
 
@@ -72,7 +73,7 @@ Pass the alpha only if teachers reach publish preview without trust-breaking con
 
 ## Release Notes
 
-### ClassLoop 0.1.0 Public Beta
+### ClassLoop 0.1.0 Controlled Pilot
 
 ClassLoop turns transcripts, notes, rosters, and links into teacher-reviewed class recaps, student follow-ups, tasks, resources, completion check-ins, and private teacher support signals.
 
@@ -86,15 +87,16 @@ Included:
 - Hosted sample demo and installable PWA shell.
 - Desktop app with encrypted local state.
 - Public Privacy, Terms, EULA, Support, and Download routes.
-- Free tier copy and Pro billing scaffold at `$3.99/month`.
+- Free tier copy includes multi-device cloud sync when Supabase is configured; Pro billing scaffold is `$3.99/month` for unlimited sessions, live capture, delivery proof, analytics, and exports.
 - Stripe Checkout and webhook-owned entitlement scaffolding.
 - Supabase auth/sync scaffolding with credential-absent desktop fallback.
 
 Known limits:
 
-- Hosted public signups are sample-only until final legal/public signup review.
+- Hosted demo-only routes are sample-only; broad school or district-managed hosted use still needs final legal/public signup review.
 - Live Google Classroom and Zoom integrations are workflow surfaces unless real OAuth/API credentials and backend routes are configured.
 - Pro should remain locked until Stripe webhook/profile state confirms an active paid entitlement.
+- The business model should stay predictable: no per-minute transcript pricing, with school/team plans only after admin, privacy, support, and legal review are ready.
 - Free desktop builds may be unsigned or ad-hoc signed; users should verify checksums.
 - Clean-host installer proof is still required per platform before broad distribution.
 - Real teacher alpha evidence is still required before treating parser quality as field-proven.
@@ -161,13 +163,13 @@ Fallback rules:
 - If a URL is missing, show `Packaging pending` and keep the web/PWA demo available.
 - If a URL points to Vercel Blob, ignore it and show `Packaging pending`.
 - macOS public downloads should stay Apple silicon only unless Intel artifacts are intentionally restored.
-- macOS public downloads use the Swift app. The free distribution path remains ad-hoc signed unless a paid Developer ID/notarization pass is added later.
+- macOS public downloads use the Swift app. The legacy Electron Mac package is rollback-only unless explicitly restored. The free distribution path remains ad-hoc signed unless a paid Developer ID/notarization pass is added later.
 - Linux public downloads should default to AppImage. Offer `.deb` only after Linux-host verification.
 - Run `npm run release:checksums` before publishing new desktop artifacts.
 
 ## Short Launch Announcement
 
-ClassLoop is opening a small public beta for teachers who want faster after-class follow-up. Paste a Zoom-style transcript, roster, notes, and links; ClassLoop turns them into a teacher-reviewed recap, student next steps, resources, and completion check-ins. The web demo uses sample accounts, and real classroom work should stay in the desktop app or a reviewed pilot. Try the demo at https://classloop-followup.vercel.app and send install, import, checkout, or sync issues through the Support page.
+ClassLoop is preparing controlled teacher pilots for faster after-class follow-up. Paste a Zoom-style transcript, roster, notes, and links; ClassLoop turns them into a teacher-reviewed recap, student next steps, resources, and completion check-ins. The web demo uses sample accounts, and real classroom work should stay in the desktop app or a reviewed pilot. Try the public demo at https://classloop-followup.vercel.app and send install, import, checkout, or sync issues through the Support page.
 
 ## Verification Checklist
 
@@ -184,8 +186,8 @@ Manual review:
 
 - `#/support` shows a support contact and says not to send raw student records.
 - `#/download` shows PWA access, installer controls, checksum access, unsigned install guidance, and packaging fallback copy.
-- `#/privacy`, `#/terms`, and `#/eula` keep hosted durable signup gated for real student data.
-- Public demo remains sample-only.
+- `#/privacy`, `#/terms`, and `#/eula` keep demo-only routes sample-only and school-scale hosted use gated for review.
+- Demo-only public route remains sample-only.
 - GitHub release asset URLs in `public/classloop-downloads.json` return successful responses.
 
 Current open blockers before broader launch:

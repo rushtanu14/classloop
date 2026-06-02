@@ -1,0 +1,5 @@
+tester_id,role,context,status,contact_channel,date_identified,date_contacted,date_tested,test_platform,reached_publish_preview,recap_rating,task_rating,student_usefulness_rating,trust_rating,would_use_again,top_blocker,next_follow_up,notes_redacted
+T001,teacher,clean transcript plus roster,identified,,,,,,,,,,,,,,
+T002,teacher,messy notes or partial transcript,identified,,,,,,,,,,,,,,
+T003,tutor,small group or one-on-one session,identified,,,,,,,,,,,,,,
+T004,club lead,meeting or workshop follow-up,identified,,,,,,,,,,,,,,

@@ -141,7 +141,7 @@ test.describe("user-visible error states and recovery", () => {
     await expect(page.getByRole("button", { name: /review warnings first/i })).toBeDisabled();
     await expect(page.getByText(/publish is paused until these warnings are reviewed/i)).toBeVisible();
 
-    await page.getByRole("button", { name: /back to edit/i }).click();
+    await page.getByRole("button", { name: /edit session/i }).click();
     await page.getByRole("button", { name: /mark reviewed/i }).first().click();
     await page.getByRole("button", { name: /preview and publish/i }).click();
     await expect(page.getByRole("button", { name: /publish to students/i })).toBeEnabled();

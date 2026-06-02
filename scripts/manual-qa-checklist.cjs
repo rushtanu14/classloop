@@ -93,7 +93,7 @@ const sections = [
     [
       "With credentials absent, confirm desktop/local mode works and hosted sync/billing failures are clear.",
       "With test credentials configured, verify Supabase login/logout, token expiry, upload/download, conflict resolution, and offline queue behavior.",
-      "Verify the Pro button opens the hidden embedded Stripe Checkout page, hosted Checkout fallback still works, return-to-ClassLoop verification keeps Pro locked until paid webhook/profile confirmation, and portal, downgrade/cancel, canceled/past-due/unpaid states, and locked-feature UI behave correctly.",
+      "Verify the Pro button opens the hidden embedded Stripe Checkout page, hosted Checkout fallback still works, return-to-ClassLoop verification keeps Pro locked until paid webhook/profile confirmation, and portal, downgrade/cancel, canceled/past-due/unpaid states, Pro-only live capture, and locked-feature UI behave correctly.",
       "Attempt client-side entitlement tampering and confirm profile/API helpers ignore paid fields submitted by the client.",
     ],
   ],
@@ -103,7 +103,7 @@ const sections = [
     [
       "Build or install the Swift macOS arm64 app, Windows x64/arm64 where supported, and Linux x64/arm64 artifacts on matching clean machines.",
       "Launch first-run, create account, confirm `.classloop-data.json` and `.classloop-storage-key` live in user data, relaunch, and sign back in.",
-      "Inspect signing/notarization/Gatekeeper/SmartScreen/AppImage warnings and whether they block a normal teacher; only inspect `.deb` installers if they were built on a Linux host.",
+      "Inspect Swift macOS signing/notarization/Gatekeeper behavior plus Windows SmartScreen and Linux AppImage warnings; only inspect `.deb` installers if they were built on a Linux host.",
       "Do not broaden desktop installer promotion until Swift macOS first-run, Gatekeeper warning copy, and Windows/Linux first-run are verified on matching clean machines.",
     ],
   ],

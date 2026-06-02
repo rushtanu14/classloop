@@ -6,6 +6,8 @@ import WebKit
 
 @main
 final class ClassLoopSwiftApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate {
+  private static var retainedDelegate: ClassLoopSwiftApp?
+
   private var window: NSWindow?
   private var webView: WKWebView?
   private var launchSource: ClassLoopLaunchSource?
@@ -15,6 +17,7 @@ final class ClassLoopSwiftApp: NSObject, NSApplicationDelegate, NSWindowDelegate
   static func main() {
     let app = NSApplication.shared
     let delegate = ClassLoopSwiftApp()
+    retainedDelegate = delegate
     app.delegate = delegate
     app.setActivationPolicy(.regular)
     app.run()
@@ -22,8 +25,10 @@ final class ClassLoopSwiftApp: NSObject, NSApplicationDelegate, NSWindowDelegate
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     let startApp = { [weak self] in
-      self?.launchSource = ClassLoopLaunchSource.resolve()
-      self?.createWindow()
+      DispatchQueue.main.async {
+        self?.launchSource = ClassLoopLaunchSource.resolve()
+        self?.createWindow()
+      }
     }
 
     if ProcessInfo.processInfo.environment["CLASSLOOP_SWIFT_RESET_WEB_STORAGE"] == "1" {
@@ -58,6 +63,7 @@ final class ClassLoopSwiftApp: NSObject, NSApplicationDelegate, NSWindowDelegate
       defer: false
     )
     window.title = "ClassLoop"
+    window.isReleasedWhenClosed = false
     window.minSize = NSSize(width: 980, height: 700)
     window.backgroundColor = NSColor(red: 0.008, green: 0.031, blue: 0.090, alpha: 1)
     window.contentView = webView
@@ -71,7 +77,9 @@ final class ClassLoopSwiftApp: NSObject, NSApplicationDelegate, NSWindowDelegate
       load(launchSource, in: webView)
     }
 
+    NSApp.unhide(nil)
     window.makeKeyAndOrderFront(nil)
+    window.orderFrontRegardless()
     NSApp.activate(ignoringOtherApps: true)
   }
 

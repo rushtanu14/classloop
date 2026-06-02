@@ -158,6 +158,6 @@ assertEqual(
 await signOutCloud();
 await assertRejects(
   cloudRequest("/api/cloud-state", { method: "PUT", body: "{}" }),
-  /Sign in with Supabase/i,
+  /Sign in to cloud sync/i,
   "cloud sync writes without credentials should fail before touching the network",
 );

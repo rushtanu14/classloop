@@ -27,7 +27,7 @@ function allowProductFeedbackCors(request, response) {
 
 function assertHostedFeedbackConfigured() {
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    throw httpError(503, "Hosted feedback storage is not configured.");
+    throw httpError(503, "Support intake is temporarily unavailable.");
   }
 }
 
@@ -135,7 +135,7 @@ export default async function handler(request, response) {
     let user = null;
     if (token) {
       const { data, error } = await supabase.auth.getUser(token);
-      if (error) throw httpError(401, "Invalid or expired Supabase session.");
+      if (error) throw httpError(401, "Invalid or expired session.");
       user = data.user ?? null;
       assertUserRateLimit(request, response, user, {
         endpoint: "feedback",

@@ -81,9 +81,9 @@ classloop-student
 6. Switch to the student view and mark a task complete.
 7. Return to the teacher view to review completion and analytics.
 
-## Public Beta Packet
+## Controlled Pilot Packet
 
-Use [docs/public-beta-packet.md](docs/public-beta-packet.md) for teacher onboarding, the alpha script, release notes, support FAQ, download links and fallbacks, the short launch announcement, and the verification checklist before inviting a real teacher.
+Use [docs/public-beta-packet.md](docs/public-beta-packet.md) as an internal pilot handoff for teacher onboarding, the alpha script, release notes, support FAQ, download links and fallbacks, the short launch announcement, and the verification checklist before inviting a real teacher. Do not publish a public beta route or broad tester signup page.
 
 ## Run Locally
 
@@ -122,7 +122,8 @@ npm run bootstrap
 | --- | --- |
 | Frontend | React 18 |
 | Language | TypeScript 5 |
-| Desktop | Electron 41 |
+| macOS desktop | SwiftUI + WebKit |
+| Windows/Linux desktop | Electron 41 |
 | Build | Vite 6 |
 | Icons | Lucide React |
 | Styling | CSS |
@@ -140,7 +141,9 @@ src/
   types.ts       Core ClassLoop domain types
   styles.css     Product styling
 desktop/
-  main.cjs       Electron main process
+  main.cjs       Electron main process for Windows/Linux and legacy Mac fallback
+macos-swift/
+  ClassLoopSwift Swift macOS app and package scripts
 api/
   billing/       Stripe checkout, portal, and webhook routes
   cloud-state.js Hosted workspace sync route
@@ -155,8 +158,11 @@ tests/
 
 ## Pricing
 
-- Free: 1 generated session per day, transcript import, Google/Zoom workflow surfaces, student accounts, recap email delivery, CSV roster tools, and local desktop storage.
-- Pro: `$3.99/month` for unlimited generated sessions plus private analytics and JSON/CSV/print report exports.
+- Free: 1 generated session per day, transcript import, Google/Zoom workflow surfaces, student accounts, recap email delivery, CSV roster tools, local encrypted storage, and multi-device cloud sync when Supabase is configured.
+- Pro: `$3.99/month` for unlimited generated sessions, live in-person/online capture, delivery proof, private analytics, and JSON/CSV/print report exports.
+- School/team later: per-teacher seats with SSO, retention controls, audit/export, admin policy, and reviewed student-data agreements.
+
+ClassLoop should follow a Granola-style business shape without copying meeting-note pricing exactly: give teachers enough Free value to trust the workflow, charge when it becomes a weekly habit, and avoid per-minute transcript pricing so long classes do not feel punished.
 
 ## Privacy And Safety
 
@@ -188,6 +194,7 @@ Useful focused checks:
 ```bash
 npm run test:web:local
 npm run test:stripe
+npm run test:swift:mac
 npm run test:desktop:state
 npm run test:desktop:first-run
 npm run test:release:distribution
@@ -200,22 +207,24 @@ The test suite covers import parsing, noisy transcripts and rosters, teacher/stu
 
 All desktop packaging commands run `npm run package:prepare` first. That rebuilds the shared Vite `dist/` output and verifies that macOS, Windows, Linux, and the Swift macOS app are wired to that same local build, so local changes are not left behind in one platform version.
 
-Build the Apple silicon macOS package:
+Build the Apple silicon Swift macOS package:
 
 ```bash
 npm run package:mac
 ```
 
-`npm run package:mac` now builds the native Swift macOS app bundle, DMG, and ZIP. The legacy Electron macOS fallback is still available when needed:
-
-```bash
-npm run package:mac:electron
-```
+`npm run package:mac` now builds the native Swift macOS app bundle, DMG, and ZIP.
 
 Run the Swift macOS app against the local web build:
 
 ```bash
 npm run swift:mac:run
+```
+
+Build the legacy Electron macOS package only if you need a rollback comparison:
+
+```bash
+npm run package:mac:electron
 ```
 
 Build Windows or Linux packages:
@@ -241,6 +250,8 @@ npm run release:checksums
 
 Use `.env.example` as the checklist for optional hosted services.
 
+For the full Stripe, Supabase, and Vercel payment setup checklist, use [docs/classloop-payment-launch-runbook.md](docs/classloop-payment-launch-runbook.md). Paid Pro promotion should stay on hold until the runbook's live checkout, webhook entitlement, cancellation, and demo-account-blocking proof is current.
+
 Common hosted variables:
 
 ```bash
@@ -250,6 +261,7 @@ SUPABASE_SERVICE_ROLE_KEY=
 
 VITE_STRIPE_PRO_PRICE_ID=
 VITE_STRIPE_PUBLISHABLE_KEY=
+VITE_STRIPE_PRICING_TABLE_ID=
 STRIPE_SECRET_KEY=
 STRIPE_PRO_PRICE_ID=
 STRIPE_WEBHOOK_SECRET=

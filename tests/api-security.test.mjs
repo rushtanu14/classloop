@@ -1,12 +1,14 @@
 import { strict as assert } from "node:assert";
 import { assertIpRateLimit, httpError, readJsonBody, sendApiError } from "../api/_shared.js";
 import {
+  validateBillingAccountPayload,
   validateCheckoutPayload,
   validateCloudWorkspaceStatePayload,
   validateEmailRecapPayload,
   validateFeedbackPayload,
   validateProfilePatchPayload,
 } from "../api/validators.js";
+import { billingPreparedProfileRow } from "../api/billing/prepare-account.js";
 
 function assertThrowsStatus(fn, statusCode, messagePattern) {
   assert.throws(
@@ -119,14 +121,50 @@ assert.deepEqual(validateCheckoutPayload({ tier: "pro", uiMode: "embedded" }), {
 assertThrowsStatus(() => validateCheckoutPayload({ tier: "free" }), 400, /one of/i);
 assertThrowsStatus(() => validateCheckoutPayload({ tier: "pro", price: "price_attacker" }), 400, /unsupported field/i);
 
+const validBillingAccount = validateBillingAccountPayload({
+  email: "teacher@classloop.test",
+  password: "teacher-pass-123",
+  role: "teacher",
+  name: "Ms. Rivera",
+});
+assert.deepEqual(validBillingAccount, {
+  email: "teacher@classloop.test",
+  password: "teacher-pass-123",
+  role: "teacher",
+  name: "Ms. Rivera",
+});
+assertThrowsStatus(() => validateBillingAccountPayload({ email: "teacher@classloop.test", password: "short", role: "teacher" }), 400, /too short/i);
+assertThrowsStatus(() => validateBillingAccountPayload({ email: "teacher@classloop.test", password: "teacher-pass-123", role: "student" }), 400, /one of/i);
+assertThrowsStatus(
+  () => validateBillingAccountPayload({ email: "teacher@classloop.test", password: "teacher-pass-123", role: "teacher", plan_tier: "pro" }),
+  400,
+  /unsupported field/i,
+);
+const preparedProfile = billingPreparedProfileRow(
+  { id: "00000000-0000-4000-8000-000000000123", email: "teacher@classloop.test" },
+  validBillingAccount,
+);
+assert.equal(preparedProfile.plan_tier, "free");
+assert.equal(preparedProfile.subscription_status, "not_configured");
+assert.equal(preparedProfile.no_training_on_student_data, true);
+const preparedOwnerProfile = billingPreparedProfileRow(
+  { id: "00000000-0000-4000-8000-000000000124", email: "rushilcpm02@gmail.com" },
+  { ...validBillingAccount, email: "rushilcpm02@gmail.com" },
+);
+assert.equal(preparedOwnerProfile.plan_tier, "pro");
+assert.equal(preparedOwnerProfile.subscription_status, "active");
+assert.equal(preparedOwnerProfile.stripe_customer_id, "manual_pro_rushilcpm02_gmail_com");
+
 assert.deepEqual(validateEmailRecapPayload({
   sessionId: "session-1",
   ownerEmail: "teacher@classloop.test",
   recipients: ["maya@classloop.test"],
+  includeAccessInstructions: true,
 }), {
   sessionId: "session-1",
   ownerEmail: "teacher@classloop.test",
   recipients: ["maya@classloop.test"],
+  includeAccessInstructions: true,
 });
 assertThrowsStatus(() => validateEmailRecapPayload({ sessionId: "session-1", ownerEmail: "teacher@classloop.test", bcc: ["attacker@classloop.test"] }), 400, /unsupported field/i);
 assertThrowsStatus(() => validateEmailRecapPayload({ sessionId: "session-1", ownerEmail: "teacher@classloop.test", recipients: ["bad-email"] }), 400, /expected format/i);

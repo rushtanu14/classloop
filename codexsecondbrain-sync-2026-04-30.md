@@ -306,8 +306,8 @@ Feature checks:
    - Sign back in and confirm the student's saved theme returns.
 10. Teacher appearance settings remain teacher-account scoped.
 11. Image backdrop URL updates the live preview and app background when a safe HTTPS image URL is used.
-12. Live capture modes require consent confirmation when privacy settings require it.
-13. Paid/API-key/external-platform features do not pretend to be live: Whisper upload transcription only works through the hosted `/api/transcribe` endpoint when `OPENAI_API_KEY` is configured; Google Classroom posting and fully automatic Google Calendar/Docs/Gmail actions remain OAuth/API setup work. Google Classroom and Zoom cloud surfaces are allowed only as honest scaffolds until OAuth/API credentials are connected.
+12. Live capture modes require verified Pro plus consent confirmation when privacy settings require it; Free users should see locked in-person/online capture cards and keep transcript/Zoom transcript import available.
+13. Paid/API-key/external-platform features do not pretend to be live: Whisper upload transcription only works through the hosted `/api/transcribe` endpoint when `OPENAI_API_KEY` is configured; Google Classroom posting, fully automatic Google Calendar/Docs/Gmail actions, and any live Zoom bot remain OAuth/API setup work. Google Classroom and Zoom cloud surfaces are allowed only as honest scaffolds until OAuth/API credentials are connected.
 14. Publish preview shows delivery logs after email send actions, supports teacher toggles for email recipients, and includes an editable class-wide Google Classroom post composer.
 15. Privacy page is accessible to teachers and exposes retention settings, export, delete class data, consent settings, and audit log.
 16. After students mark a follow-up complete, student follow-up pages can include a student note/file link and then show a bottom-right ClassLoop usefulness feedback popup; low ratings ask what would make ClassLoop better, post product feedback to the creator feedback endpoint without student names/emails, and do not appear in teacher Analytics or action queues.
@@ -368,7 +368,7 @@ Playwright is a required dev dependency for ClassLoop browser QA.
 - The user does not want to pay for integrations during the prototype stage.
 - ClassLoop cannot generate a Gmail account or send from an address the user does not own.
 - Free email path: the user creates/owns a Gmail account such as `classloop.noreply@gmail.com`, enables 2-Step Verification, creates an app password, and configures ClassLoop to send from that mailbox with `CLASSLOOP_REPLY_TO` set to the teacher/support inbox.
-- Google Classroom and Zoom cloud import can be shown as launch scaffolds only when the UI is explicit that OAuth/API connection is not live yet. Keep LMS posting, OpenAI transcription, custom transcription endpoints, and live Zoom bots removed/deferred because they require external integration setup or paid API-key paths. Browser-only online meeting capture is allowed as a free best-effort feature.
+- Google Classroom and Zoom cloud import can be shown as launch scaffolds only when the UI is explicit that OAuth/API connection is not live yet. Keep LMS posting, OpenAI transcription, custom transcription endpoints, and live Zoom bots removed/deferred because they require external integration setup or paid API-key paths. Browser-only in-person and online meeting capture are Pro-only best-effort features; transcript paste/upload and Zoom transcript import remain the reliable Free path.
 - If no external credentials are configured, ClassLoop must remain useful through transcript paste/upload, local review, publish preview, student portal, roster manager, and analytics.
 
 ## 2026-05-06 Roster Template Notes
@@ -429,7 +429,7 @@ When using the ClassLoop testing script, also verify:
   - Vercel browser deployment config in `vercel.json`.
 - Freemium MVP:
   - Free: `$0`, 1 generated session per day, transcript import, Google/Zoom workflow scaffolding, student accounts, recap email delivery, CSV import/export, student portal preview, local desktop storage.
-  - Pro: `$3.99/month`, unlimited generated sessions plus private analytics and JSON/CSV/print report exports.
+  - Pro: `$3.99/month`, unlimited generated sessions, live in-person/online capture, private analytics, and JSON/CSV/print report exports.
 - Added teacher-only Plan options and Privacy controls.
 - Added `AGENT.md` operational memory at repo root.
 - Consolidated `main` keeps the richer features: live audio notes, browser meeting capture, Gmail/SMTP delivery, class manager, publish audit, and submitted/reviewed student workflow.

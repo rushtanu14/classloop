@@ -115,6 +115,7 @@ function verifyDesktopAndHostedSecurity() {
   const emailRecaps = readText("api/email/send-recaps.js");
   const feedback = readText("api/feedback.js");
   const checkout = readText("api/billing/checkout.js");
+  const prepareAccount = readText("api/billing/prepare-account.js");
   const portal = readText("api/billing/portal.js");
   const webhook = readText("api/billing/webhook.js");
   const schema = readText("supabase/schema.sql");
@@ -131,7 +132,7 @@ function verifyDesktopAndHostedSecurity() {
     ["desktop email API validates request schema", desktop, /validateEmailRequestPayload/],
     ["desktop blocks writes after unreadable encrypted state", desktop, /if \(dataFileReadError\)/],
     ["email send reloads state server-side by session id", desktop, /const state = readDataFile\(\{ throwOnError: true \}\)/],
-    ["hosted APIs require bearer Supabase auth", shared, /Sign in with Supabase before using hosted sync/],
+    ["hosted APIs require bearer Supabase auth", shared, /auth\.startsWith\("Bearer "\)\s*\?\s*auth\.slice\("Bearer "\.length\)/],
     ["server-only Supabase key stays server-side", shared, /SUPABASE_SERVICE_ROLE_KEY/],
     ["hosted APIs share graceful JSON error handling", shared, /sendApiError/],
     ["hosted APIs emit rate-limit headers", shared, /RateLimit-Remaining/],
@@ -162,13 +163,18 @@ function verifyDesktopAndHostedSecurity() {
     ["anonymous feedback has IP rate limiting", feedback, /assertIpRateLimit\(request, response/],
     ["authenticated feedback has user rate limiting", feedback, /assertUserRateLimit\(request, response, user/],
     ["anonymous feedback has body limits", feedback, /MAX_FEEDBACK_BODY_CHARS/],
-    ["feedback fails closed without hosted credentials", feedback, /Hosted feedback storage is not configured/],
+    ["feedback fails closed without hosted credentials", feedback, /Support intake is temporarily unavailable/],
     ["feedback stores transcript context", feedback, /transcript: payload\.transcript/],
     ["feedback validates payload schema", feedback, /validateFeedbackPayload/],
     ["feedback reads bounded JSON body", feedback, /readJsonBody\(request/],
     ["billing checkout has IP rate limiting", checkout, /assertIpRateLimit\(request, response/],
     ["billing checkout has user rate limiting", checkout, /CHECKOUT_USER_RATE_LIMIT/],
     ["billing checkout validates schema", checkout, /validateCheckoutPayload/],
+    ["billing prepare account has IP rate limiting", prepareAccount, /assertIpRateLimit\(request, response/],
+    ["billing prepare account validates schema", prepareAccount, /validateBillingAccountPayload/],
+    ["billing prepare account confirms email server-side", prepareAccount, /email_confirm:\s*true/],
+    ["billing prepare account uses server-side auth admin", prepareAccount, /supabase\.auth\.admin\.createUser/],
+    ["billing prepare account refuses existing user password changes", prepareAccount, /cloud account already exists/i],
     ["billing portal has IP rate limiting", portal, /assertIpRateLimit\(request, response/],
     ["billing portal has user rate limiting", portal, /PORTAL_USER_RATE_LIMIT/],
     ["feedback metadata is sanitized", validators, /metadataValue/],
@@ -217,9 +223,9 @@ function verifyLegalBaseline() {
   const requiredLegalLanguage = [
     ["not legal advice disclaimer", /not legal advice/i],
     ["public signup status", /Public Signup Status/i],
-    ["legal review required before signup", /Have qualified counsel review final production language/i],
-    ["hosted signup stays sample-only", /Hosted ClassLoop should stay sample-only until the public legal pages/i],
-    ["sample-only hosted demo boundary", /sample accounts/i],
+    ["legal review required before school-scale hosted use", /Have qualified counsel review final production language/i],
+    ["cloud signup requires configured legal/support controls", /Cloud-backed account signup may be enabled when Supabase Auth/i],
+    ["demo-only hosted boundary", /Demo-only routes should use sample accounts only/i],
     ["Terms", /Terms/i],
     ["Privacy", /Privacy/i],
     ["EULA", /EULA/i],
@@ -227,7 +233,7 @@ function verifyLegalBaseline() {
     ["support contact", /rushilcpm02@gmail\.com|VITE_CLASSLOOP_SUPPORT_EMAIL/i],
     ["privacy-safe support requests", /support requests should avoid raw student transcripts/i],
     ["Data retention", /Data Retention/i],
-    ["hosted retention SLA before public accounts", /Hosted production retention and deletion SLAs must be legally reviewed before durable public hosted accounts are enabled/i],
+    ["hosted retention SLA before school-scale accounts", /Hosted production retention and deletion SLAs must be legally reviewed before broad school or district-managed hosted accounts are enabled/i],
     ["local desktop encryption", /Desktop data is local-first/i],
     ["manual install-over-replace updates", /manual install-over-replace/i],
     ["no-training default", /no-training/i],
@@ -243,7 +249,7 @@ function verifyLegalBaseline() {
   const requiredPublicCopy = [
     ["public privacy route", /ClassLoop Privacy Policy/i],
     ["hosted demo boundary", /Hosted demo boundary/i],
-    ["sample-only hosted demo copy", /Public hosted demos use sample accounts only/i],
+    ["demo-only hosted copy", /Demo-only routes use sample accounts only/i],
     ["local desktop data copy", /Desktop state is encrypted locally/i],
     ["no student-data training copy", /No training on student records/i],
     ["public Terms route", /ClassLoop Terms of Use/i],

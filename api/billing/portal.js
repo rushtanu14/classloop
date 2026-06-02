@@ -1,4 +1,5 @@
 import { assertIpRateLimit, json, methodNotAllowed, originUrl, requireUser, sendApiError } from "../_shared.js";
+import { isManualProCustomerId } from "./manual-pro.js";
 import { createStripeClient } from "./stripe-client.js";
 
 const PORTAL_RATE_LIMIT = { endpoint: "billing-portal", limit: 30, windowMs: 10 * 60 * 1000 };
@@ -18,6 +19,9 @@ export default async function handler(request, response) {
     if (error) throw error;
     if (!profile?.stripe_customer_id) {
       return json(response, 400, { error: "Complete Stripe Checkout before opening the billing portal." });
+    }
+    if (isManualProCustomerId(profile.stripe_customer_id)) {
+      return json(response, 400, { error: "Pro is already enabled manually for this account, so there is no Stripe billing portal." });
     }
 
     const baseUrl = process.env.CLASSLOOP_PUBLIC_URL || originUrl(request);

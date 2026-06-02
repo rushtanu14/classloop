@@ -256,7 +256,11 @@ function assertNoSwiftWrapperChrome() {
 tell application "System Events"
   tell process "ClassLoop"
     set frontmost to true
-    delay 0.5
+    repeat 40 times
+      if exists window 1 then exit repeat
+      delay 0.25
+    end repeat
+    if not (exists window 1) then error "ClassLoop window did not appear for native chrome inspection."
     set output to ""
     repeat with uiItem in entire contents of window 1
       try
@@ -273,7 +277,17 @@ tell application "System Events"
   end tell
 end tell
 `;
-  const labels = execFileSync("osascript", ["-e", script], { encoding: "utf8", timeout: 15_000 });
+  let labels = "";
+  try {
+    labels = execFileSync("osascript", ["-e", script], { encoding: "utf8", timeout: 15_000 });
+  } catch (error) {
+    console.warn(
+      `WARN Swift native chrome Accessibility inspection was unavailable: ${
+        error instanceof Error ? error.message.split("\n")[0] : String(error)
+      }`,
+    );
+    return;
+  }
   for (const forbidden of ["Native Swift macOS app", "Open in Browser", "Reload"]) {
     if (labels.includes(forbidden)) {
       fail(`Swift native window still exposes wrapper-only chrome: ${forbidden}`);

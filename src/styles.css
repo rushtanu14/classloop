@@ -3854,6 +3854,13 @@ button:disabled:hover {
   display: none;
 }
 
+.stripe-checkout-shell iframe {
+  display: block;
+  width: 100%;
+  min-height: 560px;
+  border: 0;
+}
+
 .stripe-pricing-table-shell {
   display: block;
   min-height: 580px;
@@ -3865,7 +3872,45 @@ button:disabled:hover {
 
 .stripe-pricing-table-shell stripe-pricing-table {
   display: block;
+  width: 100%;
   min-height: 580px;
+}
+
+.stripe-pricing-table-shell iframe {
+  display: block;
+  width: 100%;
+  min-height: 580px;
+  border: 0;
+}
+
+.stripe-pricing-table-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.stripe-direct-checkout-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.stripe-direct-checkout-card span {
+  display: grid;
+  gap: 3px;
+}
+
+.stripe-direct-checkout-card strong {
+  color: var(--heading);
+}
+
+.stripe-direct-checkout-card small {
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .stripe-pricing-table-shell.placeholder {

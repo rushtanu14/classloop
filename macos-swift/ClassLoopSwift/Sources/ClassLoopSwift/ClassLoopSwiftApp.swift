@@ -281,6 +281,20 @@ final class LocalDistServer {
   private let queue = DispatchQueue(label: "com.classloop.local-dist-server")
   private var dataFileReadError: String?
   private let localStateBodyMaxBytes = 8_000_000
+  private let hostedProxyBodyMaxBytes = 8_000_000
+  private let hostedProxyTimeoutSeconds: TimeInterval = 30
+  private let hostedApiBaseURL = URL(
+    string: ProcessInfo.processInfo.environment["CLASSLOOP_PUBLIC_URL"]
+      ?? ProcessInfo.processInfo.environment["VITE_CLASSLOOP_PUBLIC_URL"]
+      ?? "https://classloop-followup.vercel.app"
+  )!
+  private let hostedProxyPaths: Set<String> = [
+    "/api/cloud-state",
+    "/api/profile",
+    "/api/billing/prepare-account",
+    "/api/billing/checkout",
+    "/api/billing/portal",
+  ]
 
   init?(rootURL: URL) {
     let standardizedRoot = rootURL.standardizedFileURL
@@ -427,6 +441,10 @@ final class LocalDistServer {
       return httpResponse(status: "503 Service Unavailable", contentType: "application/json", body: data)
     }
 
+    if hostedProxyPaths.contains(path) {
+      return hostedApiProxyResponse(for: request, bodyOverride: body)
+    }
+
     if path.hasPrefix("/api/") {
       let data = jsonData(["error": "This local Swift build does not provide that hosted API endpoint."])
       return httpResponse(status: "404 Not Found", contentType: "application/json", body: body ?? data, declaredLength: data.count)
@@ -451,6 +469,111 @@ final class LocalDistServer {
     } catch {
       return httpResponse(status: "500 Internal Server Error", contentType: "text/plain", body: body ?? Data("Unable to read asset".utf8))
     }
+  }
+
+  private func hostedApiProxyResponse(for request: LocalHttpRequest, bodyOverride: Data?) -> Data {
+    let allowedMethods: Set<String> = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]
+    guard allowedMethods.contains(request.method) else {
+      return httpResponse(
+        status: "405 Method Not Allowed",
+        contentType: "application/json",
+        body: bodyOverride ?? jsonData(["error": "Method not allowed."])
+      )
+    }
+
+    guard request.body.count <= hostedProxyBodyMaxBytes else {
+      return httpResponse(
+        status: "413 Payload Too Large",
+        contentType: "application/json",
+        body: bodyOverride ?? jsonData(["error": "Request body is too large."])
+      )
+    }
+
+    guard
+      var components = URLComponents(url: hostedApiBaseURL, resolvingAgainstBaseURL: false),
+      let targetComponents = URLComponents(string: request.target)
+    else {
+      return httpResponse(
+        status: "502 Bad Gateway",
+        contentType: "application/json",
+        body: bodyOverride ?? jsonData(["error": "Unable to reach the hosted ClassLoop API."])
+      )
+    }
+
+    components.path = targetComponents.path.isEmpty ? request.path : targetComponents.path
+    components.percentEncodedQuery = targetComponents.percentEncodedQuery
+
+    guard let url = components.url else {
+      return httpResponse(
+        status: "502 Bad Gateway",
+        contentType: "application/json",
+        body: bodyOverride ?? jsonData(["error": "Unable to reach the hosted ClassLoop API."])
+      )
+    }
+
+    var upstreamRequest = URLRequest(url: url)
+    upstreamRequest.httpMethod = request.method
+    if request.method != "GET", request.method != "HEAD" {
+      upstreamRequest.httpBody = request.body
+    }
+    if let authorization = request.headers["authorization"] {
+      upstreamRequest.setValue(authorization, forHTTPHeaderField: "Authorization")
+    }
+    if let contentType = request.headers["content-type"] {
+      upstreamRequest.setValue(contentType, forHTTPHeaderField: "Content-Type")
+    }
+    if let accept = request.headers["accept"] {
+      upstreamRequest.setValue(accept, forHTTPHeaderField: "Accept")
+    }
+
+    let semaphore = DispatchSemaphore(value: 0)
+    var upstreamData = Data()
+    var upstreamStatusCode: Int?
+    var upstreamContentType = "application/json"
+    var upstreamError: Error?
+
+    let task = URLSession.shared.dataTask(with: upstreamRequest) { data, response, error in
+      upstreamError = error
+      if let httpResponse = response as? HTTPURLResponse {
+        upstreamStatusCode = httpResponse.statusCode
+        upstreamContentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? upstreamContentType
+      }
+      upstreamData = data ?? Data()
+      semaphore.signal()
+    }
+    task.resume()
+
+    if semaphore.wait(timeout: .now() + .seconds(Int(hostedProxyTimeoutSeconds))) == .timedOut {
+      task.cancel()
+      return httpResponse(
+        status: "504 Gateway Timeout",
+        contentType: "application/json",
+        body: bodyOverride ?? jsonData(["error": "Hosted ClassLoop API timed out."])
+      )
+    }
+
+    if upstreamError != nil {
+      return httpResponse(
+        status: "502 Bad Gateway",
+        contentType: "application/json",
+        body: bodyOverride ?? jsonData(["error": "Unable to reach the hosted ClassLoop API."])
+      )
+    }
+
+    guard let statusCode = upstreamStatusCode else {
+      return httpResponse(
+        status: "502 Bad Gateway",
+        contentType: "application/json",
+        body: bodyOverride ?? jsonData(["error": "Hosted ClassLoop API returned an invalid response."])
+      )
+    }
+
+    return httpResponse(
+      status: httpStatusLine(for: statusCode),
+      contentType: upstreamContentType,
+      body: bodyOverride ?? upstreamData,
+      declaredLength: upstreamData.count
+    )
   }
 
   private func stateResponse(for request: LocalHttpRequest, bodyOverride: Data?) -> Data {
@@ -762,6 +885,51 @@ final class LocalDistServer {
     response.append(Data(headers.utf8))
     response.append(body)
     return response
+  }
+
+  private func httpStatusLine(for statusCode: Int) -> String {
+    "\(statusCode) \(httpReasonPhrase(for: statusCode))"
+  }
+
+  private func httpReasonPhrase(for statusCode: Int) -> String {
+    switch statusCode {
+    case 200:
+      return "OK"
+    case 201:
+      return "Created"
+    case 204:
+      return "No Content"
+    case 400:
+      return "Bad Request"
+    case 401:
+      return "Unauthorized"
+    case 403:
+      return "Forbidden"
+    case 404:
+      return "Not Found"
+    case 405:
+      return "Method Not Allowed"
+    case 409:
+      return "Conflict"
+    case 413:
+      return "Payload Too Large"
+    case 415:
+      return "Unsupported Media Type"
+    case 422:
+      return "Unprocessable Entity"
+    case 429:
+      return "Too Many Requests"
+    case 500:
+      return "Internal Server Error"
+    case 502:
+      return "Bad Gateway"
+    case 503:
+      return "Service Unavailable"
+    case 504:
+      return "Gateway Timeout"
+    default:
+      return "OK"
+    }
   }
 
   private func jsonData(_ value: Any) -> Data {

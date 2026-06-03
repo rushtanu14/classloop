@@ -31,6 +31,15 @@ const LOCAL_API_RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const LOCAL_API_RATE_LIMIT_MAX = 240;
 const LOCAL_STATE_BODY_MAX_BYTES = 8_000_000;
 const LOCAL_EMAIL_BODY_MAX_BYTES = 20_000;
+const HOSTED_PROXY_BODY_MAX_BYTES = 8_000_000;
+const hostedApiBaseUrl = (process.env.CLASSLOOP_PUBLIC_URL || process.env.VITE_CLASSLOOP_PUBLIC_URL || "https://classloop-followup.vercel.app").replace(/\/+$/, "");
+const hostedProxyPaths = new Set([
+  "/api/cloud-state",
+  "/api/profile",
+  "/api/billing/prepare-account",
+  "/api/billing/checkout",
+  "/api/billing/portal",
+]);
 
 const securityHeaders = {
   "Cache-Control": "no-store",
@@ -38,7 +47,7 @@ const securityHeaders = {
   "Referrer-Policy": "no-referrer",
   "X-Frame-Options": "DENY",
   "Content-Security-Policy":
-    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
+    "default-src 'self'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-src 'self' https://js.stripe.com https://checkout.stripe.com https://hooks.stripe.com; child-src 'self' https://js.stripe.com https://checkout.stripe.com https://hooks.stripe.com; frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
   "Permissions-Policy": "camera=(), geolocation=(), microphone=(self), display-capture=()",
 };
 
@@ -529,6 +538,50 @@ async function readJsonRequest(request, maxBytes) {
   }
 }
 
+async function handleHostedApiProxy(request, response, parsed) {
+  const method = request.method || "GET";
+  const allowedMethods = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
+  if (!allowedMethods.includes(method)) {
+    sendMethodNotAllowed(response, allowedMethods);
+    return true;
+  }
+  if (typeof fetch !== "function") {
+    sendJson(response, 502, { error: "Hosted ClassLoop API proxy is unavailable in this desktop runtime." });
+    return true;
+  }
+
+  try {
+    const target = new URL(`${parsed.pathname}${parsed.search}`, `${hostedApiBaseUrl}/`);
+    const headers = {};
+    for (const headerName of ["authorization", "content-type", "accept"]) {
+      const value = request.headers[headerName];
+      if (value) headers[headerName] = value;
+    }
+    const body = ["GET", "HEAD"].includes(method) ? undefined : await readRequestBody(request, HOSTED_PROXY_BODY_MAX_BYTES);
+    const upstream = await fetch(target, {
+      method,
+      headers,
+      body,
+      redirect: "manual",
+    });
+    const responseHeaders = withSecurityHeaders({
+      "Content-Type": upstream.headers.get("content-type") || "application/json",
+    });
+    const location = upstream.headers.get("location");
+    if (location) responseHeaders.Location = location;
+    response.writeHead(upstream.status, responseHeaders);
+    if (method === "HEAD") {
+      response.end();
+      return true;
+    }
+    const responseBody = Buffer.from(await upstream.arrayBuffer());
+    response.end(responseBody);
+  } catch (error) {
+    sendJson(response, error.statusCode || 502, { error: error.message || "Unable to reach the hosted ClassLoop API." });
+  }
+  return true;
+}
+
 function validateStatePayload(payload) {
   rejectUnexpectedFields(
     payload,
@@ -678,6 +731,10 @@ function createStaticServer() {
       await handleEmailApi(request, response);
       return;
     }
+    if (hostedProxyPaths.has(parsed.pathname)) {
+      await handleHostedApiProxy(request, response, parsed);
+      return;
+    }
     const filePath = resolveAsset(request.url || "/");
 
     if (!filePath || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
@@ -712,6 +769,21 @@ function logStartupError(error) {
   console.error("ClassLoop desktop startup failed:", message);
 }
 
+function isLocalAppUrl(parsed) {
+  return parsed.protocol === "http:" && ["127.0.0.1", "localhost"].includes(parsed.hostname);
+}
+
+function shouldOpenExternally(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "mailto:") return true;
+    if (["http:", "https:"].includes(parsed.protocol)) return !isLocalAppUrl(parsed);
+  } catch {
+    // Ignore malformed or unsafe external URLs.
+  }
+  return false;
+}
+
 async function createWindow() {
   if (!fs.existsSync(path.join(distDir, "index.html"))) {
     throw new Error("Missing dist/index.html. ClassLoop needs the checked-in app build to run.");
@@ -736,15 +808,14 @@ async function createWindow() {
   window.once("ready-to-show", () => window.show());
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    try {
-      const parsed = new URL(url);
-      if (["https:", "http:", "mailto:"].includes(parsed.protocol)) {
-        shell.openExternal(url);
-      }
-    } catch {
-      // Ignore malformed or unsafe external URLs.
-    }
+    if (shouldOpenExternally(url)) shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  window.webContents.on("will-navigate", (event, url) => {
+    if (!shouldOpenExternally(url)) return;
+    event.preventDefault();
+    shell.openExternal(url);
   });
 
   window.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {

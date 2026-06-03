@@ -710,7 +710,6 @@ function billingProfileLabel(profile: BillingProfile) {
   if (profile.status === "past_due" || profile.status === "unpaid" || profile.status === "incomplete") {
     return "Free · Payment needs attention";
   }
-  if (profile.status === "not_configured") return "Free · not_configured";
   return "Free";
 }
 
@@ -7369,10 +7368,25 @@ function PlanRow({
 
 const stripePricingTableScriptId = "classloop-stripe-pricing-table";
 const stripePricingTableScriptSrc = "https://js.stripe.com/v3/pricing-table.js";
+const stripePricingTableApiBase = "https://merchant-ui-api.stripe.com/pricing-table";
+
+function checkoutUrlFromPricingTablePayload(payload: unknown) {
+  const items = (payload as { pricing_table_items?: Array<{ call_to_action_link?: string }> })?.pricing_table_items;
+  const checkoutUrl = Array.isArray(items) ? items.find((item) => item.call_to_action_link)?.call_to_action_link : "";
+  if (!checkoutUrl) return "";
+  try {
+    const parsed = new URL(checkoutUrl);
+    return parsed.hostname === "checkout.stripe.com" ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
+}
 
 function StripePricingTableEmbed({ customerEmail, clientReferenceId }: { customerEmail: string; clientReferenceId: string }) {
   const { pricingTableId, publishableKey } = getStripePricingTableConfig();
   const configured = Boolean(pricingTableId && publishableKey);
+  const [directCheckoutUrl, setDirectCheckoutUrl] = useState("");
+  const [checkoutFallbackStatus, setCheckoutFallbackStatus] = useState<"loading" | "ready" | "unavailable">("loading");
 
   useEffect(() => {
     if (!pricingTableId || !publishableKey) return;
@@ -7383,6 +7397,34 @@ function StripePricingTableEmbed({ customerEmail, clientReferenceId }: { custome
     script.src = stripePricingTableScriptSrc;
     document.head.appendChild(script);
   }, [pricingTableId, publishableKey]);
+
+  useEffect(() => {
+    if (!pricingTableId || !publishableKey) return;
+    let active = true;
+    const loadDirectCheckoutUrl = async () => {
+      setCheckoutFallbackStatus("loading");
+      try {
+        const query = new URLSearchParams({
+          key: publishableKey,
+          customer_email: customerEmail,
+        });
+        const response = await fetch(`${stripePricingTableApiBase}/${encodeURIComponent(pricingTableId)}?${query.toString()}`);
+        const payload = await response.json().catch(() => ({}));
+        if (!active) return;
+        const checkoutUrl = checkoutUrlFromPricingTablePayload(payload);
+        setDirectCheckoutUrl(checkoutUrl);
+        setCheckoutFallbackStatus(checkoutUrl ? "ready" : "unavailable");
+      } catch {
+        if (!active) return;
+        setDirectCheckoutUrl("");
+        setCheckoutFallbackStatus("unavailable");
+      }
+    };
+    void loadDirectCheckoutUrl();
+    return () => {
+      active = false;
+    };
+  }, [customerEmail, pricingTableId, publishableKey]);
 
   if (!configured) {
     return (
@@ -7397,6 +7439,11 @@ function StripePricingTableEmbed({ customerEmail, clientReferenceId }: { custome
     );
   }
 
+  const openDirectCheckout = () => {
+    if (!directCheckoutUrl) return;
+    window.location.href = directCheckoutUrl;
+  };
+
   const pricingTableAttributes: Record<string, string> = {
     "pricing-table-id": pricingTableId,
     "publishable-key": publishableKey,
@@ -7406,8 +7453,25 @@ function StripePricingTableEmbed({ customerEmail, clientReferenceId }: { custome
   if (safeClientReferenceId) pricingTableAttributes["client-reference-id"] = safeClientReferenceId;
 
   return (
-    <div className="stripe-pricing-table-shell" role="region" aria-label="Payment plans">
-      {createElement("stripe-pricing-table", pricingTableAttributes)}
+    <div className="stripe-pricing-table-stack">
+      <div className="stripe-pricing-table-shell" role="region" aria-label="Payment plans">
+        {createElement("stripe-pricing-table", pricingTableAttributes)}
+      </div>
+      <div className="stripe-direct-checkout-card">
+        <span>
+          <strong>Secure checkout</strong>
+          <small>Open Stripe Checkout directly if the payment panel does not appear.</small>
+        </span>
+        <button
+          className="ghost-button"
+          type="button"
+          onClick={openDirectCheckout}
+          disabled={checkoutFallbackStatus !== "ready"}
+        >
+          <ArrowUpRight size={17} />
+          {checkoutFallbackStatus === "loading" ? "Preparing checkout..." : "Open Stripe Checkout"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -7497,9 +7561,6 @@ function CloudEmailConfirmationOverlay({
         <p className="cloud-confirmation-note">
           If the email opens the wrong page, return to ClassLoop and request a fresh confirmation email.
         </p>
-        <p className="cloud-confirmation-note">
-          <strong>Expected return link:</strong> {prompt.redirectUrl}
-        </p>
         {resendStatus && <p className="cloud-confirmation-note" role="status">{resendStatus}</p>}
 
         {secondaryActionLabel && (
@@ -7559,6 +7620,24 @@ function embeddedCheckoutClientSecretFor(userId: string) {
     });
   embeddedCheckoutSessionCache = { userId, startedAt: now, promise };
   return promise;
+}
+
+type LoadedStripe = NonNullable<Awaited<ReturnType<typeof loadStripe>>>;
+type EmbeddedCheckoutOptions = { fetchClientSecret: () => Promise<string> };
+type EmbeddedCheckoutStripe = LoadedStripe & {
+  initEmbeddedCheckout?: (options: EmbeddedCheckoutOptions) => Promise<StripeEmbeddedCheckout>;
+  createEmbeddedCheckoutPage?: (options: EmbeddedCheckoutOptions) => Promise<StripeEmbeddedCheckout>;
+};
+
+function createStripeEmbeddedCheckout(stripe: LoadedStripe, fetchClientSecret: () => Promise<string>) {
+  const embeddedStripe = stripe as EmbeddedCheckoutStripe;
+  if (typeof embeddedStripe.initEmbeddedCheckout === "function") {
+    return embeddedStripe.initEmbeddedCheckout({ fetchClientSecret });
+  }
+  if (typeof embeddedStripe.createEmbeddedCheckoutPage === "function") {
+    return embeddedStripe.createEmbeddedCheckoutPage({ fetchClientSecret });
+  }
+  throw new Error("This Stripe.js version does not support embedded Checkout.");
 }
 
 function EmbeddedCheckoutPage({
@@ -7711,9 +7790,8 @@ function EmbeddedCheckoutPage({
         setMessage("Loading the secure payment form...");
         const stripe = await loadStripe(publishableKey);
         if (!stripe) throw new Error("Payment form could not load. Check your connection and try again.");
-        const clientSecret = await embeddedCheckoutClientSecretFor(session.user.id);
         if (!active || !checkoutContainerRef.current) return;
-        checkout = await stripe.createEmbeddedCheckoutPage({ clientSecret });
+        checkout = await createStripeEmbeddedCheckout(stripe, () => embeddedCheckoutClientSecretFor(session.user.id));
         if (!active) {
           checkout?.destroy();
           return;

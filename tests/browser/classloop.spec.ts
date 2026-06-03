@@ -419,6 +419,19 @@ async function mockCloudAuthForStripeCheckout(
 }
 
 async function mockStripeJsForEmbeddedCheckout(page: Page) {
+  await page.route("https://merchant-ui-api.stripe.com/pricing-table/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        pricing_table_items: [
+          {
+            call_to_action_link: "https://checkout.stripe.com/c/pay/cs_live_playwright_pricing_table",
+          },
+        ],
+      }),
+    });
+  });
   await page.route("https://js.stripe.com/**", async (route) => {
     await route.fulfill({
       status: 200,
@@ -434,17 +447,21 @@ async function mockStripeJsForEmbeddedCheckout(page: Page) {
         }
         window.Stripe = function(publishableKey) {
           window.__classloopStripePublishableKey = publishableKey;
+          async function createCheckout(options) {
+            window.__classloopEmbeddedClientSecret = options.fetchClientSecret
+              ? await options.fetchClientSecret()
+              : options.clientSecret;
+            return {
+              mount: function(target) {
+                const element = typeof target === "string" ? document.querySelector(target) : target;
+                element.innerHTML = '<section role="region" aria-label="Stripe test checkout"><h2>Stripe embedded checkout test frame</h2><button type="button">Pay ClassLoop Pro</button></section>';
+              },
+              destroy: function() {}
+            };
+          }
           return {
-            createEmbeddedCheckoutPage: async function(options) {
-              window.__classloopEmbeddedClientSecret = options.clientSecret;
-              return {
-                mount: function(target) {
-                  const element = typeof target === "string" ? document.querySelector(target) : target;
-                  element.innerHTML = '<section role="region" aria-label="Stripe test checkout"><h2>Stripe embedded checkout test frame</h2><button type="button">Pay ClassLoop Pro</button></section>';
-                },
-                destroy: function() {}
-              };
-            }
+            initEmbeddedCheckout: createCheckout,
+            createEmbeddedCheckoutPage: createCheckout
           };
         };
       `,
@@ -1512,6 +1529,7 @@ test("live capture modes stay locked until verified Pro while local billing tamp
   const runId = Date.now().toString(36);
   const email = `capture-${runId}@classloop.test`;
   const password = `teacher-pass-${runId}`;
+  await mockStripeJsForEmbeddedCheckout(page);
   await resetBrowser(page);
   await createAccount(page, "teacher", `Capture Teacher ${runId}`, email, password);
   await signInWithSeededBillingProfile(page, "teacher", email, password, {
@@ -1544,7 +1562,9 @@ test("live capture modes stay locked until verified Pro while local billing tamp
   await expect(page.getByPlaceholder("you@school.org")).toBeVisible();
   await expect(page.getByText(/Cloud sync is separate from Pro/i)).toBeVisible();
   await expect(page.getByRole("button", { name: /downgrade to free/i })).toHaveCount(0);
-  await expect(page.getByText(/FREE · not_configured/i)).toBeVisible();
+  const currentPlanCard = page.locator(".integration-card").filter({ hasText: /Current account/ });
+  await expect(currentPlanCard).toContainText(/Current account/i);
+  await expect(currentPlanCard).toContainText(/Free/i);
 });
 
 test("verified Pro can use in-person and online live capture with noisy and missing-audio fallbacks", async ({ page }, testInfo) => {
@@ -1659,6 +1679,17 @@ test("Stripe pricing table and payment link start checkout without unlocking Pro
   await expect(page.locator("stripe-pricing-table")).toHaveAttribute("customer-email", email);
   await expect(page.locator("stripe-pricing-table")).toHaveAttribute("client-reference-id", /^teacher-/);
   await expect(page.getByRole("region", { name: /stripe pricing table smoke/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /open stripe checkout/i })).toBeEnabled();
+  await page.getByRole("button", { name: /open stripe checkout/i }).click();
+  await expect(page).toHaveURL(/checkout\.stripe\.com\/c\/pay\/cs_live_playwright_pricing_table/);
+
+  await resetBrowser(page);
+  await seedLocalAccount(page, "teacher", `Stripe Teacher ${runId}`, email, password);
+  await page.reload();
+  await page.goto("/#/dashboard");
+  await signInAccount(page, "teacher", email, password);
+  await page.getByRole("button", { name: /^plan options$/i }).click();
+  await expect(page.getByRole("button", { name: /upgrade to pro with stripe/i })).toBeVisible();
 
   await page.getByRole("button", { name: /upgrade to pro with stripe/i }).click();
   await expect.poll(() => prepareRequests.length).toBe(1);
@@ -1714,8 +1745,8 @@ test("unconfirmed cloud email shows instructions overlay instead of a red billin
   const dialog = page.getByRole("dialog", { name: /check your email to link your cloud account/i });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText(`Open the inbox for ${email}`);
-  await expect(dialog).toContainText(/Expected return link/i);
-  await expect(dialog).toContainText("https://classloop-followup.vercel.app/#/billing?cloud=confirmed");
+  await expect(dialog).not.toContainText(/Expected return link/i);
+  await expect(dialog).not.toContainText("https://classloop-followup.vercel.app/#/billing?cloud=confirmed");
   await expect(page.locator(".settings-message").filter({ hasText: /email not confirmed|confirm your email/i })).toHaveCount(0);
   await expect.poll(() => prepareRequests.length).toBe(0);
   await expect.poll(() => checkoutRequests.length).toBe(0);

@@ -98,6 +98,8 @@ Start the desktop app:
 ./run.sh
 ```
 
+On macOS, this builds the local Swift app bundle and opens `release/swift-mac-arm64/ClassLoop.app` directly from this checkout.
+
 Start the browser dev server:
 
 ```bash

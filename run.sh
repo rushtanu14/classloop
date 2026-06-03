@@ -14,10 +14,10 @@ usage() {
 ClassLoop launcher
 
 Usage:
-  ./run.sh                    Start the macOS Swift app on Mac, Electron elsewhere
+  ./run.sh                    Build and open the local ClassLoop desktop app
   ./run.sh --dev              Start the browser dev server
   ./run.sh --check-env        Validate launcher env loading without starting app
-  ./run.sh --packaged [path]  Launch a packaged app build
+  ./run.sh --packaged [path]  Open an already-built packaged app
   ./run.sh --package-mac      Build the Apple silicon Swift macOS DMG/ZIP
   ./run.sh --package-electron-mac Build the legacy Electron macOS DMG/ZIP
   ./run.sh --package-win      Build Windows x64/arm64 packages
@@ -153,6 +153,48 @@ run_dev_server() {
   wait "$dev_pid"
 }
 
+open_macos_app_bundle() {
+  local app_bundle="$1"
+  local app_binary="$app_bundle/Contents/MacOS/ClassLoop"
+
+  if [ ! -d "$app_bundle" ] || [ ! -x "$app_binary" ]; then
+    echo "ClassLoop app bundle not found or not executable:" >&2
+    echo "  $app_bundle" >&2
+    exit 1
+  fi
+
+  if command -v open >/dev/null 2>&1; then
+    open -n "$app_bundle"
+  else
+    "$app_binary" &
+  fi
+}
+
+run_local_desktop_app() {
+  case "$(uname -s)" in
+    Darwin)
+      if [ "$(uname -m)" != "arm64" ]; then
+        echo "ClassLoop native macOS local app builds are Apple silicon arm64 only." >&2
+        echo "Launching the Electron fallback locally instead." >&2
+        npm start
+        return
+      fi
+
+      echo "Building ClassLoop from this checkout..."
+      package_macos
+
+      local app_bundle="$ROOT_DIR/release/swift-mac-arm64/ClassLoop.app"
+      echo "Opening local ClassLoop app:"
+      echo "  $app_bundle"
+      open_macos_app_bundle "$app_bundle"
+      ;;
+    *)
+      echo "Opening local ClassLoop app with Electron..."
+      npm start
+      ;;
+  esac
+}
+
 packaged_app_path() {
   case "$(uname -s)" in
     Darwin)
@@ -160,7 +202,7 @@ packaged_app_path() {
         echo "ClassLoop macOS packages are Apple silicon only. Use ./run.sh for local development on this Mac." >&2
         exit 1
       fi
-      echo "$ROOT_DIR/release/swift-mac-arm64/ClassLoop.app/Contents/MacOS/ClassLoop"
+      echo "$ROOT_DIR/release/swift-mac-arm64/ClassLoop.app"
       ;;
     Linux)
       echo "$ROOT_DIR/release/linux-unpacked/classloop"
@@ -181,10 +223,17 @@ run_packaged_app() {
     app_path="$(packaged_app_path)"
   fi
 
+  if [ "$(uname -s)" = "Darwin" ] && [ -d "$app_path" ] && [[ "$app_path" == *.app ]]; then
+    echo "Opening packaged ClassLoop app:"
+    echo "  $app_path"
+    open_macos_app_bundle "$app_path"
+    return
+  fi
+
   if [ ! -x "$app_path" ]; then
     echo "Packaged ClassLoop app not found or not executable:" >&2
     echo "  $app_path" >&2
-    echo "Build it first with npm run package:mac, npm run package:win, or npm run package:linux." >&2
+    echo "Build it first with ./run.sh, npm run package:mac, npm run package:win, or npm run package:linux." >&2
     exit 1
   fi
 
@@ -245,11 +294,7 @@ case "$mode" in
     require_local_toolchain
     load_local_env
     ensure_dependencies
-    if [ "$(uname -s)" = "Darwin" ]; then
-      npm run swift:mac:run
-    else
-      npm start
-    fi
+    run_local_desktop_app
     ;;
   --dev)
     require_local_toolchain

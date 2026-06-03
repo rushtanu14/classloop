@@ -7,7 +7,7 @@ import {
 } from "../api/billing/entitlements.js";
 import { stripeApiVersion } from "../api/billing/stripe-client.js";
 import { checkoutReturnUrls, embeddedCheckoutReturnUrl } from "../api/billing/checkout.js";
-import { checkoutSessionPaymentAccepted, subscriptionIdFromInvoice } from "../api/billing/webhook.js";
+import { checkoutSessionPaymentAccepted, checkoutSessionUserId, subscriptionIdFromInvoice } from "../api/billing/webhook.js";
 import {
   applyManualProGrantToRow,
   isManualProCustomerId,
@@ -99,7 +99,20 @@ assert.deepEqual(
 assert.equal(
   embeddedCheckoutReturnUrl("https://classloop-followup.vercel.app"),
   "https://classloop-followup.vercel.app/#/checkout?billing=success",
-  "Embedded Checkout should return to the hidden checkout verifier route",
+  "Hidden checkout verifier route should still resolve to the billing success flow",
+);
+assert.equal(
+  checkoutSessionUserId({ client_reference_id: "supabase-user-from-payment-link" }),
+  "supabase-user-from-payment-link",
+  "Stripe Payment Link checkout sessions should map client_reference_id to the Supabase profile",
+);
+assert.equal(
+  checkoutSessionUserId({
+    client_reference_id: "fallback-client-ref",
+    metadata: { supabaseUserId: "metadata-user-id" },
+  }),
+  "metadata-user-id",
+  "Explicit Checkout metadata should win over Payment Link client_reference_id",
 );
 assert.equal(checkoutSessionPaymentAccepted({ payment_status: "paid" }), true, "paid Checkout sessions may update entitlements");
 assert.equal(

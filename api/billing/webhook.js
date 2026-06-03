@@ -21,10 +21,14 @@ export function subscriptionIdFromInvoice(invoice) {
   return "";
 }
 
-async function applySubscriptionUpdate(supabase, subscription, fallbackStatus = "active") {
+export function checkoutSessionUserId(session) {
+  return session?.metadata?.supabaseUserId || session?.client_reference_id || "";
+}
+
+async function applySubscriptionUpdate(supabase, subscription, fallbackStatus = "active", fallbackUserId = "") {
   await applySubscriptionProfileUpdate(supabase, {
     customerId: String(subscription.customer || ""),
-    userId: subscription.metadata?.supabaseUserId,
+    userId: subscription.metadata?.supabaseUserId || fallbackUserId,
     tier: "pro",
     status: subscription.status || fallbackStatus,
     subscriptionId: subscription.id,
@@ -62,16 +66,17 @@ export default async function handler(request, response) {
       if (!checkoutSessionPaymentAccepted(session)) {
         return json(response, 200, { received: true, ignored: "payment_not_accepted" });
       }
+      const sessionUserId = checkoutSessionUserId(session);
       const subscription =
         typeof session.subscription === "string"
           ? await stripe.subscriptions.retrieve(session.subscription)
           : session.subscription;
       if (subscription) {
-        await applySubscriptionUpdate(supabase, subscription);
+        await applySubscriptionUpdate(supabase, subscription, "active", sessionUserId);
       } else {
         await applySubscriptionProfileUpdate(supabase, {
           customerId: String(session.customer || ""),
-          userId: session.metadata?.supabaseUserId,
+          userId: sessionUserId,
           tier: "pro",
           status: "active",
           subscriptionId: typeof session.subscription === "string" ? session.subscription : undefined,

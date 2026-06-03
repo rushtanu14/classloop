@@ -17,7 +17,7 @@
     "test:security": "node scripts/security-baseline.cjs && node tests/api-security.test.mjs",
     "test:package:init": "node scripts/package-init-failure-smoke.cjs",
     "bootstrap": "node scripts/bootstrap-dependencies.cjs",
-    "test:stripe": "node scripts/run-playwright.cjs tests/browser/classloop.spec.ts -g \"Stripe pricing table\"",
+    "test:stripe": "node scripts/run-playwright.cjs tests/browser/classloop.spec.ts -g \"Stripe payment link\"",
     "test:browser": "node scripts/run-playwright.cjs --workers=1",
     "test:web": "node scripts/run-playwright.cjs -c playwright.web.config.ts",
     "test:web:local": "CLASSLOOP_WEB_TEST_URL=http://127.0.0.1:5177 node scripts/run-playwright.cjs -c playwright.web.config.ts",

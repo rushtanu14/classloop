@@ -76,10 +76,12 @@ const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | und
 const defaultStripePublishableKey =
   "pk_live_51TVPunCZ4fp9VxAWEaKlZRDYDXbXORPxpWfa8MQ4YbZ2HRGo82H0FroVWaYPDfRj6eImeDQB3c21umsipqTsSX0q005Nt906Yz";
 const defaultStripePricingTableId = "prctbl_1TdX6hCZ4fp9VxAW8RoGLMmZ";
+const defaultStripePaymentLinkUrl = "https://buy.stripe.com/7sY28qeT16Mh5wi0ZbeME00";
 const supabaseUrl = viteEnv.VITE_SUPABASE_URL;
 const supabaseAnonKey = viteEnv.VITE_SUPABASE_ANON_KEY;
 const stripePublishableKey = viteEnv.VITE_STRIPE_PUBLISHABLE_KEY || defaultStripePublishableKey;
 const stripePricingTableId = viteEnv.VITE_STRIPE_PRICING_TABLE_ID || defaultStripePricingTableId;
+const stripePaymentLinkUrl = viteEnv.VITE_STRIPE_PAYMENT_LINK_URL || defaultStripePaymentLinkUrl;
 const classLoopPublicUrl = viteEnv.VITE_CLASSLOOP_PUBLIC_URL || "https://classloop-followup.vercel.app";
 const offlineQueueKey = "classloop:cloud-offline-queue:v1";
 const manualProEmails = new Set(["rushilcpm02@gmail.com"]);
@@ -107,6 +109,22 @@ export function getStripePricingTableConfig() {
     pricingTableId: stripePricingTableId || "",
     publishableKey: stripePublishableKey || "",
   };
+}
+
+export function getStripePaymentLinkUrl() {
+  return stripePaymentLinkUrl;
+}
+
+export function buildStripePaymentLinkUrl({ email, clientReferenceId }: { email?: string; clientReferenceId?: string } = {}) {
+  let url: URL;
+  try {
+    url = new URL(stripePaymentLinkUrl);
+  } catch {
+    url = new URL(defaultStripePaymentLinkUrl);
+  }
+  if (email) url.searchParams.set("prefilled_email", normalizeCloudEmail(email));
+  if (clientReferenceId) url.searchParams.set("client_reference_id", clientReferenceId);
+  return url.toString();
 }
 
 export function getSupabaseClient() {

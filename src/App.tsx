@@ -50,8 +50,7 @@ import {
   Wand2,
   X,
 } from "lucide-react";
-import { loadStripe, type StripeEmbeddedCheckout } from "@stripe/stripe-js";
-import { createElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -66,16 +65,14 @@ import {
 import { createStructuredTranscriptFromSegments, createStructuredTranscriptFromText, formatTranscriptTime } from "./transcript";
 import {
   cloudRequest,
+  buildStripePaymentLinkUrl,
   createBillingPortalSession,
   createCloudAccount,
-  createCheckoutSession,
-  createEmbeddedCheckoutSession,
   getBackendStatus,
   getCloudEmailRedirectUrl,
   getCloudProfile,
   getCloudSession,
-  getStripePricingTableConfig,
-  getStripePublishableKey,
+  getStripePaymentLinkUrl,
   isManualProBillingProfile,
   isPaidPlan,
   manualProBillingProfileForEmail,
@@ -7366,112 +7363,21 @@ function PlanRow({
   );
 }
 
-const stripePricingTableScriptId = "classloop-stripe-pricing-table";
-const stripePricingTableScriptSrc = "https://js.stripe.com/v3/pricing-table.js";
-const stripePricingTableApiBase = "https://merchant-ui-api.stripe.com/pricing-table";
-
-function checkoutUrlFromPricingTablePayload(payload: unknown) {
-  const items = (payload as { pricing_table_items?: Array<{ call_to_action_link?: string }> })?.pricing_table_items;
-  const checkoutUrl = Array.isArray(items) ? items.find((item) => item.call_to_action_link)?.call_to_action_link : "";
-  if (!checkoutUrl) return "";
+function StripePaymentLinkNote() {
+  let paymentHost = "Stripe";
   try {
-    const parsed = new URL(checkoutUrl);
-    return parsed.hostname === "checkout.stripe.com" ? parsed.toString() : "";
+    paymentHost = new URL(getStripePaymentLinkUrl()).hostname;
   } catch {
-    return "";
+    paymentHost = "Stripe";
   }
-}
-
-function StripePricingTableEmbed({ customerEmail, clientReferenceId }: { customerEmail: string; clientReferenceId: string }) {
-  const { pricingTableId, publishableKey } = getStripePricingTableConfig();
-  const configured = Boolean(pricingTableId && publishableKey);
-  const [directCheckoutUrl, setDirectCheckoutUrl] = useState("");
-  const [checkoutFallbackStatus, setCheckoutFallbackStatus] = useState<"loading" | "ready" | "unavailable">("loading");
-
-  useEffect(() => {
-    if (!pricingTableId || !publishableKey) return;
-    if (document.getElementById(stripePricingTableScriptId)) return;
-    const script = document.createElement("script");
-    script.id = stripePricingTableScriptId;
-    script.async = true;
-    script.src = stripePricingTableScriptSrc;
-    document.head.appendChild(script);
-  }, [pricingTableId, publishableKey]);
-
-  useEffect(() => {
-    if (!pricingTableId || !publishableKey) return;
-    let active = true;
-    const loadDirectCheckoutUrl = async () => {
-      setCheckoutFallbackStatus("loading");
-      try {
-        const query = new URLSearchParams({
-          key: publishableKey,
-          customer_email: customerEmail,
-        });
-        const response = await fetch(`${stripePricingTableApiBase}/${encodeURIComponent(pricingTableId)}?${query.toString()}`);
-        const payload = await response.json().catch(() => ({}));
-        if (!active) return;
-        const checkoutUrl = checkoutUrlFromPricingTablePayload(payload);
-        setDirectCheckoutUrl(checkoutUrl);
-        setCheckoutFallbackStatus(checkoutUrl ? "ready" : "unavailable");
-      } catch {
-        if (!active) return;
-        setDirectCheckoutUrl("");
-        setCheckoutFallbackStatus("unavailable");
-      }
-    };
-    void loadDirectCheckoutUrl();
-    return () => {
-      active = false;
-    };
-  }, [customerEmail, pricingTableId, publishableKey]);
-
-  if (!configured) {
-    return (
-      <div className="stripe-pricing-table-shell placeholder" role="status">
-        <div className="integration-card">
-          <span>
-            <strong>Online payment is not available right now.</strong>
-            <small>Use Upgrade to Pro again later or contact ClassLoop support if this keeps happening.</small>
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  const openDirectCheckout = () => {
-    if (!directCheckoutUrl) return;
-    window.location.href = directCheckoutUrl;
-  };
-
-  const pricingTableAttributes: Record<string, string> = {
-    "pricing-table-id": pricingTableId,
-    "publishable-key": publishableKey,
-    "customer-email": customerEmail,
-  };
-  const safeClientReferenceId = clientReferenceId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 200);
-  if (safeClientReferenceId) pricingTableAttributes["client-reference-id"] = safeClientReferenceId;
 
   return (
-    <div className="stripe-pricing-table-stack">
-      <div className="stripe-pricing-table-shell" role="region" aria-label="Payment plans">
-        {createElement("stripe-pricing-table", pricingTableAttributes)}
-      </div>
-      <div className="stripe-direct-checkout-card">
-        <span>
-          <strong>Secure checkout</strong>
-          <small>Open Stripe Checkout directly if the payment panel does not appear.</small>
-        </span>
-        <button
-          className="ghost-button"
-          type="button"
-          onClick={openDirectCheckout}
-          disabled={checkoutFallbackStatus !== "ready"}
-        >
-          <ArrowUpRight size={17} />
-          {checkoutFallbackStatus === "loading" ? "Preparing checkout..." : "Open Stripe Checkout"}
-        </button>
-      </div>
+    <div className="stripe-direct-checkout-card">
+      <span>
+        <strong>Stripe Payment Link</strong>
+        <small>Upgrade opens directly on {paymentHost}; ClassLoop turns on Pro only after Stripe confirms payment.</small>
+      </span>
+      <ArrowUpRight size={18} aria-hidden="true" />
     </div>
   );
 }
@@ -7595,51 +7501,6 @@ function CloudEmailConfirmationOverlay({
   );
 }
 
-let embeddedCheckoutSessionCache:
-  | {
-      userId: string;
-      startedAt: number;
-      promise: Promise<string>;
-    }
-  | null = null;
-
-function embeddedCheckoutClientSecretFor(userId: string) {
-  const now = Date.now();
-  if (embeddedCheckoutSessionCache?.userId === userId && now - embeddedCheckoutSessionCache.startedAt < 10_000) {
-    return embeddedCheckoutSessionCache.promise;
-  }
-
-  const promise = createEmbeddedCheckoutSession("pro")
-    .then((session) => {
-      if (!session.clientSecret) throw new Error("Payment form could not be prepared.");
-      return session.clientSecret;
-    })
-    .catch((error) => {
-      if (embeddedCheckoutSessionCache?.promise === promise) embeddedCheckoutSessionCache = null;
-      throw error;
-    });
-  embeddedCheckoutSessionCache = { userId, startedAt: now, promise };
-  return promise;
-}
-
-type LoadedStripe = NonNullable<Awaited<ReturnType<typeof loadStripe>>>;
-type EmbeddedCheckoutOptions = { fetchClientSecret: () => Promise<string> };
-type EmbeddedCheckoutStripe = LoadedStripe & {
-  initEmbeddedCheckout?: (options: EmbeddedCheckoutOptions) => Promise<StripeEmbeddedCheckout>;
-  createEmbeddedCheckoutPage?: (options: EmbeddedCheckoutOptions) => Promise<StripeEmbeddedCheckout>;
-};
-
-function createStripeEmbeddedCheckout(stripe: LoadedStripe, fetchClientSecret: () => Promise<string>) {
-  const embeddedStripe = stripe as EmbeddedCheckoutStripe;
-  if (typeof embeddedStripe.initEmbeddedCheckout === "function") {
-    return embeddedStripe.initEmbeddedCheckout({ fetchClientSecret });
-  }
-  if (typeof embeddedStripe.createEmbeddedCheckoutPage === "function") {
-    return embeddedStripe.createEmbeddedCheckoutPage({ fetchClientSecret });
-  }
-  throw new Error("This Stripe.js version does not support embedded Checkout.");
-}
-
 function EmbeddedCheckoutPage({
   auth,
   billingProfile,
@@ -7654,13 +7515,12 @@ function EmbeddedCheckoutPage({
   appendAudit: (action: string, detail: string, actor?: AuthSession | null) => void;
 }) {
   const backendStatus = getBackendStatus();
-  const publishableKey = getStripePublishableKey();
   const billingReturnStatus = getParam("billing");
-  const checkoutContainerRef = useRef<HTMLDivElement | null>(null);
-  const [message, setMessage] = useState("Preparing secure checkout...");
-  const [status, setStatus] = useState<"loading" | "ready" | "error" | "verifying" | "success">("loading");
+  const [message, setMessage] = useState("Preparing Stripe Payment Link...");
+  const [status, setStatus] = useState<"loading" | "opening" | "error" | "verifying" | "success">("loading");
   const [connectedEmail, setConnectedEmail] = useState("");
   const [cloudConfirmation, setCloudConfirmation] = useState<CloudConfirmationPrompt | null>(null);
+  const openedPaymentLinkRef = useRef(false);
   const isDemoAccount = Boolean(auth.demo);
   const hasPro = isPaidPlan(billingProfile);
 
@@ -7673,12 +7533,12 @@ function EmbeddedCheckoutPage({
     return true;
   }, []);
 
-  const ensureCheckoutCloudSession = useCallback(async () => {
+  const ensureCheckoutCloudIdentity = useCallback(async () => {
     const existingSession = await getCloudSession();
     if (existingSession) {
       const email = existingSession.user.email ?? "";
       setConnectedEmail(email);
-      return existingSession;
+      return { userId: existingSession.user.id, email };
     }
 
     const normalizedAuthEmail = normalizeEmail(auth.email);
@@ -7710,7 +7570,7 @@ function EmbeddedCheckoutPage({
     const email = result.session.user.email ?? normalizedAuthEmail;
     setConnectedEmail(email);
     appendAudit("cloud_connect", `Prepared payment account for ${email}.`, auth);
-    return result.session;
+    return { userId: result.session.user.id, email };
   }, [appendAudit, auth, localAuthSecret, showEmailConfirmation]);
 
   useEffect(() => {
@@ -7761,67 +7621,7 @@ function EmbeddedCheckoutPage({
     };
   }, [billingReturnStatus, isDemoAccount, setBillingProfile]);
 
-  useEffect(() => {
-    if (billingReturnStatus === "success" || hasPro) return;
-    let active = true;
-    let checkout: StripeEmbeddedCheckout | null = null;
-
-    const mountCheckout = async () => {
-      try {
-        if (isDemoAccount) {
-          setStatus("error");
-          setMessage("Demo account upgrades are disabled. Create your own account to upgrade.");
-          return;
-        }
-        if (!backendStatus.supabaseConfigured) {
-          setStatus("error");
-          setMessage("Online upgrades are unavailable right now. Try again later or contact ClassLoop support.");
-          return;
-        }
-        const session = await ensureCheckoutCloudSession();
-        if (!session) return;
-        setConnectedEmail(session.user.email ?? "");
-        if (!backendStatus.stripeEmbeddedConfigured || !publishableKey) {
-          setStatus("error");
-          setMessage("The payment form is unavailable right now. Try again later or contact ClassLoop support.");
-          return;
-        }
-        setStatus("loading");
-        setMessage("Loading the secure payment form...");
-        const stripe = await loadStripe(publishableKey);
-        if (!stripe) throw new Error("Payment form could not load. Check your connection and try again.");
-        if (!active || !checkoutContainerRef.current) return;
-        checkout = await createStripeEmbeddedCheckout(stripe, () => embeddedCheckoutClientSecretFor(session.user.id));
-        if (!active) {
-          checkout?.destroy();
-          return;
-        }
-        checkout?.mount(checkoutContainerRef.current);
-        setStatus("ready");
-        setMessage("Complete Stripe Checkout here. Pro turns on after payment is confirmed.");
-      } catch (error) {
-        if (!active) return;
-        setStatus("error");
-        setMessage(error instanceof Error ? error.message : "Unable to load the payment form.");
-      }
-    };
-
-    void mountCheckout();
-    return () => {
-      active = false;
-      checkout?.destroy();
-    };
-  }, [
-    backendStatus.stripeEmbeddedConfigured,
-    backendStatus.supabaseConfigured,
-    billingReturnStatus,
-    ensureCheckoutCloudSession,
-    hasPro,
-    isDemoAccount,
-    publishableKey,
-  ]);
-
-  const openHostedCheckout = async () => {
+  const openPaymentLink = useCallback(async () => {
     try {
       if (isDemoAccount) {
         setMessage("Demo account upgrades are disabled.");
@@ -7831,19 +7631,26 @@ function EmbeddedCheckoutPage({
         setMessage("Online upgrades are unavailable right now. Try again later or contact ClassLoop support.");
         return;
       }
-      const session = await ensureCheckoutCloudSession();
-      if (!session) return;
-      setMessage("Opening the secure payment page...");
-      const checkout = await createCheckoutSession("pro");
-      if (!checkout.url || new URL(checkout.url).hostname !== "checkout.stripe.com") {
-        throw new Error("Payment page did not open correctly. Try again later.");
-      }
-      window.location.href = checkout.url;
+      setStatus("loading");
+      const identity = await ensureCheckoutCloudIdentity();
+      if (!identity) return;
+      setStatus("opening");
+      setMessage("Opening Stripe Payment Link. Pro turns on after payment is confirmed.");
+      window.location.href = buildStripePaymentLinkUrl({
+        email: identity.email,
+        clientReferenceId: identity.userId,
+      });
     } catch (error) {
       setStatus("error");
       setMessage(error instanceof Error ? error.message : "Online payment is not available right now.");
     }
-  };
+  }, [backendStatus.supabaseConfigured, ensureCheckoutCloudIdentity, isDemoAccount]);
+
+  useEffect(() => {
+    if (billingReturnStatus === "success" || hasPro || openedPaymentLinkRef.current) return;
+    openedPaymentLinkRef.current = true;
+    void openPaymentLink();
+  }, [billingReturnStatus, hasPro, openPaymentLink]);
 
   if (hasPro) {
     const manualPro = isManualProBillingProfile(billingProfile);
@@ -7879,9 +7686,9 @@ function EmbeddedCheckoutPage({
       <section className="review-banner">
         <div>
           <span className="eyebrow">Pro checkout</span>
-          <h2>Upgrade inside ClassLoop.</h2>
+          <h2>Upgrade on Stripe.</h2>
           <p>
-            Pay securely inside ClassLoop. Pro turns on only after payment is confirmed.
+            ClassLoop opens a secure Stripe Payment Link and turns on Pro only after payment is confirmed.
           </p>
         </div>
       </section>
@@ -7889,11 +7696,11 @@ function EmbeddedCheckoutPage({
       <section className="content-grid two-columns align-start">
         <Panel title="Secure payment" icon={ShieldCheck}>
           <div className="settings-stack">
-            <div className={`integration-card ${status === "ready" || status === "success" ? "active" : ""}`}>
+            <div className={`integration-card ${status === "opening" || status === "success" ? "active" : ""}`}>
               <span>
                 <strong>
-                  {status === "ready"
-                    ? "Checkout ready"
+                  {status === "opening"
+                    ? "Opening Stripe"
                     : status === "verifying"
                       ? "Verifying payment"
                       : status === "error"
@@ -7904,11 +7711,7 @@ function EmbeddedCheckoutPage({
               </span>
             </div>
             {connectedEmail && <p className="settings-message success">Cloud account: {connectedEmail}</p>}
-            <div
-              ref={checkoutContainerRef}
-              className={status === "error" || status === "success" || status === "verifying" ? "stripe-checkout-shell inactive" : "stripe-checkout-shell"}
-              aria-label="Secure payment form"
-            />
+            <StripePaymentLinkNote />
           </div>
         </Panel>
 
@@ -7923,8 +7726,8 @@ function EmbeddedCheckoutPage({
             <button className="primary-button" type="button" onClick={() => navigate("billing")}>
               Back to Plan options
             </button>
-            <button className="ghost-button" type="button" onClick={openHostedCheckout} disabled={isDemoAccount || !backendStatus.supabaseConfigured}>
-              Open Stripe Checkout instead
+            <button className="ghost-button" type="button" onClick={openPaymentLink} disabled={isDemoAccount || !backendStatus.supabaseConfigured}>
+              Open Stripe Payment Link
             </button>
           </div>
         </Panel>
@@ -8062,7 +7865,7 @@ function SyncBillingPage({
     if (existingSession) {
       const email = existingSession.user.email ?? "";
       setConnectedEmail(email);
-      return true;
+      return { userId: existingSession.user.id, email };
     }
 
     const normalizedAuthEmail = normalizeEmail(auth.email);
@@ -8073,30 +7876,30 @@ function SyncBillingPage({
 
     if (!secretMatchesCurrentAccount || !localAuthSecret?.password) {
       setMessage("Sign in again, then Upgrade to Pro will continue with this account.");
-      return false;
+      return null;
     }
 
     setMessage("Preparing your ClassLoop account for payment...");
     const signInResult = await signIntoCloud(normalizedAuthEmail, localAuthSecret.password);
-    if (showEmailConfirmation(signInResult, normalizedAuthEmail, "checkout")) return false;
+    if (showEmailConfirmation(signInResult, normalizedAuthEmail, "checkout")) return null;
     let result = signInResult;
     if (!result.ok) {
       await prepareBillingCloudAccount(normalizedAuthEmail, localAuthSecret.password, "teacher", auth.name);
       result = await signIntoCloud(normalizedAuthEmail, localAuthSecret.password);
-      if (showEmailConfirmation(result, normalizedAuthEmail, "checkout")) return false;
+      if (showEmailConfirmation(result, normalizedAuthEmail, "checkout")) return null;
     }
     if (!result.ok || !result.session) {
       setMessage(
         result.message ||
           "Unable to prepare payment for this account. Sign in again, then retry Upgrade to Pro.",
       );
-      return false;
+      return null;
     }
 
     const email = result.session.user.email ?? normalizedAuthEmail;
     setConnectedEmail(email);
     appendAudit("cloud_connect", `Prepared payment account for ${email}.`);
-    return true;
+    return { userId: result.session.user.id, email };
   };
 
   const uploadCloud = async () => {
@@ -8124,7 +7927,7 @@ function SyncBillingPage({
     }
   };
 
-  const startCheckout = async (tier: Exclude<PlanTier, "free">) => {
+  const startCheckout = async () => {
     try {
       if (isDemoAccount) {
         setMessage(demoBillingMessage);
@@ -8134,12 +7937,15 @@ function SyncBillingPage({
         setMessage("Online upgrades are unavailable right now. Try again later or contact ClassLoop support.");
         return;
       }
-      const checkoutReady = await ensureCheckoutCloudSession();
-      if (!checkoutReady) {
+      const checkoutIdentity = await ensureCheckoutCloudSession();
+      if (!checkoutIdentity) {
         return;
       }
-      setMessage("Opening the Pro checkout page. Pro turns on after payment is confirmed.");
-      navigate("checkout", { tier });
+      setMessage("Opening Stripe Payment Link. Pro turns on after payment is confirmed.");
+      window.location.href = buildStripePaymentLinkUrl({
+        email: checkoutIdentity.email,
+        clientReferenceId: checkoutIdentity.userId,
+      });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Online payment is not available right now.");
     }
@@ -8339,11 +8145,11 @@ function SyncBillingPage({
             </div>
           ) : (
             <div className="settings-stack">
-              <button className="primary-button full" type="button" onClick={() => void startCheckout("pro")}>
+              <button className="primary-button full" type="button" onClick={() => void startCheckout()}>
                 <ShieldCheck size={17} />
                 Upgrade to Pro with Stripe
               </button>
-              <StripePricingTableEmbed customerEmail={auth.email} clientReferenceId={auth.accountId} />
+              <StripePaymentLinkNote />
             </div>
           )}
           <div className="integration-card plan-card">
@@ -8392,7 +8198,7 @@ function SyncBillingPage({
               void connectCloud();
               return;
             }
-            void startCheckout("pro");
+            void startCheckout();
           }}
           onResend={() => resendCloudConfirmation(cloudConfirmation.email, cloudConfirmation.redirectUrl)}
         />

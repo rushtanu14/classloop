@@ -53,7 +53,7 @@
 
 ### Entitlement Gate Tests
 - **Free / Paid Boundaries**: `npm run test:entitlements` verifies Free, paid active Pro, trialing, past-due, canceled, unpaid, paused, and incomplete subscription states map to the right feature access. Trialing/no-payment states stay locked until Stripe reports an accepted payment.
-- **Stripe Embedded Checkout Smoke**: `npm run test:stripe` clicks the real Pro upgrade button with mocked cloud auth and checkout APIs, verifies ClassLoop routes to the hidden `#/checkout` page instead of the left nav, verifies `/api/billing/checkout` requests embedded mode and mounts the Stripe embedded frame, verifies the hosted Checkout fallback still opens `checkout.stripe.com`, and verifies returning to ClassLoop still keeps Pro locked while webhook/profile confirmation is pending.
+- **Stripe Payment Link Smoke**: `npm run test:stripe` clicks the real Pro upgrade button with mocked cloud auth, verifies ClassLoop prepares the cloud account behind the scenes, verifies the browser opens the configured `buy.stripe.com` Payment Link with email and client reference id attached, verifies the old embedded checkout API path is not called, and verifies Pro stays locked until webhook/profile confirmation is pending.
 - **Webhook-Owned Updates**: Entitlement tests verify Stripe checkout/subscription/invoice webhook payload mapping updates `classloop_profiles` with `plan_tier`, `subscription_status`, customer id, subscription id, and current period end.
 - **Client Tampering Guard**: Entitlement tests verify `/api/profile` PATCH helpers ignore client-submitted paid fields like `plan_tier`, camelCase paid entitlement fields, `subscription_status`, Stripe customer ids, nested billing profiles, invalid roles, and snake-case privacy tampering.
 - **Locked UI Behavior**: Browser tests verify in-person and online live capture stay locked for Free/unpaid users, Free one-session-per-day copy appears, second draft generation is disabled for Free accounts, verified Stripe-owned Pro unlocks live capture and paid controls, and unpaid/local entitlement attempts keep paid analytics/export locks.
@@ -164,7 +164,7 @@ Playwright is installed in the repo through `@playwright/test`.
 **Automated install**: `npm install` runs `playwright install chromium` through `postinstall`.
 **Run cloud sync tests**: `npm run test:cloud`
 **Run entitlement tests**: `npm run test:entitlements`
-**Run Stripe Embedded Checkout smoke**: `npm run test:stripe`
+**Run Stripe Payment Link smoke**: `npm run test:stripe`
 **Run security baseline**: `npm run test:security`
 **Run package init failure smoke**: `npm run test:package:init`
 **Run browser tests**: `npm run test:browser`

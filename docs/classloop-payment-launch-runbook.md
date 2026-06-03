@@ -17,9 +17,9 @@ This runbook is for turning the existing ClassLoop Pro billing scaffold into a r
 These are the payment paths the external setup must support:
 
 - `api/billing/prepare-account.js` creates or prepares a Supabase cloud account before checkout, so the upgrade flow can feel like one account setup instead of a second visible signup.
-- `api/billing/checkout.js` creates a Stripe subscription Checkout Session using `STRIPE_PRO_PRICE_ID`, the authenticated Supabase user, a Stripe customer, `client_reference_id`, and `supabaseUserId` metadata.
-- Hosted Checkout returns to `#/billing?billing=success` or `#/billing?billing=canceled`.
-- Embedded Checkout returns to `#/checkout?billing=success`.
+- The app opens the configured Stripe Payment Link at `VITE_STRIPE_PAYMENT_LINK_URL` and appends the signed-in email plus Supabase user id as `prefilled_email` and `client_reference_id`.
+- `api/billing/checkout.js` remains as the server-owned Checkout Session fallback using `STRIPE_PRO_PRICE_ID`, the authenticated Supabase user, a Stripe customer, `client_reference_id`, and `supabaseUserId` metadata.
+- Hosted Checkout or Payment Link success should return to `#/billing?billing=success` when configured in Stripe.
 - `api/billing/webhook.js` verifies the raw Stripe body with `STRIPE_WEBHOOK_SECRET` and updates `classloop_profiles` for:
   - `checkout.session.completed`
   - `customer.subscription.updated`
@@ -54,19 +54,20 @@ These are the payment paths the external setup must support:
 4. Copy the recurring Price ID into both:
    - `STRIPE_PRO_PRICE_ID`
    - `VITE_STRIPE_PRO_PRICE_ID`
-5. Optional but useful: create a Stripe pricing table for the same Pro price and copy its ID into `VITE_STRIPE_PRICING_TABLE_ID`.
-6. Copy the Stripe publishable key into `VITE_STRIPE_PUBLISHABLE_KEY`.
-7. Copy the Stripe secret key into `STRIPE_SECRET_KEY`.
-8. Configure the Stripe customer portal so users can cancel or manage the subscription.
-9. Add a webhook endpoint for the deployed domain:
+5. Create or confirm the Stripe Payment Link and copy it into `VITE_STRIPE_PAYMENT_LINK_URL`.
+6. Optional fallback: keep a Stripe pricing table id in `VITE_STRIPE_PRICING_TABLE_ID`.
+7. Copy the Stripe publishable key into `VITE_STRIPE_PUBLISHABLE_KEY`.
+8. Copy the Stripe secret key into `STRIPE_SECRET_KEY`.
+9. Configure the Stripe customer portal so users can cancel or manage the subscription.
+10. Add a webhook endpoint for the deployed domain:
    - `https://classloop-followup.vercel.app/api/billing/webhook`
-10. Subscribe the endpoint to:
+11. Subscribe the endpoint to:
     - `checkout.session.completed`
     - `customer.subscription.updated`
     - `customer.subscription.deleted`
     - `invoice.paid`
     - `invoice.payment_failed`
-11. Copy the webhook signing secret into `STRIPE_WEBHOOK_SECRET`.
+12. Copy the webhook signing secret into `STRIPE_WEBHOOK_SECRET`.
 
 Do not mix test and live values. A test secret key, test Price ID, and test webhook secret must stay together. Live launch needs a live secret key, live Price ID, live webhook secret, and redacted `cs_live_...` Checkout Session proof.
 
@@ -86,6 +87,7 @@ CLASSLOOP_PUBLIC_URL=https://classloop-followup.vercel.app
 VITE_STRIPE_PRO_PRICE_ID=
 VITE_STRIPE_PUBLISHABLE_KEY=
 VITE_STRIPE_PRICING_TABLE_ID=
+VITE_STRIPE_PAYMENT_LINK_URL=https://buy.stripe.com/7sY28qeT16Mh5wi0ZbeME00
 STRIPE_SECRET_KEY=
 STRIPE_PRO_PRICE_ID=
 STRIPE_WEBHOOK_SECRET=
@@ -117,7 +119,7 @@ Manual Stripe test-mode walkthrough:
 2. Go to Plan options.
 3. Click Upgrade to Pro.
 4. Confirm the cloud account if Supabase email confirmation is enabled.
-5. Complete Stripe Checkout with a Stripe test card.
+5. Complete the Stripe Payment Link checkout with a Stripe test card.
 6. Return to `#/billing?billing=success`.
 7. Refresh plan.
 8. Verify the app shows `PRO / active`.

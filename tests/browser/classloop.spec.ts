@@ -418,57 +418,6 @@ async function mockCloudAuthForStripeCheckout(
   return { resendRequests };
 }
 
-async function mockStripeJsForEmbeddedCheckout(page: Page) {
-  await page.route("https://merchant-ui-api.stripe.com/pricing-table/**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        pricing_table_items: [
-          {
-            call_to_action_link: "https://checkout.stripe.com/c/pay/cs_live_playwright_pricing_table",
-          },
-        ],
-      }),
-    });
-  });
-  await page.route("https://js.stripe.com/**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/javascript",
-      body: `
-        if (!window.customElements.get("stripe-pricing-table")) {
-          window.customElements.define("stripe-pricing-table", class extends HTMLElement {
-            connectedCallback() {
-              if (this.childElementCount) return;
-              this.innerHTML = '<section role="region" aria-label="Stripe pricing table smoke"><h2>Stripe pricing table test frame</h2><button type="button">Select Pro</button></section>';
-            }
-          });
-        }
-        window.Stripe = function(publishableKey) {
-          window.__classloopStripePublishableKey = publishableKey;
-          async function createCheckout(options) {
-            window.__classloopEmbeddedClientSecret = options.fetchClientSecret
-              ? await options.fetchClientSecret()
-              : options.clientSecret;
-            return {
-              mount: function(target) {
-                const element = typeof target === "string" ? document.querySelector(target) : target;
-                element.innerHTML = '<section role="region" aria-label="Stripe test checkout"><h2>Stripe embedded checkout test frame</h2><button type="button">Pay ClassLoop Pro</button></section>';
-              },
-              destroy: function() {}
-            };
-          }
-          return {
-            initEmbeddedCheckout: createCheckout,
-            createEmbeddedCheckoutPage: createCheckout
-          };
-        };
-      `,
-    });
-  });
-}
-
 async function mockLiveCaptureDevices(page: Page) {
   await page.addInitScript({
     content: `
@@ -1529,7 +1478,6 @@ test("live capture modes stay locked until verified Pro while local billing tamp
   const runId = Date.now().toString(36);
   const email = `capture-${runId}@classloop.test`;
   const password = `teacher-pass-${runId}`;
-  await mockStripeJsForEmbeddedCheckout(page);
   await resetBrowser(page);
   await createAccount(page, "teacher", `Capture Teacher ${runId}`, email, password);
   await signInWithSeededBillingProfile(page, "teacher", email, password, {
@@ -1556,9 +1504,8 @@ test("live capture modes stay locked until verified Pro while local billing tamp
   await expect(page.getByRole("button", { name: /view plan options/i })).toBeVisible();
 
   await page.getByRole("button", { name: /^plan options$/i }).click();
-  await expect(page.locator(".stripe-pricing-table-shell")).toBeVisible();
-  await expect(page.locator("stripe-pricing-table")).toHaveAttribute("customer-email", email);
-  await expect(page.locator("stripe-pricing-table")).toHaveAttribute("client-reference-id", /^teacher-/);
+  await expect(page.locator(".stripe-pricing-table-shell")).toHaveCount(0);
+  await expect(page.getByText(/Stripe Payment Link/i)).toBeVisible();
   await expect(page.getByPlaceholder("you@school.org")).toBeVisible();
   await expect(page.getByText(/Cloud sync is separate from Pro/i)).toBeVisible();
   await expect(page.getByRole("button", { name: /downgrade to free/i })).toHaveCount(0);
@@ -1611,21 +1558,20 @@ test("verified Pro can use in-person and online live capture with noisy and miss
   await expect(page.getByRole("heading", { name: /Unknown meeting voice/i })).toBeVisible();
 });
 
-test("Stripe pricing table and payment link start checkout without unlocking Pro first", async ({ page }, testInfo) => {
+test("Stripe payment link starts checkout without unlocking Pro first", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "The Stripe smoke runs once on desktop; mobile checkout is covered by responsive app smokes.");
   const runId = Date.now().toString(36);
   const email = `stripe-${runId}@classloop.test`;
   const password = `teacher-pass-${runId}`;
-  const checkoutRequests: Array<{ authorization: string | undefined; body: Record<string, unknown> }> = [];
+  const checkoutApiRequests: Array<{ authorization: string | undefined; body: Record<string, unknown> }> = [];
   const prepareRequests: Array<Record<string, unknown>> = [];
 
-  await mockStripeJsForEmbeddedCheckout(page);
   await mockCloudAuthForStripeCheckout(page, email, { failPasswordSignIn: true });
-  await page.route("https://checkout.stripe.com/**", async (route) => {
+  await page.route("https://buy.stripe.com/**", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "text/html",
-      body: "<main><h1>Hosted Stripe Checkout smoke</h1></main>",
+      body: "<main><h1>Stripe Payment Link smoke</h1></main>",
     });
   });
   await page.route("**/api/billing/prepare-account", async (route) => {
@@ -1651,14 +1597,14 @@ test("Stripe pricing table and payment link start checkout without unlocking Pro
   });
   await page.route("**/api/billing/checkout", async (route) => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
-    checkoutRequests.push({
+    checkoutApiRequests.push({
       authorization: route.request().headers().authorization,
       body,
     });
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(body.uiMode === "embedded" ? { clientSecret: "cs_test_embedded_secret" } : { url: "https://checkout.stripe.com/c/pay/cs_live_playwright_open_smoke" }),
+      body: JSON.stringify({ url: "https://checkout.stripe.com/c/pay/cs_live_playwright_open_smoke" }),
     });
   });
 
@@ -1673,37 +1619,19 @@ test("Stripe pricing table and payment link start checkout without unlocking Pro
   await expect(page.getByRole("button", { name: /upgrade to pro with stripe/i })).toBeVisible();
   await expect(page.getByText(/Current account/i)).toBeVisible();
   await expect(page.locator(".integration-card").filter({ hasText: /Current account/ })).toContainText(/Free/i);
-  await expect(page.locator(".stripe-pricing-table-shell")).toBeVisible();
-  await expect(page.locator("stripe-pricing-table")).toHaveAttribute("pricing-table-id", "prctbl_classloop_playwright");
-  await expect(page.locator("stripe-pricing-table")).toHaveAttribute("publishable-key", "pk_test_classloop_playwright");
-  await expect(page.locator("stripe-pricing-table")).toHaveAttribute("customer-email", email);
-  await expect(page.locator("stripe-pricing-table")).toHaveAttribute("client-reference-id", /^teacher-/);
-  await expect(page.getByRole("region", { name: /stripe pricing table smoke/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /open stripe checkout/i })).toBeEnabled();
-  await page.getByRole("button", { name: /open stripe checkout/i }).click();
-  await expect(page).toHaveURL(/checkout\.stripe\.com\/c\/pay\/cs_live_playwright_pricing_table/);
-
-  await resetBrowser(page);
-  await seedLocalAccount(page, "teacher", `Stripe Teacher ${runId}`, email, password);
-  await page.reload();
-  await page.goto("/#/dashboard");
-  await signInAccount(page, "teacher", email, password);
-  await page.getByRole("button", { name: /^plan options$/i }).click();
-  await expect(page.getByRole("button", { name: /upgrade to pro with stripe/i })).toBeVisible();
+  await expect(page.locator(".stripe-pricing-table-shell")).toHaveCount(0);
+  await expect(page.locator("stripe-pricing-table")).toHaveCount(0);
+  await expect(page.getByText(/Stripe Payment Link/i)).toBeVisible();
+  await expect(page.getByText(/ClassLoop turns on Pro only after Stripe confirms payment/i)).toBeVisible();
 
   await page.getByRole("button", { name: /upgrade to pro with stripe/i }).click();
   await expect.poll(() => prepareRequests.length).toBe(1);
-  await expect.poll(() => checkoutRequests.length).toBe(1);
-  await expect(checkoutRequests[0].authorization).toContain("playwright-access-token");
-  await expect(checkoutRequests[0].body).toEqual({ tier: "pro", uiMode: "embedded" });
-  await expect(page.getByRole("region", { name: /stripe test checkout/i })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText(/Complete Stripe Checkout here/i)).toBeVisible();
-
-  await page.getByRole("button", { name: /open stripe checkout instead/i }).click();
-  await expect.poll(() => checkoutRequests.length).toBe(2);
-  await expect(checkoutRequests[1].body).toEqual({ tier: "pro" });
-  await expect(page).toHaveURL(/checkout\.stripe\.com/);
-  await expect(page.getByRole("heading", { name: /hosted stripe checkout smoke/i })).toBeVisible();
+  await expect.poll(() => checkoutApiRequests.length).toBe(0);
+  await expect(page).toHaveURL(/buy\.stripe\.com\/7sY28qeT16Mh5wi0ZbeME00/);
+  const paymentUrl = new URL(page.url());
+  expect(paymentUrl.searchParams.get("prefilled_email")).toBe(email);
+  expect(paymentUrl.searchParams.get("client_reference_id")).toBe("00000000-0000-4000-8000-000000000123");
+  await expect(page.getByRole("heading", { name: /Stripe Payment Link smoke/i })).toBeVisible();
   await expect(page.getByText(/PRO · active/i)).toHaveCount(0);
 });
 

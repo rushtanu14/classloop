@@ -1,12 +1,14 @@
 # ClassLoop
 
-ClassLoop turns class transcripts, notes, rosters, and links into teacher-reviewed student follow-ups. It also includes a personal meeting-minutes mode for individual follow-through without class rosters or student accounts.
+ClassLoop turns messy learning records and meeting notes into clear follow-through. It can be used by teachers, tutors, club leads, workshop facilitators, students reviewing their own meetings, and anyone who needs next steps from a transcript or notes. The deepest workflow is built for teachers: class transcripts, notes, rosters, and links become teacher-reviewed student follow-ups.
 
 Teachers get a clean review workflow after class. Students get a simple dashboard with the recap, tasks, resources, due dates, and completion check-ins meant for them.
 
 Live site: https://classloop-followup.vercel.app
 
 ## Why ClassLoop
+
+Everyone has the same follow-through problem after a live session: notes are messy, decisions are scattered, links disappear, and next steps stay vague. ClassLoop should be easy to understand as a general follow-through workspace, while staying especially valuable for teachers.
 
 Teachers already know what happened in class, who participated, who missed something, and what needs to happen next. The hard part is turning that memory into clear follow-up for every student.
 
@@ -18,7 +20,20 @@ ClassLoop helps with that after-class cleanup:
 - Give students clear next steps without making the teacher rebuild context by hand.
 - Track completion and private support signals in one place.
 
+## Launch Focus
+
+Lead with the broad promise: ClassLoop helps people turn messy session inputs into usable follow-through. Then make the teacher wedge unmistakable: teachers get review, roster matching, student-specific previews, publishing, completion, and private support signals that generic meeting-note tools do not provide.
+
+This keeps the first impression accessible to everyone while still making the strongest product story teacher-specific.
+
 ## What It Does
+
+### For Everyone
+
+- Paste meeting notes, transcript snippets, decisions, resources, questions, and due dates.
+- Turn messy session context into a recap, task list, resources, and owner-friendly follow-through.
+- Keep personal meeting minutes separate from classroom rosters, student publishing, and teacher analytics.
+- Use the hosted sample demo to understand the workflow before using real data in the desktop app or configured account path.
 
 ### For Teachers
 
@@ -51,8 +66,8 @@ ClassLoop helps with that after-class cleanup:
 - Public landing pages for features, screenshots, docs, privacy, terms, EULA, support, and downloads.
 - Hosted web demo with sample teacher and student accounts.
 - Installable PWA shell with manifest, service worker, app icons, and Add to Home Screen flow.
-- Supabase-backed hosted account and sync scaffold.
-- Stripe Checkout-based Pro subscription scaffold.
+- Supabase-backed hosted account, email confirmation, and sync scaffold.
+- Stripe Checkout/Payment Link-based Pro subscription scaffold.
 - Google Classroom and Zoom workflow surfaces for roster/course and transcript-first classroom follow-up.
 
 ## Demo Accounts
@@ -84,6 +99,10 @@ classloop-student
 ## Controlled Pilot Packet
 
 Use [docs/public-beta-packet.md](docs/public-beta-packet.md) as an internal pilot handoff for teacher onboarding, the alpha script, release notes, support FAQ, download links and fallbacks, the short launch announcement, and the verification checklist before inviting a real teacher. Do not publish a public beta route or broad tester signup page.
+
+## Product Requirements
+
+Use [docs/classloop-prd.md](docs/classloop-prd.md) as the current PRD for launch positioning, user stories, teacher-specific depth, non-goals, and acceptance criteria.
 
 ## Run Locally
 

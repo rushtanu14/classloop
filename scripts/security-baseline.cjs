@@ -172,9 +172,8 @@ function verifyDesktopAndHostedSecurity() {
     ["billing checkout validates schema", checkout, /validateCheckoutPayload/],
     ["billing prepare account has IP rate limiting", prepareAccount, /assertIpRateLimit\(request, response/],
     ["billing prepare account validates schema", prepareAccount, /validateBillingAccountPayload/],
-    ["billing prepare account confirms email server-side", prepareAccount, /email_confirm:\s*true/],
-    ["billing prepare account uses server-side auth admin", prepareAccount, /supabase\.auth\.admin\.createUser/],
-    ["billing prepare account refuses existing user password changes", prepareAccount, /cloud account already exists/i],
+    ["billing prepare account is guarded legacy flow", prepareAccount, /Create and confirm your ClassLoop account before checkout/],
+    ["billing prepare account returns conflict instead of creating accounts", prepareAccount, /json\(response,\s*409/],
     ["billing portal has IP rate limiting", portal, /assertIpRateLimit\(request, response/],
     ["billing portal has user rate limiting", portal, /PORTAL_USER_RATE_LIMIT/],
     ["feedback metadata is sanitized", validators, /metadataValue/],
@@ -191,6 +190,9 @@ function verifyDesktopAndHostedSecurity() {
   checks.forEach(([label, source, pattern]) => {
     if (!pattern.test(source)) fail(`Missing security control: ${label}`);
   });
+  if (/supabase\.auth\.admin\.createUser|email_confirm:\s*true/.test(prepareAccount)) {
+    fail("Billing prepare account must not silently create or confirm cloud accounts.");
+  }
 }
 
 function verifyRuntimeLogging() {

@@ -319,6 +319,8 @@ async function mockCloudAuthForStripeCheckout(
   } = {},
 ) {
   const resendRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const signupRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const updateUserRequests: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
   const userMetadata = {
     product: "ClassLoop",
     plan: "free",
@@ -376,6 +378,10 @@ async function mockCloudAuthForStripeCheckout(
     });
   });
   await page.route("**/auth/v1/signup**", async (route) => {
+    signupRequests.push({
+      url: route.request().url(),
+      body: route.request().postDataJSON() as Record<string, unknown>,
+    });
     if (options.signupAlreadyExists) {
       await route.fulfill({
         status: 400,
@@ -415,7 +421,25 @@ async function mockCloudAuthForStripeCheckout(
       body: JSON.stringify({ user: null, session: null }),
     });
   });
-  return { resendRequests };
+  await page.route("**/auth/v1/user**", async (route) => {
+    updateUserRequests.push({
+      url: route.request().url(),
+      method: route.request().method(),
+      body: route.request().postDataJSON() as Record<string, unknown>,
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        user: {
+          ...fakeUser,
+          email: (route.request().postDataJSON() as Record<string, unknown>).email ?? cloudEmail,
+          email_change_sent_at: "2026-06-07T00:00:00.000Z",
+        },
+      }),
+    });
+  });
+  return { resendRequests, signupRequests, updateUserRequests };
 }
 
 async function mockLiveCaptureDevices(page: Page) {
@@ -614,7 +638,7 @@ async function downloadCurrentReportJson(page: Page) {
 
 test("public root shows landing page and can enter the app demo", async ({ page }) => {
   await page.goto("/#/features");
-  await expect(page.getByRole("heading", { name: /features for classroom continuity/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /features for follow-through/i })).toBeVisible();
   await expect(page.getByText(/Transcript intelligence/i)).toBeVisible();
 
   await page.goto("/#/screenshots");
@@ -628,6 +652,9 @@ test("public root shows landing page and can enter the app demo", async ({ page 
   await expect(heroCopy.getByRole("button", { name: /open web demo/i })).toBeVisible();
   await expect(heroCopy.getByRole("button", { name: /add to phone/i })).toBeVisible();
   await expect(heroCopy.getByRole("button", { name: /view screenshots/i })).toBeVisible();
+  await expect(page.getByText("Class, club, and personal notes")).toBeVisible();
+  await expect(page.getByText("Teacher review built in")).toBeVisible();
+  await expect(page.getByText("Student-specific next steps")).toBeVisible();
   await expect(heroCopy.getByRole("button", { name: /download|macos|support classloop/i })).toHaveCount(0);
   await expect(page.locator(".landing-hero .landing-platform-list")).toHaveCount(0);
   await page.goto("/#/download");
@@ -945,6 +972,35 @@ test("existing cloud email signs in instead of creating a duplicate account", as
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
   await page.getByRole("button", { name: /^plan options$/i }).click();
   await expect(page.getByText(`Connected as ${email}`)).toBeVisible({ timeout: 15_000 });
+});
+
+test("cloud email changes require password and wait for new-email confirmation", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The cloud email-change regression only needs one browser project.");
+  const runId = Date.now().toString(36);
+  const email = `profile-email-${runId}@classloop.test`;
+  const newEmail = `profile-email-new-${runId}@classloop.test`;
+  const password = `profile-pass-${runId}`;
+  const name = `Profile Teacher ${runId}`;
+
+  await resetBrowser(page);
+  const cloudAuth = await mockCloudAuthForStripeCheckout(page, email, { role: "teacher", name });
+  await createAccount(page, "teacher", name, email, password, { mockCloud: false });
+  await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+
+  await page.getByRole("button", { name }).click();
+  await expect(page.getByText(/Profile settings/i)).toBeVisible();
+  await page.locator(".profile-menu").getByLabel("Email").fill(newEmail);
+  await page.locator(".profile-menu").getByRole("button", { name: /save settings/i }).click();
+  await expect(page.locator(".profile-menu")).toContainText(/Current password is incorrect/i);
+  await expect.poll(() => cloudAuth.updateUserRequests.length).toBe(0);
+
+  await page.locator(".profile-menu").getByPlaceholder(/Required to change email or password/i).fill(password);
+  await page.locator(".profile-menu").getByRole("button", { name: /save settings/i }).click();
+  await expect(page.locator(".profile-menu")).toContainText(/Confirmation sent to the new email/i);
+  await expect.poll(() => cloudAuth.updateUserRequests.length).toBe(1);
+  expect(cloudAuth.updateUserRequests[0].body).toMatchObject({ email: newEmail });
+  await expect(page.getByRole("button", { name })).toBeVisible();
+  await expect(page.getByRole("button", { name: new RegExp(escapeRegExp(newEmail), "i") })).toHaveCount(0);
 });
 
 test("individual account can paste personal meeting minutes and track due-date status", async ({ page }, testInfo) => {
@@ -1566,7 +1622,14 @@ test("Stripe payment link starts checkout without unlocking Pro first", async ({
   const checkoutApiRequests: Array<{ authorization: string | undefined; body: Record<string, unknown> }> = [];
   const prepareRequests: Array<Record<string, unknown>> = [];
 
-  await mockCloudAuthForStripeCheckout(page, email, { failPasswordSignIn: true });
+  const cloudAuth = await mockCloudAuthForStripeCheckout(page, email, { failPasswordSignIn: true });
+  await page.route("https://js.stripe.com/v3/buy-button.js", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/javascript",
+      body: "customElements.define('stripe-buy-button', class extends HTMLElement {});",
+    });
+  });
   await page.route("https://buy.stripe.com/**", async (route) => {
     await route.fulfill({
       status: 200,
@@ -1623,9 +1686,20 @@ test("Stripe payment link starts checkout without unlocking Pro first", async ({
   await expect(page.locator("stripe-pricing-table")).toHaveCount(0);
   await expect(page.getByText(/Stripe Payment Link/i)).toBeVisible();
   await expect(page.getByText(/ClassLoop turns on Pro only after Stripe confirms payment/i)).toBeVisible();
+  await expect(page.locator(".stripe-buy-button-copy strong").filter({ hasText: /Stripe Buy Button fallback/i })).toBeVisible();
+  await expect(page.getByText(/current theme accent/i)).toBeVisible();
+
+  await page.getByRole("button", { name: /prepare stripe buy button/i }).click();
+  await expect.poll(() => cloudAuth.signupRequests.length).toBeLessThanOrEqual(1);
+  await expect.poll(() => prepareRequests.length).toBe(0);
+  const buyButton = page.locator("stripe-buy-button").first();
+  await expect(buyButton).toHaveAttribute("buy-button-id", "buy_btn_1Te51FCZ4fp9VxAWmKtmkgsA");
+  await expect(buyButton).toHaveAttribute("publishable-key", /^pk_(test|live)_/);
+  await expect(buyButton).toHaveAttribute("customer-email", email);
+  await expect(buyButton).toHaveAttribute("client-reference-id", "00000000-0000-4000-8000-000000000123");
 
   await page.getByRole("button", { name: /upgrade to pro with stripe/i }).click();
-  await expect.poll(() => prepareRequests.length).toBe(1);
+  await expect.poll(() => prepareRequests.length).toBe(0);
   await expect.poll(() => checkoutApiRequests.length).toBe(0);
   await expect(page).toHaveURL(/buy\.stripe\.com\/7sY28qeT16Mh5wi0ZbeME00/);
   const paymentUrl = new URL(page.url());
@@ -1673,15 +1747,17 @@ test("unconfirmed cloud email shows instructions overlay instead of a red billin
   const dialog = page.getByRole("dialog", { name: /check your email to link your cloud account/i });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText(`Open the inbox for ${email}`);
+  await expect.poll(() => cloudAuth.resendRequests.length).toBe(1);
   await expect(dialog).not.toContainText(/Expected return link/i);
   await expect(dialog).not.toContainText("https://classloop-followup.vercel.app/#/billing?cloud=confirmed");
-  await expect(page.locator(".settings-message").filter({ hasText: /email not confirmed|confirm your email/i })).toHaveCount(0);
+  await expect(page.locator(".settings-message.warning").filter({ hasText: /email not confirmed|confirm your email/i })).toHaveCount(0);
   await expect.poll(() => prepareRequests.length).toBe(0);
   await expect.poll(() => checkoutRequests.length).toBe(0);
   await dialog.getByRole("button", { name: /resend confirmation email/i }).click();
   await expect(dialog).toContainText(/Confirmation email sent again/i);
-  await expect.poll(() => cloudAuth.resendRequests.length).toBe(1);
+  await expect.poll(() => cloudAuth.resendRequests.length).toBe(2);
   expect(cloudAuth.resendRequests[0].body).toMatchObject({ email, type: "signup" });
+  expect(cloudAuth.resendRequests[1].body).toMatchObject({ email, type: "signup" });
 
   await dialog.getByRole("button", { name: /close email confirmation instructions/i }).click();
   await page.getByPlaceholder("you@school.org").fill(email);

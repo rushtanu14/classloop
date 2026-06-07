@@ -77,11 +77,14 @@ const defaultStripePublishableKey =
   "pk_live_51TVPunCZ4fp9VxAWEaKlZRDYDXbXORPxpWfa8MQ4YbZ2HRGo82H0FroVWaYPDfRj6eImeDQB3c21umsipqTsSX0q005Nt906Yz";
 const defaultStripePricingTableId = "prctbl_1TdX6hCZ4fp9VxAW8RoGLMmZ";
 const defaultStripePaymentLinkUrl = "https://buy.stripe.com/7sY28qeT16Mh5wi0ZbeME00";
+const defaultStripeBuyButtonId = "buy_btn_1Te51FCZ4fp9VxAWmKtmkgsA";
 const supabaseUrl = viteEnv.VITE_SUPABASE_URL;
 const supabaseAnonKey = viteEnv.VITE_SUPABASE_ANON_KEY;
 const stripePublishableKey = viteEnv.VITE_STRIPE_PUBLISHABLE_KEY || defaultStripePublishableKey;
 const stripePricingTableId = viteEnv.VITE_STRIPE_PRICING_TABLE_ID || defaultStripePricingTableId;
 const stripePaymentLinkUrl = viteEnv.VITE_STRIPE_PAYMENT_LINK_URL || defaultStripePaymentLinkUrl;
+const stripeBuyButtonId = viteEnv.VITE_STRIPE_BUY_BUTTON_ID || defaultStripeBuyButtonId;
+const stripeBuyButtonPublishableKey = viteEnv.VITE_STRIPE_BUY_BUTTON_PUBLISHABLE_KEY || stripePublishableKey;
 const classLoopPublicUrl = viteEnv.VITE_CLASSLOOP_PUBLIC_URL || "https://classloop-followup.vercel.app";
 const offlineQueueKey = "classloop:cloud-offline-queue:v1";
 const manualProEmails = new Set(["rushilcpm02@gmail.com"]);
@@ -113,6 +116,13 @@ export function getStripePricingTableConfig() {
 
 export function getStripePaymentLinkUrl() {
   return stripePaymentLinkUrl;
+}
+
+export function getStripeBuyButtonConfig() {
+  return {
+    buyButtonId: stripeBuyButtonId || "",
+    publishableKey: stripeBuyButtonPublishableKey || "",
+  };
 }
 
 export function buildStripePaymentLinkUrl({ email, clientReferenceId }: { email?: string; clientReferenceId?: string } = {}) {
@@ -360,26 +370,56 @@ export async function resendCloudConfirmation(email: string, redirectUrl = getCl
   };
 }
 
-export async function prepareBillingCloudAccount(
-  email: string,
+export async function requestCloudEmailChange(
+  currentEmail: string,
   password: string,
-  role: "teacher",
-  name = "",
-): Promise<{ ready: true; email: string }> {
-  const response = await fetch("/api/billing/prepare-account", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, role, name }),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const fallback =
-      response.status === 404
-        ? "Payment setup is not available in this build."
-        : "Unable to prepare payment right now.";
-    throw new Error(data.error || fallback);
+  nextEmail: string,
+  redirectRoute = "dashboard",
+): Promise<CloudAuthResult> {
+  const client = getSupabaseClient();
+  if (!client) return { ok: false, message: "Cloud email changes are not available in this build." };
+  const normalizedCurrentEmail = normalizeCloudEmail(currentEmail);
+  const normalizedNextEmail = normalizeCloudEmail(nextEmail);
+  const redirectUrl = getCloudEmailRedirectUrl(redirectRoute);
+
+  let session = await getCloudSession();
+  if (!session || normalizeCloudEmail(session.user.email ?? "") !== normalizedCurrentEmail) {
+    const signInResult = await signIntoCloud(normalizedCurrentEmail, password);
+    if (signInResult.code === "email_confirmation_required") {
+      await resendCloudConfirmation(normalizedCurrentEmail, getCloudEmailRedirectUrl("dashboard")).catch(() => undefined);
+      return {
+        ...signInResult,
+        message: "Confirm your current email before changing it. ClassLoop sent another confirmation email.",
+      };
+    }
+    if (!signInResult.ok || !signInResult.session) {
+      return { ok: false, message: signInResult.message || "Current password is incorrect." };
+    }
+    session = signInResult.session;
   }
-  return data as { ready: true; email: string };
+
+  const { data, error } = await client.auth.updateUser(
+    { email: normalizedNextEmail },
+    { emailRedirectTo: redirectUrl },
+  );
+  if (error) {
+    if (/already|registered|exists|duplicate/i.test(error.message)) {
+      return { ok: false, message: "That email is already connected to a ClassLoop cloud account." };
+    }
+    if (isEmailConfirmationError(error)) {
+      return emailConfirmationRequiredResult(normalizedCurrentEmail, "Confirm your current email before changing it.", redirectRoute);
+    }
+    return { ok: false, message: "Unable to request that email change right now." };
+  }
+
+  return {
+    ok: true,
+    code: "email_confirmation_required",
+    email: normalizedNextEmail,
+    redirectUrl,
+    message: "Confirmation sent to the new email. Confirm it before using that address to sign in.",
+    session: data.user ? session : null,
+  };
 }
 
 export async function signOutCloud() {

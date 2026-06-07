@@ -47,7 +47,7 @@ const securityHeaders = {
   "Referrer-Policy": "no-referrer",
   "X-Frame-Options": "DENY",
   "Content-Security-Policy":
-    "default-src 'self'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-src 'self' https://js.stripe.com https://checkout.stripe.com https://hooks.stripe.com; child-src 'self' https://js.stripe.com https://checkout.stripe.com https://hooks.stripe.com; frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
+    "default-src 'self'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-src 'self' https://js.stripe.com https://checkout.stripe.com https://hooks.stripe.com https://buy.stripe.com; child-src 'self' https://js.stripe.com https://checkout.stripe.com https://hooks.stripe.com https://buy.stripe.com; frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
   "Permissions-Policy": "camera=(), geolocation=(), microphone=(self), display-capture=()",
 };
 

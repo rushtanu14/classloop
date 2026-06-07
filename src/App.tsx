@@ -72,13 +72,14 @@ import {
   getCloudEmailRedirectUrl,
   getCloudProfile,
   getCloudSession,
+  getStripeBuyButtonConfig,
   getStripePaymentLinkUrl,
   isManualProBillingProfile,
   isPaidPlan,
   manualProBillingProfileForEmail,
   planCatalog,
-  prepareBillingCloudAccount,
   resendCloudConfirmation,
+  requestCloudEmailChange,
   signIntoCloud,
   signOutCloud,
   type BillingProfile,
@@ -171,7 +172,7 @@ type LocalAuthSecret = {
 type CloudConfirmationPrompt = {
   email: string;
   redirectUrl: string;
-  context: "account-create" | "checkout" | "cloud-login";
+  context: "account-create" | "checkout" | "cloud-login" | "email-change";
 };
 
 type AuditActor = Pick<AuthSession, "email" | "role"> &
@@ -340,6 +341,11 @@ type ThemeSettings = {
   key: ThemeKey;
   accent: string;
   imageUrl: string;
+};
+
+type StripeCheckoutIdentity = {
+  email: string;
+  userId: string;
 };
 
 type SpeechRecognitionResultLike = {
@@ -1992,7 +1998,7 @@ function App() {
   const [walkthroughStepIndex, setWalkthroughStepIndex] = useState(0);
   const [landingMode, setLandingMode] = useState(isLandingHash);
   const [landingPage, setLandingPage] = useState<LandingPageKey>(getLandingPage);
-  const [publicDemoOnly] = useState(() => isDemoOnlyOverride());
+  const [publicDemoOnly, setPublicDemoOnly] = useState(() => isDemoOnlyOverride());
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
   const [bootPhase, setBootPhase] = useState<BootPhase>("local");
   const [workspaceNotice, setWorkspaceNotice] = useState<WorkspaceNotice | null>(null);
@@ -3017,7 +3023,6 @@ function App() {
       accounts.some(
         (item) =>
           item.id !== account.id &&
-          item.role === account.role &&
           normalizeEmail(item.email) === nextEmail,
       )
     ) {
@@ -3027,25 +3032,42 @@ function App() {
       return { ok: false, message: "Sample account settings reset after the demo. Download the app to save your own profile." };
     }
 
+    const emailChanged = nextEmail !== normalizeEmail(account.email);
+    const needsPasswordCheck = emailChanged || Boolean(settings.newPassword);
     let passwordHash = account.passwordHash;
-    if (settings.newPassword) {
-      if (settings.newPassword.length < 8) {
-        return { ok: false, message: "Use at least 8 characters for the new password." };
-      }
+    if (needsPasswordCheck) {
       const currentHash = await hashSecret(settings.currentPassword);
       if (currentHash !== account.passwordHash) {
         return { ok: false, message: "Current password is incorrect." };
       }
+    }
+    if (settings.newPassword) {
+      if (settings.newPassword.length < 8) {
+        return { ok: false, message: "Use at least 8 characters for the new password." };
+      }
       passwordHash = await hashSecret(settings.newPassword);
     }
 
-    const nextAccount = { ...account, name: nextName, email: nextEmail, passwordHash };
+    let emailChangeMessage = "";
+    if (emailChanged && !account.demo) {
+      if (getBackendStatus().supabaseConfigured) {
+        const result = await requestCloudEmailChange(normalizeEmail(account.email), settings.currentPassword, nextEmail);
+        if (!result.ok && result.code !== "email_confirmation_required") {
+          return { ok: false, message: result.message };
+        }
+        emailChangeMessage = result.message || `Confirmation sent to ${nextEmail}. Confirm it before signing in with that address.`;
+      } else {
+        emailChangeMessage = "Cloud email confirmation is unavailable in this build, so only this device was updated.";
+      }
+    }
+
+    const nextAccount = { ...account, name: nextName, email: emailChanged && getBackendStatus().supabaseConfigured ? account.email : nextEmail, passwordHash };
     setAccounts((current) => current.map((item) => (item.id === account.id ? nextAccount : item)));
     if (localAuthSecretRef.current?.accountId === account.id) {
       localAuthSecretRef.current = {
         accountId: account.id,
         role: account.role,
-        email: nextEmail,
+        email: normalizeEmail(nextAccount.email),
         password: settings.newPassword || localAuthSecretRef.current.password,
       };
     }
@@ -3054,11 +3076,12 @@ function App() {
         ? {
             ...current,
             name: nextName,
-            email: nextEmail,
+            email: normalizeEmail(nextAccount.email),
+            multiDevicePending: current.multiDevicePending || Boolean(emailChangeMessage),
           }
         : current,
     );
-    return { ok: true, message: "Settings saved." };
+    return { ok: true, message: emailChangeMessage || "Settings saved." };
   };
 
   const handleRequestPasswordReset = async (role: AuthRole, email: string) => {
@@ -3146,8 +3169,9 @@ function App() {
           window.location.hash = page === "home" ? "/home" : `/${page}`;
         }}
         onOpenApp={() => {
+          setPublicDemoOnly(true);
           setLandingMode(false);
-          navigate("dashboard");
+          navigate("dashboard", { demoOnly: "1" });
         }}
       />
     );
@@ -3800,13 +3824,13 @@ function LandingPage({
                 </div>
                 <h1>ClassLoop</h1>
                 <p>
-                  Save time after class by turning a pasted Zoom transcript into teacher-reviewed recaps, shared
-                  resources, and class tasks without rebuilding the classroom context by hand.
+                  A follow-through workspace for classes, tutoring, clubs, workshops, and personal meetings, with
+                  the deepest workflow built for teachers who need student-ready next steps after class.
                 </p>
                 <div className="landing-proof-row" aria-label="ClassLoop product highlights">
-                  <span>Zoom transcript first</span>
-                  <span>Teacher-approved drafts</span>
-                  <span>Classwide Classroom posts</span>
+                  <span>Class, club, and personal notes</span>
+                  <span>Teacher review built in</span>
+                  <span>Student-specific next steps</span>
                 </div>
                 <div className="landing-actions landing-actions-hero">
                   <button className="landing-primary" type="button" onClick={onOpenApp}>
@@ -3855,10 +3879,10 @@ function LandingPage({
         {page === "features" && (
           <>
             <header className="landing-page-header">
-              <h1>Features for classroom continuity.</h1>
+              <h1>Features for follow-through.</h1>
               <p>
-                ClassLoop is built around the teacher workflow after class: gather the messy record, clean it up,
-                publish specific follow-through, and see what needs attention next.
+                ClassLoop can organize many learning and meeting records, while the classroom path stays teacher-first:
+                gather the messy record, clean it up, publish specific follow-through, and see what needs attention next.
               </p>
             </header>
             <section className="landing-feature-matrix" aria-label="ClassLoop feature matrix">
@@ -5913,7 +5937,7 @@ function ProfileMenu({
             type={showPassword ? "text" : "password"}
             value={currentPassword}
             onChange={(event) => setCurrentPassword(event.target.value)}
-            placeholder="Required to change password"
+            placeholder="Required to change email or password"
           />
           <button type="button" onClick={() => setShowPassword((show) => !show)} aria-label={showPassword ? "Hide password" : "Show password"}>
             {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -7382,6 +7406,109 @@ function StripePaymentLinkNote() {
   );
 }
 
+function useStripeBuyButtonScript(enabled: boolean) {
+  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+
+  useEffect(() => {
+    if (!enabled) {
+      setStatus("idle");
+      return;
+    }
+
+    if (window.customElements?.get("stripe-buy-button")) {
+      setStatus("ready");
+      return;
+    }
+
+    const src = "https://js.stripe.com/v3/buy-button.js";
+    let script = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
+    setStatus("loading");
+
+    const handleLoad = () => {
+      if (script) script.dataset.classloopLoaded = "true";
+      setStatus("ready");
+    };
+    const handleError = () => setStatus("error");
+
+    if (!script) {
+      script = document.createElement("script");
+      script.async = true;
+      script.src = src;
+      script.dataset.classloopStripeBuyButton = "true";
+      document.head.appendChild(script);
+    } else if (script.dataset.classloopLoaded === "true") {
+      setStatus("ready");
+      return;
+    }
+
+    script.addEventListener("load", handleLoad);
+    script.addEventListener("error", handleError);
+    return () => {
+      script?.removeEventListener("load", handleLoad);
+      script?.removeEventListener("error", handleError);
+    };
+  }, [enabled]);
+
+  return status;
+}
+
+function StripeBuyButtonFallback({
+  identity,
+  preparing,
+  disabled,
+  onPrepare,
+}: {
+  identity: StripeCheckoutIdentity | null;
+  preparing: boolean;
+  disabled: boolean;
+  onPrepare: () => void;
+}) {
+  const config = getStripeBuyButtonConfig();
+  const configured = Boolean(config.buyButtonId && config.publishableKey);
+  const scriptStatus = useStripeBuyButtonScript(Boolean(identity && configured));
+
+  return (
+    <div className={identity ? "stripe-buy-button-card ready" : "stripe-buy-button-card"}>
+      <div className="stripe-buy-button-copy">
+        <span>
+          <strong>Stripe Buy Button fallback</strong>
+          <small>
+            Use this if the direct Payment Link does not open. ClassLoop still sends your email and account id so Pro only unlocks after Stripe confirms payment.
+          </small>
+        </span>
+        <small className="theme-aware-note">The ClassLoop controls and fallback shell use the current theme accent.</small>
+      </div>
+
+      <button className={identity ? "ghost-button full" : "primary-button full"} type="button" onClick={onPrepare} disabled={disabled || preparing || !configured}>
+        <ShieldCheck size={17} aria-hidden="true" />
+        {preparing ? "Preparing Stripe button..." : identity ? "Refresh Stripe Buy Button" : "Prepare Stripe Buy Button fallback"}
+      </button>
+
+      {!configured && (
+        <p className="settings-message warning">
+          Stripe Buy Button fallback is not configured for this build.
+        </p>
+      )}
+
+      {identity && configured && (
+        <div className="stripe-buy-button-frame" data-script-status={scriptStatus}>
+          <stripe-buy-button
+            key={`${config.buyButtonId}-${identity.userId}-${identity.email}`}
+            buy-button-id={config.buyButtonId}
+            publishable-key={config.publishableKey}
+            client-reference-id={identity.userId}
+            customer-email={identity.email}
+          />
+          {scriptStatus === "loading" && <small>Loading Stripe Buy Button...</small>}
+          {scriptStatus === "error" && (
+            <small>Stripe Buy Button did not load. Use the direct Payment Link button above.</small>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CloudEmailConfirmationOverlay({
   prompt,
   actionLabel,
@@ -7393,6 +7520,7 @@ function CloudEmailConfirmationOverlay({
   onResend,
 }: CloudEmailConfirmationOverlayProps) {
   const isAccountCreation = prompt.context === "account-create";
+  const isEmailChange = prompt.context === "email-change";
   const [resendStatus, setResendStatus] = useState("");
   const [resending, setResending] = useState(false);
 
@@ -7417,11 +7545,17 @@ function CloudEmailConfirmationOverlay({
           <div>
             <span className="eyebrow">Cloud account confirmation</span>
             <h2 id="cloud-confirmation-title">
-              {isAccountCreation ? "Check your email to finish your account." : "Check your email to link your cloud account."}
+              {isAccountCreation
+                ? "Check your email to finish your account."
+                : isEmailChange
+                  ? "Check your new email to finish the change."
+                  : "Check your email to link your cloud account."}
             </h2>
             <p>
               {isAccountCreation
                 ? `ClassLoop created an account for ${prompt.email}. Confirm the address before multi-device sign-in works.`
+                : isEmailChange
+                  ? `ClassLoop sent a confirmation email to ${prompt.email}. Confirm the address before signing in with the new email.`
                 : `ClassLoop sent a confirmation email to ${prompt.email}. Confirm the address to finish linking this account.`}
             </p>
           </div>
@@ -7449,6 +7583,8 @@ function CloudEmailConfirmationOverlay({
               <small>
                 {isAccountCreation
                   ? "The email verifies your address so multi-device sign-in works with the same ClassLoop account. The same ClassLoop account can sign in on desktop, browser, and phone."
+                  : isEmailChange
+                    ? "The email verifies that you own the new address before ClassLoop moves the cloud account to it."
                   : "The email verifies your address so ClassLoop can safely link this login to your cloud account."}
               </small>
             </div>
@@ -7524,12 +7660,13 @@ function EmbeddedCheckoutPage({
   const isDemoAccount = Boolean(auth.demo);
   const hasPro = isPaidPlan(billingProfile);
 
-  const showEmailConfirmation = useCallback((result: CloudAuthResult, fallbackEmail: string) => {
+  const showCheckoutEmailConfirmation = useCallback(async (result: CloudAuthResult, fallbackEmail: string) => {
     const prompt = cloudConfirmationFromResult(result, fallbackEmail, "checkout");
     if (!prompt) return false;
     setCloudConfirmation(prompt);
     setStatus("loading");
-    setMessage("Confirm your email before checkout continues.");
+    setMessage("Confirm your email before checkout continues. ClassLoop sent another confirmation email.");
+    await resendCloudConfirmation(prompt.email, prompt.redirectUrl).catch(() => undefined);
     return true;
   }, []);
 
@@ -7554,11 +7691,15 @@ function EmbeddedCheckoutPage({
     setStatus("loading");
     setMessage("Preparing your ClassLoop account for payment...");
     let result = await signIntoCloud(normalizedAuthEmail, localAuthSecret.password);
-    if (showEmailConfirmation(result, normalizedAuthEmail)) return null;
+    if (await showCheckoutEmailConfirmation(result, normalizedAuthEmail)) return null;
     if (!result.ok) {
-      await prepareBillingCloudAccount(normalizedAuthEmail, localAuthSecret.password, "teacher", auth.name);
-      result = await signIntoCloud(normalizedAuthEmail, localAuthSecret.password);
-      if (showEmailConfirmation(result, normalizedAuthEmail)) return null;
+      result = await createCloudAccount(normalizedAuthEmail, localAuthSecret.password, {
+        role: "teacher",
+        name: auth.name,
+        redirectRoute: "billing",
+        source: "checkout_cloud_verification",
+      });
+      if (await showCheckoutEmailConfirmation(result, normalizedAuthEmail)) return null;
     }
     if (!result.ok || !result.session) {
       throw new Error(
@@ -7571,7 +7712,7 @@ function EmbeddedCheckoutPage({
     setConnectedEmail(email);
     appendAudit("cloud_connect", `Prepared payment account for ${email}.`, auth);
     return { userId: result.session.user.id, email };
-  }, [appendAudit, auth, localAuthSecret, showEmailConfirmation]);
+  }, [appendAudit, auth, localAuthSecret, showCheckoutEmailConfirmation]);
 
   useEffect(() => {
     getCloudSession().then((session) => setConnectedEmail(session?.user.email ?? ""));
@@ -7774,6 +7915,8 @@ function SyncBillingPage({
   const [message, setMessage] = useState("");
   const [connectedEmail, setConnectedEmail] = useState("");
   const [cloudConfirmation, setCloudConfirmation] = useState<CloudConfirmationPrompt | null>(null);
+  const [stripeBuyButtonIdentity, setStripeBuyButtonIdentity] = useState<StripeCheckoutIdentity | null>(null);
+  const [preparingStripeBuyButton, setPreparingStripeBuyButton] = useState(false);
   const isDemoAccount = Boolean(auth.demo);
   const billingReturnStatus = getParam("billing");
   const demoBillingMessage =
@@ -7849,6 +7992,15 @@ function SyncBillingPage({
     return true;
   };
 
+  const showCheckoutEmailConfirmation = async (result: CloudAuthResult, fallbackEmail: string) => {
+    const prompt = cloudConfirmationFromResult(result, fallbackEmail, "checkout");
+    if (!prompt) return false;
+    setCloudConfirmation(prompt);
+    setMessage("Confirm your email before checkout continues. ClassLoop sent another confirmation email.");
+    await resendCloudConfirmation(prompt.email, prompt.redirectUrl).catch(() => undefined);
+    return true;
+  };
+
   const connectCloud = async () => {
     const result = await signIntoCloud(cloudEmail, cloudPassword);
     if (showEmailConfirmation(result, cloudEmail, "cloud-login")) return;
@@ -7881,12 +8033,16 @@ function SyncBillingPage({
 
     setMessage("Preparing your ClassLoop account for payment...");
     const signInResult = await signIntoCloud(normalizedAuthEmail, localAuthSecret.password);
-    if (showEmailConfirmation(signInResult, normalizedAuthEmail, "checkout")) return null;
+    if (await showCheckoutEmailConfirmation(signInResult, normalizedAuthEmail)) return null;
     let result = signInResult;
     if (!result.ok) {
-      await prepareBillingCloudAccount(normalizedAuthEmail, localAuthSecret.password, "teacher", auth.name);
-      result = await signIntoCloud(normalizedAuthEmail, localAuthSecret.password);
-      if (showEmailConfirmation(result, normalizedAuthEmail, "checkout")) return null;
+      result = await createCloudAccount(normalizedAuthEmail, localAuthSecret.password, {
+        role: "teacher",
+        name: auth.name,
+        redirectRoute: "billing",
+        source: "checkout_cloud_verification",
+      });
+      if (await showCheckoutEmailConfirmation(result, normalizedAuthEmail)) return null;
     }
     if (!result.ok || !result.session) {
       setMessage(
@@ -7948,6 +8104,28 @@ function SyncBillingPage({
       });
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Online payment is not available right now.");
+    }
+  };
+
+  const prepareStripeBuyButton = async () => {
+    try {
+      if (isDemoAccount) {
+        setMessage(demoBillingMessage);
+        return;
+      }
+      if (!backendStatus.supabaseConfigured) {
+        setMessage("Online upgrades are unavailable right now. Try again later or contact ClassLoop support.");
+        return;
+      }
+      setPreparingStripeBuyButton(true);
+      const checkoutIdentity = await ensureCheckoutCloudSession();
+      if (!checkoutIdentity) return;
+      setStripeBuyButtonIdentity(checkoutIdentity);
+      setMessage("Stripe Buy Button fallback is ready. Pro still turns on only after Stripe confirms payment.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to prepare the Stripe Buy Button right now.");
+    } finally {
+      setPreparingStripeBuyButton(false);
     }
   };
 
@@ -8150,6 +8328,12 @@ function SyncBillingPage({
                 Upgrade to Pro with Stripe
               </button>
               <StripePaymentLinkNote />
+              <StripeBuyButtonFallback
+                identity={stripeBuyButtonIdentity}
+                preparing={preparingStripeBuyButton}
+                disabled={isDemoAccount || !backendStatus.supabaseConfigured}
+                onPrepare={() => void prepareStripeBuyButton()}
+              />
             </div>
           )}
           <div className="integration-card plan-card">

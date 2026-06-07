@@ -13,6 +13,7 @@ import {
   getBackendStatus,
   getCloudAuthState,
   getCloudSession,
+  requestCloudEmailChange,
   signIntoCloud,
   signOutCloud,
 } from "../src/cloud.js";
@@ -154,6 +155,11 @@ assertEqual(
   (await createCloudAccount("teacher@classloop.test", "password")).ok,
   false,
   "cloud signup should fail gracefully when Supabase credentials are absent",
+);
+assertEqual(
+  (await requestCloudEmailChange("teacher@classloop.test", "password", "new-teacher@classloop.test")).ok,
+  false,
+  "cloud email changes should fail gracefully when Supabase credentials are absent",
 );
 await signOutCloud();
 await assertRejects(

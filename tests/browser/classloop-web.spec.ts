@@ -39,9 +39,9 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
     await expect(page.getByRole("button", { name: /^download$/i })).toBeVisible();
   }
   await expect(page.getByRole("button", { name: /open web demo/i })).toBeVisible();
-  await expect(page.getByText("Teacher-approved drafts")).toBeVisible();
-  await expect(page.getByText("Zoom transcript first")).toBeVisible();
-  await expect(page.getByText("Classwide Classroom posts")).toBeVisible();
+  await expect(page.getByText("Class, club, and personal notes")).toBeVisible();
+  await expect(page.getByText("Teacher review built in")).toBeVisible();
+  await expect(page.getByText("Student-specific next steps")).toBeVisible();
   await expect(page.getByRole("button", { name: /^beta$/i })).toHaveCount(0);
   await expectNoUnnamedInteractive(page, ".landing-page");
   await expectContrast(page, landingContrastSelectors);

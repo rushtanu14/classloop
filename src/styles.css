@@ -3913,6 +3913,57 @@ button:disabled:hover {
   line-height: 1.45;
 }
 
+.stripe-buy-button-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--primary) 44%, var(--line));
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--primary-soft) 72%, transparent), transparent 70%),
+    var(--surface);
+}
+
+.stripe-buy-button-card.ready {
+  box-shadow: 0 14px 34px color-mix(in srgb, var(--primary) 16%, transparent);
+}
+
+.stripe-buy-button-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.stripe-buy-button-copy span {
+  display: grid;
+  gap: 4px;
+}
+
+.stripe-buy-button-copy strong {
+  color: var(--heading);
+}
+
+.stripe-buy-button-copy small,
+.stripe-buy-button-frame small,
+.theme-aware-note {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.stripe-buy-button-frame {
+  display: grid;
+  gap: 8px;
+  min-height: 48px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+}
+
+.stripe-buy-button-frame stripe-buy-button {
+  display: block;
+  width: 100%;
+}
+
 .stripe-pricing-table-shell.placeholder {
   min-height: auto;
   padding: 16px;
@@ -7150,8 +7201,8 @@ th {
   background: #bae6fd;
 }
 
-:root[data-theme="abyssal"] :is(.delivery-log-row, .audit-row, .capture-mode-card, .integration-card, .cloud-confirmation-steps li),
-:root[data-theme="graphite"] :is(.delivery-log-row, .audit-row, .capture-mode-card, .integration-card, .cloud-confirmation-steps li) {
+:root[data-theme="abyssal"] :is(.delivery-log-row, .audit-row, .capture-mode-card, .integration-card, .cloud-confirmation-steps li, .stripe-buy-button-card, .stripe-buy-button-frame),
+:root[data-theme="graphite"] :is(.delivery-log-row, .audit-row, .capture-mode-card, .integration-card, .cloud-confirmation-steps li, .stripe-buy-button-card, .stripe-buy-button-frame) {
   color: var(--readable-ink);
   border-color: var(--readable-line);
   background: var(--readable-surface);
@@ -7168,8 +7219,8 @@ th {
   color: var(--readable-ink);
 }
 
-:root[data-theme="abyssal"] :is(.delivery-log-row span, .audit-row span, .delivery-log-row small, .audit-row small, .capture-consent, .switch-row, .cloud-confirmation-steps small, .cloud-confirmation-note),
-:root[data-theme="graphite"] :is(.delivery-log-row span, .audit-row span, .delivery-log-row small, .audit-row small, .capture-consent, .switch-row, .cloud-confirmation-steps small, .cloud-confirmation-note) {
+:root[data-theme="abyssal"] :is(.delivery-log-row span, .audit-row span, .delivery-log-row small, .audit-row small, .capture-consent, .switch-row, .cloud-confirmation-steps small, .cloud-confirmation-note, .stripe-buy-button-copy small, .stripe-buy-button-frame small, .theme-aware-note),
+:root[data-theme="graphite"] :is(.delivery-log-row span, .audit-row span, .delivery-log-row small, .audit-row small, .capture-consent, .switch-row, .cloud-confirmation-steps small, .cloud-confirmation-note, .stripe-buy-button-copy small, .stripe-buy-button-frame small, .theme-aware-note) {
   color: var(--readable-muted);
 }
 

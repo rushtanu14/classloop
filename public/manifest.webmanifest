@@ -1,7 +1,7 @@
 {
   "name": "ClassLoop",
   "short_name": "ClassLoop",
-  "description": "Teacher-reviewed class recaps, shared resources, and class tasks from Zoom transcripts.",
+  "description": "Follow-through for classes, tutoring, clubs, and personal meetings with teacher-reviewed recaps, shared resources, and student next steps.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",

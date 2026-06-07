@@ -119,7 +119,7 @@ async function verifyApiFailClosed() {
     if (response.statusCode !== 401) {
       fail(`${handler.label} should fail closed with 401 when auth is unavailable; got ${response.statusCode}.`);
     }
-    if (!/sign in with supabase/i.test(payload.error || "")) {
+    if (!/(sign in with supabase|sign in before using cloud sync)/i.test(payload.error || "")) {
       fail(`${handler.label} returned unclear outage/auth copy: ${JSON.stringify(payload)}`);
     }
     console.log(`PASS ${handler.label} fails closed with clear auth message`);
@@ -134,7 +134,7 @@ async function verifyApiFailClosed() {
   if (feedbackResponse.statusCode !== 503) {
     fail(`product feedback write should fail closed with 503 when hosted credentials are unavailable; got ${feedbackResponse.statusCode}.`);
   }
-  if (!/feedback storage is not configured/i.test(feedbackPayload.error || "")) {
+  if (!/(feedback storage is not configured|support intake is temporarily unavailable)/i.test(feedbackPayload.error || "")) {
     fail(`product feedback outage copy should explain missing hosted credentials: ${JSON.stringify(feedbackPayload)}`);
   }
   console.log("PASS product feedback write fails closed when hosted credentials are missing");
@@ -157,10 +157,10 @@ async function verifyApiFailClosed() {
     body: Buffer.from("{}"),
   });
   const webhookPayload = webhookPost.json();
-  if (webhookPost.statusCode !== 503 || !/hosted service is not configured/i.test(webhookPayload.error || "")) {
+  if (webhookPost.statusCode !== 503 || !/(hosted service is not configured|hosted service is not available right now)/i.test(webhookPayload.error || "")) {
     fail(`Stripe webhook should explain missing credentials during billing outage drill: ${JSON.stringify(webhookPayload)}`);
   }
-  console.log("PASS Stripe webhook surfaces missing billing credentials clearly");
+  console.log("PASS Stripe webhook surfaces billing outage clearly");
 }
 
 function verifySupabaseSchema() {

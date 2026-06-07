@@ -1,25 +1,25 @@
 # ClassLoop Growth Kit
 
-Last updated: 2026-06-01
+Last updated: 2026-06-07
 
 This is the lightweight bridge from "ClassLoop works" to "teachers understand it, try it, and tell us what is missing." It keeps the product north star, business model, launch path, and first promo assets in one place.
 
 ## North Star
 
-ClassLoop should be broadly understandable but teacher-specific in value: a personal assistant for classroom follow-through.
+ClassLoop should be broadly understandable and teacher-specific in depth: a follow-through workspace for classes, tutoring, clubs, workshops, personal meetings, and student next steps, with the strongest workflow built for teachers.
 
 The promise is simple:
 
-> Turn messy class inputs into polished follow-ups students can actually use.
+> Turn messy session inputs into clear follow-through, with a teacher-first workflow for student-ready class next steps.
 
-ClassLoop should help teachers remember, draft, route, review, publish, remind, and track without making the workflow feel like another LMS chore.
+ClassLoop should help people turn transcripts, notes, links, questions, and due dates into usable next steps. For teachers, it should remember, draft, route, review, publish, remind, and track without making the workflow feel like another LMS chore.
 
 ## Product Positioning
 
 - Not an AI note taker: a classroom continuity assistant.
 - Not a grading or surveillance product: private support signals, teacher review, and student-specific next steps.
 - Not a generic productivity app: built around transcripts, rosters, resources, student dashboards, and after-class follow-up.
-- Broad enough for teachers, tutors, club leads, workshops, and personal meeting notes.
+- Broad enough for teachers, tutors, club leads, workshops, students reviewing their own work, and personal meeting notes.
 - Specific enough that a teacher immediately sees the "after class" job it removes.
 
 ## Granola-Inspired Model

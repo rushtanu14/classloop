@@ -1,7 +1,5 @@
 import {
   assertIpRateLimit,
-  getSupabaseAdmin,
-  httpError,
   json,
   methodNotAllowed,
   readJsonBody,
@@ -26,11 +24,6 @@ export function billingPreparedProfileRow(user, payload) {
   };
 }
 
-function isExistingUserError(error) {
-  const text = `${error?.code || ""} ${error?.message || ""}`.toLowerCase();
-  return /already|registered|exists|duplicate|unique/.test(text);
-}
-
 export default async function handler(request, response) {
   try {
     assertIpRateLimit(request, response, PREPARE_ACCOUNT_RATE_LIMIT);
@@ -42,36 +35,9 @@ export default async function handler(request, response) {
         name: "Billing account",
       }),
     );
-    const supabase = getSupabaseAdmin();
-
-    const { data, error } = await supabase.auth.admin.createUser({
+    return json(response, 409, {
+      error: "Create and confirm your ClassLoop account before checkout. Use the confirmation email from account creation, then retry Upgrade to Pro.",
       email: payload.email,
-      password: payload.password,
-      email_confirm: true,
-      user_metadata: {
-        name: payload.name,
-        role: payload.role,
-        source: "classloop_billing_prepare",
-      },
-    });
-
-    if (error) {
-      if (isExistingUserError(error)) {
-        throw httpError(409, "A cloud account already exists for this email. Sign in with that cloud password to continue.");
-      }
-      throw error;
-    }
-
-    if (!data?.user?.id) {
-      throw httpError(502, "Cloud account was not created. Try again in a moment.");
-    }
-
-    const { error: profileError } = await supabase.from("classloop_profiles").upsert(billingPreparedProfileRow(data.user, payload));
-    if (profileError) throw profileError;
-
-    return json(response, 200, {
-      ready: true,
-      email: data.user.email || payload.email,
     });
   } catch (error) {
     return sendApiError(response, error, "Unable to prepare billing account.");

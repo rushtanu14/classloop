@@ -2229,13 +2229,6 @@ function App() {
     };
   }, [auth?.accountId, auth?.demo, auth?.email, auth?.role, sharedReady]);
 
-  useEffect(() => {
-    if (!auth || route !== "tutorial") return;
-    setWalkthroughStepIndex(0);
-    setWalkthroughOpen(true);
-    navigate(auth.role === "teacher" ? "dashboard" : auth.role === "individual" ? "personal-dashboard" : "student");
-  }, [auth, route]);
-
   const sortedSessions = useMemo(
     () => [...sessions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
     [sessions],
@@ -3384,22 +3377,7 @@ function App() {
             appendAudit={appendAudit}
           />
         )}
-        {effectiveRoute === "tutorial" &&
-          (auth.role === "teacher" ? (
-            <TeacherDashboard sessions={teacherSessions} draft={visibleDraft} billingProfile={billingProfile} />
-          ) : auth.role === "individual" ? (
-            <PersonalDashboard meetings={individualMeetings} />
-          ) : (
-            <StudentDashboard
-              sessions={studentPortalSessions}
-              selectedStudentId={auth.studentId ?? selectedStudentId}
-              setSelectedStudentId={setSelectedStudentId}
-              markFollowUpComplete={markFollowUpComplete}
-              auth={auth}
-              submitProductFeedback={submitProductFeedback}
-              submittedProductFeedbackKeys={activeAccount?.submittedProductFeedbackKeys ?? []}
-            />
-          ))}
+        {effectiveRoute === "tutorial" && <TutorialPage auth={auth} />}
         {effectiveRoute === "appearance" && <DesignSystemPage theme={activeTheme} setTheme={handleThemeChange} />}
         {effectiveRoute === "privacy" && auth.role === "teacher" && (
           <PrivacyControlsPage

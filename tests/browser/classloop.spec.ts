@@ -691,8 +691,12 @@ test("public root shows landing page and can enter the app demo", async ({ page 
   expect(manifestJson.start_url).toContain("source=pwa");
   expect(manifestJson.icons?.map((icon: { src: string }) => icon.src)).toContain("/classloop-app-icon-512.png");
   await page.getByRole("button", { name: /open web demo/i }).click();
-  await expect(page.getByRole("heading", { name: /^ClassLoop$/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^log in$/i })).toBeVisible();
+  await expect(page).toHaveURL(/#\/dashboard\?demoOnly=1/);
+  await expect(page.getByRole("heading", { name: /try classloop as a teacher or student/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /demo teacher side/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /demo student side/i })).toBeVisible();
+  await expect(page.getByPlaceholder("name@example.com")).toHaveCount(0);
+  await expect(page.getByPlaceholder("Enter password")).toHaveCount(0);
 });
 
 test("hosted demo mode uses sample accounts only and does not persist demo workspace data", async ({ page }) => {
@@ -1503,6 +1507,12 @@ test("privacy, sync billing, appearance, and tutorial controls are usable", asyn
     await expectTourSpotlight(page, '[data-tour="nav-analytics"]');
   }
   await page.getByRole("button", { name: /skip/i }).click();
+  await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+
+  await page.getByRole("button", { name: /^how it works$/i }).click();
+  await expect(page.getByRole("heading", { name: /learn the class follow-up loop one step at a time/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /create a session/i })).toBeVisible();
+  await page.getByRole("button", { name: /skip tutorial/i }).click();
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
 
   await page.getByRole("button", { name: /^plan options$/i }).click();

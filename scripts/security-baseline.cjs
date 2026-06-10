@@ -62,7 +62,7 @@ function verifyNoHighConfidenceSecrets(files) {
     {
       name: "non-empty server secret env assignment",
       pattern:
-        /^(?:SUPABASE_SERVICE_ROLE_KEY|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|CLASSLOOP_GMAIL_APP_PASSWORD|CLASSLOOP_SMTP_PASS)[^\S\r\n]*=[^\S\r\n]*(?!(?:replace-me|your-16-character-app-password)?[^\S\r\n]*$)[^\r\n]+/im,
+        /^(?:SUPABASE_SERVICE_ROLE_KEY|SUPABASE_KEEPALIVE_PASSWORD|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|CLASSLOOP_GMAIL_APP_PASSWORD|CLASSLOOP_SMTP_PASS|CRON_SECRET)[^\S\r\n]*=[^\S\r\n]*(?!(?:replace-me|replace-me-with-a-long-random-password|your-16-character-app-password)?[^\S\r\n]*$)[^\r\n]+/im,
     },
   ];
 
@@ -105,20 +105,42 @@ function verifyLocalStorageSecurity() {
   });
 }
 
+function verifyVercelFunctionBudget(files) {
+  const deployableApiFiles = files.filter((relPath) => /^api\/.+\.(mjs|cjs|js|ts)$/.test(relPath));
+  if (deployableApiFiles.length !== 1 || deployableApiFiles[0] !== "api/index.js") {
+    fail(`Vercel Hobby deployments must expose only api/index.js; found: ${deployableApiFiles.join(", ") || "none"}`);
+  }
+  const legacyInternalApiFiles = files.filter((relPath) => relPath.startsWith("server/api/"));
+  if (legacyInternalApiFiles.length) {
+    fail(`Internal handlers must stay outside server/api to avoid function-count confusion: ${legacyInternalApiFiles.join(", ")}`);
+  }
+
+  const vercel = JSON.parse(readText("vercel.json"));
+  const apiRewrite = vercel.rewrites?.find((rewrite) => rewrite.source === "/api/(.*)");
+  if (apiRewrite?.destination !== "/api/index?route=$1") {
+    fail("vercel.json must rewrite all /api/* traffic through the single api/index dispatcher.");
+  }
+  const keepaliveCron = vercel.crons?.find((cron) => cron.path === "/api/ops/supabase-keepalive");
+  if (keepaliveCron?.schedule !== "17 12 * * 1") {
+    fail("vercel.json must run the Supabase keepalive cron weekly without adding another API function file.");
+  }
+}
+
 function verifyDesktopAndHostedSecurity() {
   const appSource = readText("src/App.tsx");
   const desktop = readText("desktop/main.cjs");
-  const shared = readText("server/api/_shared.js");
-  const validators = readText("server/api/validators.js");
-  const config = readText("server/api/config.js");
-  const profile = readText("server/api/profile.js");
-  const cloudState = readText("server/api/cloud-state.js");
-  const emailRecaps = readText("server/api/email/send-recaps.js");
-  const feedback = readText("server/api/feedback.js");
-  const checkout = readText("server/api/billing/checkout.js");
-  const prepareAccount = readText("server/api/billing/prepare-account.js");
-  const portal = readText("server/api/billing/portal.js");
-  const webhook = readText("server/api/billing/webhook.js");
+  const shared = readText("server/backend/api/_shared.js");
+  const validators = readText("server/backend/api/validators.js");
+  const config = readText("server/backend/api/config.js");
+  const profile = readText("server/backend/api/profile.js");
+  const cloudState = readText("server/backend/api/cloud-state.js");
+  const emailRecaps = readText("server/backend/api/email/send-recaps.js");
+  const feedback = readText("server/backend/api/feedback.js");
+  const checkout = readText("server/backend/api/billing/checkout.js");
+  const prepareAccount = readText("server/backend/api/billing/prepare-account.js");
+  const portal = readText("server/backend/api/billing/portal.js");
+  const webhook = readText("server/backend/api/billing/webhook.js");
+  const keepalive = readText("server/backend/api/ops/supabase-keepalive.js");
   const schema = readText("supabase/schema.sql");
 
   const checks = [
@@ -160,7 +182,7 @@ function verifyDesktopAndHostedSecurity() {
     ["hosted recap email validates payload schema", emailRecaps, /validateEmailRecapPayload/],
     ["hosted recap email reloads cloud state server-side", emailRecaps, /loadWorkspaceState\(supabase, user\.id\)/],
     ["hosted recap email writes delivery state after send", emailRecaps, /markSessionEmailsSent/],
-    ["Stripe client pins current SDK API version", readText("server/api/billing/stripe-client.js"), /apiVersion: stripeApiVersion/],
+    ["Stripe client pins current SDK API version", readText("server/backend/api/billing/stripe-client.js"), /apiVersion: stripeApiVersion/],
     ["anonymous feedback has IP rate limiting", feedback, /assertIpRateLimit\(request, response/],
     ["authenticated feedback has user rate limiting", feedback, /assertUserRateLimit\(request, response, user/],
     ["anonymous feedback has body limits", feedback, /MAX_FEEDBACK_BODY_CHARS/],
@@ -185,6 +207,9 @@ function verifyDesktopAndHostedSecurity() {
     ["Stripe webhook preserves explicit error statuses", webhook, /const statusCode = error\.statusCode \|\| 400/],
     ["Stripe webhook handles invoice renewals", webhook, /event\.type === "invoice\.paid"/],
     ["Stripe webhook handles invoice payment failures", webhook, /event\.type === "invoice\.payment_failed"/],
+    ["Supabase keepalive requires cron secret", keepalive, /assertCronAuthorization\(request\)/],
+    ["Supabase keepalive uses email password auth", keepalive, /signInWithPassword\(\{ email, password \}\)/],
+    ["Supabase keepalive uses dedicated env credentials", keepalive, /SUPABASE_KEEPALIVE_EMAIL/],
     ["workspace RLS enabled", schema, /alter table public\.classloop_workspace_state enable row level security/i],
     ["workspace own-record policy exists", schema, /workspace_state_select_own/i],
   ];
@@ -198,7 +223,16 @@ function verifyDesktopAndHostedSecurity() {
 }
 
 function verifyRuntimeLogging() {
-  const files = ["src/App.tsx", "src/cloud.ts", "desktop/main.cjs", "server/api/_shared.js", "server/api/cloud-state.js", "server/api/profile.js", "server/api/feedback.js"];
+  const files = [
+    "src/App.tsx",
+    "src/cloud.ts",
+    "desktop/main.cjs",
+    "server/backend/api/_shared.js",
+    "server/backend/api/cloud-state.js",
+    "server/backend/api/profile.js",
+    "server/backend/api/feedback.js",
+    "server/backend/api/ops/supabase-keepalive.js",
+  ];
   const noisyLogs = [];
   files.forEach((relPath) => {
     const text = readText(relPath);
@@ -270,6 +304,7 @@ function main() {
   const files = trackedFiles();
   verifyIgnoredLocalFiles([".env.local", ".env.test.local", ".classloop-data.json", ".classloop-storage-key", ".classloop-data.json"]);
   verifyNoHighConfidenceSecrets(trackedTextFiles(files));
+  verifyVercelFunctionBudget(files);
   verifyLocalStorageSecurity();
   verifyDesktopAndHostedSecurity();
   verifyRuntimeLogging();

@@ -1,15 +1,16 @@
-import checkout from "../server/api/billing/checkout.js";
-import portal from "../server/api/billing/portal.js";
-import prepareAccount from "../server/api/billing/prepare-account.js";
-import webhook from "../server/api/billing/webhook.js";
-import cloudState from "../server/api/cloud-state.js";
-import configHandler from "../server/api/config.js";
-import emailRecaps from "../server/api/email/send-recaps.js";
-import feedback from "../server/api/feedback.js";
-import integrationsStatus from "../server/api/integrations/status.js";
-import profile from "../server/api/profile.js";
-import transcribe from "../server/api/transcribe.js";
-import { json } from "../server/api/_shared.js";
+import checkout from "../server/backend/api/billing/checkout.js";
+import portal from "../server/backend/api/billing/portal.js";
+import prepareAccount from "../server/backend/api/billing/prepare-account.js";
+import webhook from "../server/backend/api/billing/webhook.js";
+import cloudState from "../server/backend/api/cloud-state.js";
+import configHandler from "../server/backend/api/config.js";
+import emailRecaps from "../server/backend/api/email/send-recaps.js";
+import feedback from "../server/backend/api/feedback.js";
+import integrationsStatus from "../server/backend/api/integrations/status.js";
+import profile from "../server/backend/api/profile.js";
+import supabaseKeepalive from "../server/backend/api/ops/supabase-keepalive.js";
+import transcribe from "../server/backend/api/transcribe.js";
+import { json } from "../server/backend/api/_shared.js";
 
 export const config = {
   api: {
@@ -27,6 +28,7 @@ const handlers = new Map([
   ["email/send-recaps", emailRecaps],
   ["feedback", feedback],
   ["integrations/status", integrationsStatus],
+  ["ops/supabase-keepalive", supabaseKeepalive],
   ["profile", profile],
   ["transcribe", transcribe],
 ]);

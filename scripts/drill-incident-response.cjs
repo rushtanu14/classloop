@@ -6,24 +6,25 @@ const { spawnSync } = require("child_process");
 const rootDir = path.resolve(__dirname, "..");
 
 const protectedHandlers = [
-  { rel: "server/api/cloud-state.js", method: "GET", label: "cloud sync read" },
-  { rel: "server/api/profile.js", method: "GET", label: "profile/auth read" },
-  { rel: "server/api/billing/checkout.js", method: "POST", label: "billing checkout" },
-  { rel: "server/api/billing/portal.js", method: "POST", label: "billing portal" },
+  { rel: "server/backend/api/cloud-state.js", method: "GET", label: "cloud sync read" },
+  { rel: "server/backend/api/profile.js", method: "GET", label: "profile/auth read" },
+  { rel: "server/backend/api/billing/checkout.js", method: "POST", label: "billing checkout" },
+  { rel: "server/backend/api/billing/portal.js", method: "POST", label: "billing portal" },
 ];
 
 const syntaxFiles = [
   "api/index.js",
-  "server/api/_shared.js",
-  "server/api/validators.js",
-  "server/api/config.js",
-  "server/api/cloud-state.js",
-  "server/api/feedback.js",
-  "server/api/profile.js",
-  "server/api/billing/checkout.js",
-  "server/api/billing/portal.js",
-  "server/api/billing/webhook.js",
-  "server/api/billing/entitlements.js",
+  "server/backend/api/_shared.js",
+  "server/backend/api/validators.js",
+  "server/backend/api/config.js",
+  "server/backend/api/cloud-state.js",
+  "server/backend/api/feedback.js",
+  "server/backend/api/profile.js",
+  "server/backend/api/ops/supabase-keepalive.js",
+  "server/backend/api/billing/checkout.js",
+  "server/backend/api/billing/portal.js",
+  "server/backend/api/billing/webhook.js",
+  "server/backend/api/billing/entitlements.js",
 ];
 
 function fail(message) {
@@ -41,9 +42,12 @@ function runCommand(label, command, args) {
       VITE_SUPABASE_ANON_KEY: "",
       SUPABASE_URL: "",
       SUPABASE_SERVICE_ROLE_KEY: "",
+      SUPABASE_KEEPALIVE_EMAIL: "",
+      SUPABASE_KEEPALIVE_PASSWORD: "",
       STRIPE_SECRET_KEY: "",
       STRIPE_PRO_PRICE_ID: "",
       STRIPE_WEBHOOK_SECRET: "",
+      CRON_SECRET: "",
     },
   });
   if (result.status !== 0) fail(`${label} failed with exit code ${result.status}.`);
@@ -126,7 +130,7 @@ async function verifyApiFailClosed() {
     console.log(`PASS ${handler.label} fails closed with clear auth message`);
   }
 
-  const feedbackResponse = await callHandler("server/api/feedback.js", {
+  const feedbackResponse = await callHandler("server/backend/api/feedback.js", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: { rating: 5, note: "drill", role: "student", source: "incident_drill", transcript: "Drill transcript" },
@@ -140,7 +144,7 @@ async function verifyApiFailClosed() {
   }
   console.log("PASS product feedback write fails closed when hosted credentials are missing");
 
-  const configResponse = await callHandler("server/api/config.js", { method: "GET" });
+  const configResponse = await callHandler("server/backend/api/config.js", { method: "GET" });
   const config = configResponse.json();
   if (configResponse.statusCode !== 200) fail(`/api/config should remain readable during credential outages.`);
   if (config.supabaseConfigured !== false || config.stripeConfigured !== false) {
@@ -148,11 +152,11 @@ async function verifyApiFailClosed() {
   }
   console.log("PASS public config reports missing hosted credentials without crashing");
 
-  const webhookGet = await callHandler("server/api/billing/webhook.js", { method: "GET" });
+  const webhookGet = await callHandler("server/backend/api/billing/webhook.js", { method: "GET" });
   if (webhookGet.statusCode !== 405) fail(`Stripe webhook GET should be rejected with 405, got ${webhookGet.statusCode}.`);
   console.log("PASS Stripe webhook rejects unsupported methods");
 
-  const webhookPost = await callHandler("server/api/billing/webhook.js", {
+  const webhookPost = await callHandler("server/backend/api/billing/webhook.js", {
     method: "POST",
     headers: { "stripe-signature": "test-signature" },
     body: Buffer.from("{}"),

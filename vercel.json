@@ -8,6 +8,12 @@
       "destination": "/api/index?route=$1"
     }
   ],
+  "crons": [
+    {
+      "path": "/api/ops/supabase-keepalive",
+      "schedule": "17 12 * * 1"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",

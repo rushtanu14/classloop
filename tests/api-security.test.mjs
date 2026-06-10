@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
-import { assertIpRateLimit, httpError, readJsonBody, sendApiError } from "../server/api/_shared.js";
+import { assertCronAuthorization } from "../server/backend/api/ops/supabase-keepalive.js";
+import { assertIpRateLimit, httpError, readJsonBody, sendApiError } from "../server/backend/api/_shared.js";
 import {
   validateBillingAccountPayload,
   validateCheckoutPayload,
@@ -7,8 +8,8 @@ import {
   validateEmailRecapPayload,
   validateFeedbackPayload,
   validateProfilePatchPayload,
-} from "../server/api/validators.js";
-import { billingPreparedProfileRow } from "../server/api/billing/prepare-account.js";
+} from "../server/backend/api/validators.js";
+import { billingPreparedProfileRow } from "../server/backend/api/billing/prepare-account.js";
 
 function assertThrowsStatus(fn, statusCode, messagePattern) {
   assert.throws(
@@ -184,6 +185,18 @@ assertIpRateLimit(rateRequest, rateResponse, { endpoint, limit: 2, windowMs: 60_
 assertThrowsStatus(() => assertIpRateLimit(rateRequest, rateResponse, { endpoint, limit: 2, windowMs: 60_000 }), 429, /too many/i);
 assert.ok(rateResponse.headers["retry-after"], "429 responses should include Retry-After.");
 assert.ok(rateResponse.headers["ratelimit-remaining"], "rate-limit headers should be emitted.");
+
+const oldCronSecret = process.env.CRON_SECRET;
+process.env.CRON_SECRET = "cron-test-secret";
+assert.doesNotThrow(() =>
+  assertCronAuthorization(mockRequest({ method: "GET", headers: { authorization: "Bearer cron-test-secret" } })),
+);
+assertThrowsStatus(() => assertCronAuthorization(mockRequest({ method: "GET" })), 401, /unauthorized/i);
+if (oldCronSecret === undefined) {
+  delete process.env.CRON_SECRET;
+} else {
+  process.env.CRON_SECRET = oldCronSecret;
+}
 
 await assert.rejects(
   readJsonBody(mockRequest({ headers: { "content-type": "text/plain" }, body: "{}" })),

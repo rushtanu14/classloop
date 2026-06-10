@@ -108,17 +108,17 @@ function verifyLocalStorageSecurity() {
 function verifyDesktopAndHostedSecurity() {
   const appSource = readText("src/App.tsx");
   const desktop = readText("desktop/main.cjs");
-  const shared = readText("api/_shared.js");
-  const validators = readText("api/validators.js");
-  const config = readText("api/config.js");
-  const profile = readText("api/profile.js");
-  const cloudState = readText("api/cloud-state.js");
-  const emailRecaps = readText("api/email/send-recaps.js");
-  const feedback = readText("api/feedback.js");
-  const checkout = readText("api/billing/checkout.js");
-  const prepareAccount = readText("api/billing/prepare-account.js");
-  const portal = readText("api/billing/portal.js");
-  const webhook = readText("api/billing/webhook.js");
+  const shared = readText("server/api/_shared.js");
+  const validators = readText("server/api/validators.js");
+  const config = readText("server/api/config.js");
+  const profile = readText("server/api/profile.js");
+  const cloudState = readText("server/api/cloud-state.js");
+  const emailRecaps = readText("server/api/email/send-recaps.js");
+  const feedback = readText("server/api/feedback.js");
+  const checkout = readText("server/api/billing/checkout.js");
+  const prepareAccount = readText("server/api/billing/prepare-account.js");
+  const portal = readText("server/api/billing/portal.js");
+  const webhook = readText("server/api/billing/webhook.js");
   const schema = readText("supabase/schema.sql");
 
   const checks = [
@@ -160,7 +160,7 @@ function verifyDesktopAndHostedSecurity() {
     ["hosted recap email validates payload schema", emailRecaps, /validateEmailRecapPayload/],
     ["hosted recap email reloads cloud state server-side", emailRecaps, /loadWorkspaceState\(supabase, user\.id\)/],
     ["hosted recap email writes delivery state after send", emailRecaps, /markSessionEmailsSent/],
-    ["Stripe client pins current SDK API version", readText("api/billing/stripe-client.js"), /apiVersion: stripeApiVersion/],
+    ["Stripe client pins current SDK API version", readText("server/api/billing/stripe-client.js"), /apiVersion: stripeApiVersion/],
     ["anonymous feedback has IP rate limiting", feedback, /assertIpRateLimit\(request, response/],
     ["authenticated feedback has user rate limiting", feedback, /assertUserRateLimit\(request, response, user/],
     ["anonymous feedback has body limits", feedback, /MAX_FEEDBACK_BODY_CHARS/],
@@ -198,7 +198,7 @@ function verifyDesktopAndHostedSecurity() {
 }
 
 function verifyRuntimeLogging() {
-  const files = ["src/App.tsx", "src/cloud.ts", "desktop/main.cjs", "api/_shared.js", "api/cloud-state.js", "api/profile.js", "api/feedback.js"];
+  const files = ["src/App.tsx", "src/cloud.ts", "desktop/main.cjs", "server/api/_shared.js", "server/api/cloud-state.js", "server/api/profile.js", "server/api/feedback.js"];
   const noisyLogs = [];
   files.forEach((relPath) => {
     const text = readText(relPath);

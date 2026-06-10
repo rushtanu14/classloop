@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { assertIpRateLimit, httpError, readJsonBody, sendApiError } from "../api/_shared.js";
+import { assertIpRateLimit, httpError, readJsonBody, sendApiError } from "../server/api/_shared.js";
 import {
   validateBillingAccountPayload,
   validateCheckoutPayload,
@@ -7,8 +7,8 @@ import {
   validateEmailRecapPayload,
   validateFeedbackPayload,
   validateProfilePatchPayload,
-} from "../api/validators.js";
-import { billingPreparedProfileRow } from "../api/billing/prepare-account.js";
+} from "../server/api/validators.js";
+import { billingPreparedProfileRow } from "../server/api/billing/prepare-account.js";
 
 function assertThrowsStatus(fn, statusCode, messagePattern) {
   assert.throws(

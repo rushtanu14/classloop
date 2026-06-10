@@ -4,17 +4,17 @@ import {
   currentPeriodEnd,
   planTierForSubscriptionStatus,
   subscriptionProfilePayload,
-} from "../api/billing/entitlements.js";
-import { stripeApiVersion } from "../api/billing/stripe-client.js";
-import { checkoutReturnUrls, embeddedCheckoutReturnUrl } from "../api/billing/checkout.js";
-import { checkoutSessionPaymentAccepted, checkoutSessionUserId, subscriptionIdFromInvoice } from "../api/billing/webhook.js";
+} from "../server/api/billing/entitlements.js";
+import { stripeApiVersion } from "../server/api/billing/stripe-client.js";
+import { checkoutReturnUrls, embeddedCheckoutReturnUrl } from "../server/api/billing/checkout.js";
+import { checkoutSessionPaymentAccepted, checkoutSessionUserId, subscriptionIdFromInvoice } from "../server/api/billing/webhook.js";
 import {
   applyManualProGrantToRow,
   isManualProCustomerId,
   manualProCustomerId,
   manualProProfileColumns,
-} from "../api/billing/manual-pro.js";
-import { billingProfileFromRow, profilePatchColumns } from "../api/profile.js";
+} from "../server/api/billing/manual-pro.js";
+import { billingProfileFromRow, profilePatchColumns } from "../server/api/profile.js";
 import { isPaidPlan, manualProBillingProfileForEmail } from "../.test-build/src/cloud.js";
 
 function fakeSupabase() {

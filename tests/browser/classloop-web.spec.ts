@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { expectContrast, expectNoUnnamedInteractive, expectReadableMobileLayout } from "./accessibility-helpers";
 
 const landingContrastSelectors = [
@@ -15,8 +16,13 @@ const landingContrastSelectors = [
   ".landing-pwa-checklist p",
 ];
 
+const gotoHostedRoute = async (page: Page, route: string) => {
+  await page.goto(route, { waitUntil: "domcontentloaded" });
+  await page.locator("#root").waitFor({ state: "attached" });
+};
+
 test("hosted web landing and sample-only demo are usable", async ({ page }) => {
-  await page.goto("/?demoOnly=1");
+  await gotoHostedRoute(page, "/?demoOnly=1");
   await expect(page.getByRole("heading", { name: /^ClassLoop$/i })).toBeVisible();
   const screenshotsButton = page.getByRole("button", { name: /^screenshots$/i });
   const docsButton = page.getByRole("button", { name: /^docs$/i });
@@ -60,12 +66,12 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
     await expect(page.locator(".landing-card-kicker").filter({ hasText: /^Support signals$/ })).toBeVisible();
   }
 
-  await page.goto("/?demoOnly=1#/beta");
+  await gotoHostedRoute(page, "/?demoOnly=1#/beta");
   await expect(page.getByText(/run a 15-minute classloop beta test/i)).toHaveCount(0);
   await expect(page.getByText(/copy beta invite/i)).toHaveCount(0);
   await expect(page.getByText(/feedback scorecard/i)).toHaveCount(0);
 
-  await page.goto("/?demoOnly=1#/docs");
+  await gotoHostedRoute(page, "/?demoOnly=1#/docs");
   await expect(page.getByRole("heading", { name: /^ClassLoop docs\.$/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /business model/i })).toBeVisible();
   await expect(page.getByText(/Teacher Pro.*\$3\.99\/month/i)).toBeVisible();
@@ -73,9 +79,9 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   await expect(page.getByText(/School\/team later/i)).toBeVisible();
   await expect(page.getByRole("heading", { name: /launch gates/i })).toBeVisible();
 
-  await page.goto("/?demoOnly=1");
+  await gotoHostedRoute(page, "/?demoOnly=1");
   if (!(await page.locator(".landing-platform-list").count())) {
-    await page.goto("/?demoOnly=1#/download");
+    await gotoHostedRoute(page, "/?demoOnly=1#/download");
   }
   const downloadRouteHeading = page.getByRole("heading", { name: /download classloop/i });
   if (await downloadRouteHeading.isVisible().catch(() => false)) {
@@ -162,7 +168,7 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
     }
   }
 
-  await page.goto("/?demoOnly=1");
+  await gotoHostedRoute(page, "/?demoOnly=1");
   await page.getByRole("button", { name: /open web demo|open demo/i }).first().click();
   await expect(page.getByRole("heading", { name: /try classloop as a teacher or student/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /demo teacher side/i })).toBeVisible();
@@ -195,7 +201,7 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
 });
 
 test("hosted public screenshots and privacy routes expose compliance boundaries", async ({ page }) => {
-  await page.goto("/?demoOnly=1#/screenshots");
+  await gotoHostedRoute(page, "/?demoOnly=1#/screenshots");
   await expect(page.getByRole("heading", { name: /screenshots: how classloop works/i })).toBeVisible();
   await expect(page.getByRole("img", { name: /teacher import and review screen/i })).toBeVisible();
   await expect(page.getByRole("img", { name: /student dashboard/i })).toBeVisible();
@@ -228,7 +234,7 @@ test("hosted public screenshots and privacy routes expose compliance boundaries"
     expect(response.ok()).toBeTruthy();
   }
 
-  await page.goto("/?demoOnly=1#/privacy");
+  await gotoHostedRoute(page, "/?demoOnly=1#/privacy");
   await expect(page.getByRole("heading", { name: /classloop privacy policy/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /local desktop data/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /no training on student records/i })).toBeVisible();
@@ -249,7 +255,7 @@ test("hosted public screenshots and privacy routes expose compliance boundaries"
     ".landing-policy-panel p",
   ]);
 
-  await page.goto("/?demoOnly=1#/terms");
+  await gotoHostedRoute(page, "/?demoOnly=1#/terms");
   await expect(page.getByRole("heading", { name: /classloop terms of use/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /service scope/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /sample hosted demo/i })).toBeVisible();
@@ -257,7 +263,7 @@ test("hosted public screenshots and privacy routes expose compliance boundaries"
   await expect(page.getByText(/not an official gradebook/i)).toBeVisible();
   await expectNoUnnamedInteractive(page, ".landing-page");
 
-  await page.goto("/?demoOnly=1#/eula");
+  await gotoHostedRoute(page, "/?demoOnly=1#/eula");
   await expect(page.getByRole("heading", { name: /classloop desktop eula/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /unsigned builds/i })).toBeVisible();
   await expect(page.getByText(/manual install-over-replace/i)).toBeVisible();
@@ -272,7 +278,7 @@ test("hosted public screenshots and privacy routes expose compliance boundaries"
       body: JSON.stringify({ ok: true, notified: true }),
     });
   });
-  await page.goto("/?demoOnly=1#/support");
+  await gotoHostedRoute(page, "/?demoOnly=1#/support");
   await expect(page.getByRole("heading", { name: /classloop support/i })).toBeVisible();
   await expect(page.getByText(/rushilcpm02@gmail.com/i)).toBeVisible();
   await expect(page.getByRole("region", { name: /classloop installer feedback/i })).toBeVisible();

@@ -10,6 +10,7 @@ const browserTestEnv =
   "VITE_STRIPE_PRO_PRICE_ID=price_classloop_playwright " +
   "VITE_STRIPE_PUBLISHABLE_KEY=pk_test_classloop_playwright " +
   "VITE_STRIPE_PRICING_TABLE_ID=prctbl_classloop_playwright " +
+  "VITE_STRIPE_BUY_BUTTON_ID=buy_btn_classloop_playwright " +
   "VITE_STRIPE_PAYMENT_LINK_URL=https://buy.stripe.com/7sY28qeT16Mh5wi0ZbeME00";
 
 export default defineConfig({

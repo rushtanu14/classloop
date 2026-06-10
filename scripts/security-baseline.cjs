@@ -106,6 +106,7 @@ function verifyLocalStorageSecurity() {
 }
 
 function verifyDesktopAndHostedSecurity() {
+  const appSource = readText("src/App.tsx");
   const desktop = readText("desktop/main.cjs");
   const shared = readText("api/_shared.js");
   const validators = readText("api/validators.js");
@@ -164,9 +165,10 @@ function verifyDesktopAndHostedSecurity() {
     ["authenticated feedback has user rate limiting", feedback, /assertUserRateLimit\(request, response, user/],
     ["anonymous feedback has body limits", feedback, /MAX_FEEDBACK_BODY_CHARS/],
     ["feedback fails closed without hosted credentials", feedback, /Support intake is temporarily unavailable/],
-    ["feedback stores transcript context", feedback, /transcript: payload\.transcript/],
+    ["feedback caps transcript context before support storage", feedback, /transcript:\s*storedTranscriptContext\(payload\.transcript\)/],
     ["feedback validates payload schema", feedback, /validateFeedbackPayload/],
     ["feedback reads bounded JSON body", feedback, /readJsonBody\(request/],
+    ["student popup feedback omits raw transcript bodies", appSource, /source:\s*"student_followup_popup"[\s\S]*?transcript:\s*""/],
     ["billing checkout has IP rate limiting", checkout, /assertIpRateLimit\(request, response/],
     ["billing checkout has user rate limiting", checkout, /CHECKOUT_USER_RATE_LIMIT/],
     ["billing checkout validates schema", checkout, /validateCheckoutPayload/],

@@ -1703,7 +1703,7 @@ test("Stripe payment link starts checkout without unlocking Pro first", async ({
   await expect.poll(() => cloudAuth.signupRequests.length).toBeLessThanOrEqual(1);
   await expect.poll(() => prepareRequests.length).toBe(0);
   const buyButton = page.locator("stripe-buy-button").first();
-  await expect(buyButton).toHaveAttribute("buy-button-id", "buy_btn_1Te51FCZ4fp9VxAWmKtmkgsA");
+  await expect(buyButton).toHaveAttribute("buy-button-id", /^buy_btn_/);
   await expect(buyButton).toHaveAttribute("publishable-key", /^pk_(test|live)_/);
   await expect(buyButton).toHaveAttribute("customer-email", email);
   await expect(buyButton).toHaveAttribute("client-reference-id", "00000000-0000-4000-8000-000000000123");

@@ -72,6 +72,7 @@ import {
   getCloudEmailRedirectUrl,
   getCloudProfile,
   getCloudSession,
+  hasStripePaymentLinkConfig,
   getStripeBuyButtonConfig,
   getStripePaymentLinkUrl,
   isManualProBillingProfile,
@@ -2623,7 +2624,7 @@ function App() {
         note: trimmedNote,
         role: "student",
         source: "student_followup_popup",
-        transcript: session.transcript,
+        transcript: "",
         metadata: {
           sessionType: session.type,
           sessionStatus: session.status,
@@ -7366,6 +7367,18 @@ function PlanRow({
 }
 
 function StripePaymentLinkNote() {
+  if (!hasStripePaymentLinkConfig()) {
+    return (
+      <div className="stripe-direct-checkout-card inactive">
+        <span>
+          <strong>Stripe Payment Link</strong>
+          <small>Upgrade path is not configured for this build yet.</small>
+        </span>
+        <CircleAlert size={18} aria-hidden="true" />
+      </div>
+    );
+  }
+
   let paymentHost = "Stripe";
   try {
     paymentHost = new URL(getStripePaymentLinkUrl()).hostname;
@@ -7746,6 +7759,10 @@ function EmbeddedCheckoutPage({
         setMessage("Demo account upgrades are disabled.");
         return;
       }
+      if (!backendStatus.stripePaymentLinkConfigured) {
+        setMessage("Online upgrades are not configured for this build yet.");
+        return;
+      }
       if (!backendStatus.supabaseConfigured) {
         setMessage("Online upgrades are unavailable right now. Try again later or contact ClassLoop support.");
         return;
@@ -7763,7 +7780,7 @@ function EmbeddedCheckoutPage({
       setStatus("error");
       setMessage(error instanceof Error ? error.message : "Online payment is not available right now.");
     }
-  }, [backendStatus.supabaseConfigured, ensureCheckoutCloudIdentity, isDemoAccount]);
+  }, [backendStatus.stripePaymentLinkConfigured, backendStatus.supabaseConfigured, ensureCheckoutCloudIdentity, isDemoAccount]);
 
   useEffect(() => {
     if (billingReturnStatus === "success" || hasPro || openedPaymentLinkRef.current) return;
@@ -7845,7 +7862,7 @@ function EmbeddedCheckoutPage({
             <button className="primary-button" type="button" onClick={() => navigate("billing")}>
               Back to Plan options
             </button>
-            <button className="ghost-button" type="button" onClick={openPaymentLink} disabled={isDemoAccount || !backendStatus.supabaseConfigured}>
+            <button className="ghost-button" type="button" onClick={openPaymentLink} disabled={isDemoAccount || !backendStatus.supabaseConfigured || !backendStatus.stripePaymentLinkConfigured}>
               Open Stripe Payment Link
             </button>
           </div>
@@ -8067,6 +8084,10 @@ function SyncBillingPage({
         setMessage(demoBillingMessage);
         return;
       }
+      if (!backendStatus.stripePaymentLinkConfigured) {
+        setMessage("Online upgrades are not configured for this build yet.");
+        return;
+      }
       if (!backendStatus.supabaseConfigured) {
         setMessage("Online upgrades are unavailable right now. Try again later or contact ClassLoop support.");
         return;
@@ -8089,6 +8110,10 @@ function SyncBillingPage({
     try {
       if (isDemoAccount) {
         setMessage(demoBillingMessage);
+        return;
+      }
+      if (!backendStatus.stripePaymentLinkConfigured) {
+        setMessage("Stripe Buy Button fallback is not configured for this build.");
         return;
       }
       if (!backendStatus.supabaseConfigured) {

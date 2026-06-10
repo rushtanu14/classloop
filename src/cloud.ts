@@ -29,6 +29,7 @@ export type BackendStatus = {
   supabaseConfigured: boolean;
   stripeConfigured: boolean;
   stripeEmbeddedConfigured: boolean;
+  stripePaymentLinkConfigured: boolean;
   webReady: boolean;
 };
 
@@ -73,17 +74,12 @@ export const planCatalog = [
 ];
 
 const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
-const defaultStripePublishableKey =
-  "pk_live_51TVPunCZ4fp9VxAWEaKlZRDYDXbXORPxpWfa8MQ4YbZ2HRGo82H0FroVWaYPDfRj6eImeDQB3c21umsipqTsSX0q005Nt906Yz";
-const defaultStripePricingTableId = "prctbl_1TdX6hCZ4fp9VxAW8RoGLMmZ";
-const defaultStripePaymentLinkUrl = "https://buy.stripe.com/7sY28qeT16Mh5wi0ZbeME00";
-const defaultStripeBuyButtonId = "buy_btn_1Te51FCZ4fp9VxAWmKtmkgsA";
 const supabaseUrl = viteEnv.VITE_SUPABASE_URL;
 const supabaseAnonKey = viteEnv.VITE_SUPABASE_ANON_KEY;
-const stripePublishableKey = viteEnv.VITE_STRIPE_PUBLISHABLE_KEY || defaultStripePublishableKey;
-const stripePricingTableId = viteEnv.VITE_STRIPE_PRICING_TABLE_ID || defaultStripePricingTableId;
-const stripePaymentLinkUrl = viteEnv.VITE_STRIPE_PAYMENT_LINK_URL || defaultStripePaymentLinkUrl;
-const stripeBuyButtonId = viteEnv.VITE_STRIPE_BUY_BUTTON_ID || defaultStripeBuyButtonId;
+const stripePublishableKey = viteEnv.VITE_STRIPE_PUBLISHABLE_KEY || "";
+const stripePricingTableId = viteEnv.VITE_STRIPE_PRICING_TABLE_ID || "";
+const stripePaymentLinkUrl = viteEnv.VITE_STRIPE_PAYMENT_LINK_URL || "";
+const stripeBuyButtonId = viteEnv.VITE_STRIPE_BUY_BUTTON_ID || "";
 const stripeBuyButtonPublishableKey = viteEnv.VITE_STRIPE_BUY_BUTTON_PUBLISHABLE_KEY || stripePublishableKey;
 const classLoopPublicUrl = viteEnv.VITE_CLASSLOOP_PUBLIC_URL || "https://classloop-followup.vercel.app";
 const offlineQueueKey = "classloop:cloud-offline-queue:v1";
@@ -93,12 +89,14 @@ let supabaseClient: SupabaseClient | null = null;
 
 export function getBackendStatus(): BackendStatus {
   const supabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
-  const stripeConfigured = Boolean(viteEnv.VITE_STRIPE_PRO_PRICE_ID);
+  const stripeConfigured = Boolean(viteEnv.VITE_STRIPE_PRO_PRICE_ID || stripePaymentLinkUrl);
   const stripeEmbeddedConfigured = Boolean(stripePublishableKey);
+  const stripePaymentLinkConfigured = Boolean(stripePaymentLinkUrl);
   return {
     supabaseConfigured,
     stripeConfigured,
     stripeEmbeddedConfigured,
+    stripePaymentLinkConfigured,
     webReady: supabaseConfigured && stripeConfigured,
   };
 }
@@ -118,6 +116,10 @@ export function getStripePaymentLinkUrl() {
   return stripePaymentLinkUrl;
 }
 
+export function hasStripePaymentLinkConfig() {
+  return Boolean(stripePaymentLinkUrl);
+}
+
 export function getStripeBuyButtonConfig() {
   return {
     buyButtonId: stripeBuyButtonId || "",
@@ -126,12 +128,10 @@ export function getStripeBuyButtonConfig() {
 }
 
 export function buildStripePaymentLinkUrl({ email, clientReferenceId }: { email?: string; clientReferenceId?: string } = {}) {
-  let url: URL;
-  try {
-    url = new URL(stripePaymentLinkUrl);
-  } catch {
-    url = new URL(defaultStripePaymentLinkUrl);
+  if (!stripePaymentLinkUrl) {
+    throw new Error("Stripe Payment Link is not configured for this build.");
   }
+  const url = new URL(stripePaymentLinkUrl);
   if (email) url.searchParams.set("prefilled_email", normalizeCloudEmail(email));
   if (clientReferenceId) url.searchParams.set("client_reference_id", clientReferenceId);
   return url.toString();

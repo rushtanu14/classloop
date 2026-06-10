@@ -13,6 +13,7 @@ import { validateFeedbackPayload } from "./validators.js";
 const FEEDBACK_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const FEEDBACK_RATE_LIMIT_MAX = 20;
 const MAX_FEEDBACK_BODY_CHARS = 90_000;
+const MAX_STORED_TRANSCRIPT_CHARS = 4_000;
 const MAX_EMAIL_TRANSCRIPT_CHARS = 12_000;
 
 function allowProductFeedbackCors(request, response) {
@@ -34,7 +35,13 @@ function assertHostedFeedbackConfigured() {
 function emailTranscriptSnippet(transcript) {
   if (!transcript) return "";
   if (transcript.length <= MAX_EMAIL_TRANSCRIPT_CHARS) return transcript;
-  return `${transcript.slice(0, MAX_EMAIL_TRANSCRIPT_CHARS)}\n\n[Transcript truncated in email; full stored payload is available in ClassLoop product feedback storage.]`;
+  return `${transcript.slice(0, MAX_EMAIL_TRANSCRIPT_CHARS)}\n\n[Transcript truncated for email delivery.]`;
+}
+
+function storedTranscriptContext(transcript) {
+  if (!transcript) return "";
+  if (transcript.length <= MAX_STORED_TRANSCRIPT_CHARS) return transcript;
+  return `${transcript.slice(0, MAX_STORED_TRANSCRIPT_CHARS)}\n\n[Transcript truncated before support storage.]`;
 }
 
 function feedbackEmailConfig() {
@@ -149,7 +156,7 @@ export default async function handler(request, response) {
       note: payload.note,
       role: payload.role,
       source: payload.source,
-      transcript: payload.transcript,
+      transcript: storedTranscriptContext(payload.transcript),
       metadata: payload.metadata,
       created_at: new Date().toISOString(),
     };

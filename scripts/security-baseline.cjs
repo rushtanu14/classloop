@@ -31,6 +31,11 @@ function readText(relPath) {
   return fs.readFileSync(path.join(rootDir, relPath), "utf8");
 }
 
+function isThinApiReexport(relPath) {
+  const text = readText(relPath).trim();
+  return /^export \{(?: config,)? ?default \} from "\.\.\/(?:\.\.\/)?server\/backend\/api\/.+\.js";?$/.test(text);
+}
+
 function trackedTextFiles(files) {
   const binaryExtensions = new Set([".png", ".jpg", ".jpeg", ".gif", ".ico", ".icns", ".dmg", ".exe", ".zip", ".AppImage", ".deb"]);
   return files.filter((relPath) => {
@@ -107,7 +112,8 @@ function verifyLocalStorageSecurity() {
 
 function verifyVercelFunctionBudget(files) {
   const deployableApiFiles = files.filter((relPath) => /^api\/.+\.(mjs|cjs|js|ts)$/.test(relPath));
-  if (deployableApiFiles.length !== 1 || deployableApiFiles[0] !== "api/index.js") {
+  const runtimeApiEntrypoints = deployableApiFiles.filter((relPath) => relPath === "api/index.js" || !isThinApiReexport(relPath));
+  if (runtimeApiEntrypoints.length !== 1 || runtimeApiEntrypoints[0] !== "api/index.js") {
     fail(`Vercel Hobby deployments must expose only api/index.js; found: ${deployableApiFiles.join(", ") || "none"}`);
   }
   const legacyInternalApiFiles = files.filter((relPath) => relPath.startsWith("server/api/"));

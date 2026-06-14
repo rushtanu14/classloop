@@ -11313,8 +11313,8 @@ function ProductFeedbackPrompt({
             <span>
               <strong>Help improve ClassLoop?</strong>
               <small>
-                Rate this follow-up. Your teacher will not see it; ClassLoop sends your feedback and the related transcript
-                context to the creator.
+                Rate this follow-up. Your teacher will not see it; ClassLoop sends your feedback and a small session summary
+                to the creator.
               </small>
             </span>
             <button className="icon-button" type="button" aria-label="Dismiss ClassLoop product feedback" onClick={() => setDismissed(true)}>

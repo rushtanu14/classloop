@@ -1191,9 +1191,11 @@ Leo Martinez, leo-club-${runId}@classloop.test`,
     note: "Show one worked example before the task list.",
   });
   const feedbackJson = JSON.stringify(productFeedbackPayloads);
-  expect(feedbackJson).toContain("Maya Vale");
-  expect(feedbackJson).toContain("complete the error-analysis worksheet");
+  expect(feedbackJson).toContain('"sessionType":"Math review"');
+  expect(feedbackJson).toContain('"completedFollowUp":true');
+  expect(feedbackJson).not.toContain("Maya Vale");
   expect(feedbackJson).not.toContain(`maya-${runId}@classloop.test`);
+  expect(feedbackJson).not.toContain("complete the error-analysis worksheet");
 
   await signInAccount(page, "teacher", teacherA.email, teacherA.password);
   await page.getByRole("button", { name: /^dashboard$/i }).click();

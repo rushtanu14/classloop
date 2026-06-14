@@ -394,6 +394,30 @@ type IntegrationStatus = {
     from?: string;
     replyTo?: string;
   };
+  localMcp?: {
+    available: boolean;
+    transport: string;
+    command: string;
+    args: string[];
+    redactionDefault: string;
+    resources: string[];
+    tools: string[];
+    prompts: string[];
+  };
+  composio?: {
+    configured: boolean;
+    serverName: string;
+    mcpConfigIdConfigured: boolean;
+    userIdConfigured: boolean;
+    toolkits: Array<{
+      id: string;
+      label: string;
+      authConfigEnv: string;
+      authConfigured: boolean;
+      mode: string;
+      allowedTools: string[];
+    }>;
+  };
 };
 
 type EmailDeliveryResult = {
@@ -8046,6 +8070,8 @@ function SyncBillingPage({
   const [cloudConfirmation, setCloudConfirmation] = useState<CloudConfirmationPrompt | null>(null);
   const [stripeBuyButtonIdentity, setStripeBuyButtonIdentity] = useState<StripeCheckoutIdentity | null>(null);
   const [preparingStripeBuyButton, setPreparingStripeBuyButton] = useState(false);
+  const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
+  const [integrationStatusMessage, setIntegrationStatusMessage] = useState("");
   const isDemoAccount = Boolean(auth.demo);
   const billingReturnStatus = getParam("billing");
   const demoBillingMessage =
@@ -8053,6 +8079,23 @@ function SyncBillingPage({
 
   useEffect(() => {
     getCloudSession().then((session) => setConnectedEmail(session?.user.email ?? ""));
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    apiJson<IntegrationStatus>("/api/integrations/status")
+      .then((status) => {
+        if (!active) return;
+        setIntegrationStatus(status);
+        setIntegrationStatusMessage("");
+      })
+      .catch((error) => {
+        if (!active) return;
+        setIntegrationStatusMessage(error instanceof Error ? error.message : "Unable to load connector status.");
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -8326,6 +8369,9 @@ function SyncBillingPage({
       detail: "Pro unlocks in-person class capture and online meeting capture; transcript upload remains the reliable Free path.",
     },
   ];
+  const composioToolkits = integrationStatus?.composio?.toolkits ?? [];
+  const configuredComposioToolkits = composioToolkits.filter((toolkit) => toolkit.authConfigured).length;
+  const localMcpToolCount = integrationStatus?.localMcp?.tools.length ?? 0;
 
   return (
     <div className="page-stack">
@@ -8493,6 +8539,46 @@ function SyncBillingPage({
           </div>
         </Panel>
       </section>
+
+      <Panel title="MCP and Composio connectors" icon={Link2}>
+        <div className="settings-stack">
+          <div className={`integration-card ${integrationStatus?.localMcp?.available ? "active" : ""}`}>
+            <span>
+              <strong>Local MCP server</strong>
+              <small>
+                {integrationStatus?.localMcp?.available
+                  ? `${localMcpToolCount} preview tools over ${integrationStatus.localMcp.transport}; raw transcripts stay redacted by default.`
+                  : "Build the local MCP server before connecting it to a desktop MCP client."}
+              </small>
+            </span>
+          </div>
+          <div className={`integration-card ${integrationStatus?.composio?.configured ? "active" : ""}`}>
+            <span>
+              <strong>Composio MCP config</strong>
+              <small>
+                {integrationStatus?.composio?.configured
+                  ? `${configuredComposioToolkits} of ${composioToolkits.length} connector auth configs are present for ${integrationStatus.composio.serverName}.`
+                  : "Set COMPOSIO_API_KEY and connector auth config ids to enable preview connectors."}
+              </small>
+            </span>
+          </div>
+          {composioToolkits.map((toolkit) => (
+            <div className={`integration-card ${toolkit.authConfigured ? "active" : ""}`} key={toolkit.id}>
+              <span>
+                <strong>{toolkit.label}</strong>
+                <small>
+                  {toolkit.authConfigured
+                    ? `${toolkit.mode.replace("_", " ")} connector configured.`
+                    : `Missing ${toolkit.authConfigEnv}.`}
+                </small>
+                <small>{toolkit.allowedTools.slice(0, 3).join(", ")}{toolkit.allowedTools.length > 3 ? "..." : ""}</small>
+              </span>
+            </div>
+          ))}
+          {!integrationStatus && !integrationStatusMessage && <p className="settings-message">Loading connector status...</p>}
+          {integrationStatusMessage && <p className="settings-message">{integrationStatusMessage}</p>}
+        </div>
+      </Panel>
 
       <Panel title="What Pro unlocks after payment" icon={Sparkles}>
         <div className="settings-stack">
@@ -10836,6 +10922,8 @@ function PublishPreview({
     }))
     .filter((option) => option.email && !option.email.endsWith("@classloop.local"));
   const recipientCount = selectedEmailRecipients.length;
+  const classroomToolkit = integrationStatus?.composio?.toolkits.find((toolkit) => toolkit.id === "google_classroom");
+  const classroomComposioReady = Boolean(integrationStatus?.composio?.configured && classroomToolkit?.authConfigured);
   const currentPublishAudit = draft.publishAudit ?? makePublishAudit(draft);
   const blockingImportWarnings = unresolvedBlockingImportWarnings(draft);
   const updatePreviewSession = (sessionId: string, updater: (session: Session) => Session) => {
@@ -10849,7 +10937,9 @@ function PublishPreview({
   };
   const previewClassroomPost = () => {
     setClassroomPostMessage(
-      `Edited ${classroomPostType} is ready. Classroom posting is not connected yet, so copy this draft into your classroom tool.`,
+      classroomComposioReady
+        ? `Edited ${classroomPostType} is ready for the Composio preview connector. ClassLoop still requires teacher confirmation before external posting.`
+        : `Edited ${classroomPostType} is ready. Classroom posting is not connected yet, so copy this draft into your classroom tool.`,
     );
   };
   const sendStudentEmails = async () => {
@@ -11035,9 +11125,11 @@ function PublishPreview({
             <div className="capture-guidance">
               <ShieldCheck size={17} />
               <div>
-                <strong>Integration status</strong>
+                <strong>{classroomComposioReady ? "Composio preview connector ready" : "Integration status"}</strong>
                 <small>
-                  Classroom posting is not connected yet. Review the draft here, then copy it into your classroom tool.
+                  {classroomComposioReady
+                    ? "Google Classroom auth is configured through Composio, but this screen still prepares a reviewable class-wide draft only."
+                    : "Classroom posting is not connected yet. Review the draft here, then copy it into your classroom tool."}
                 </small>
               </div>
             </div>

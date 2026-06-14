@@ -11,9 +11,13 @@
     "dev": "vite --host 127.0.0.1",
     "start": "electron .",
     "build": "tsc && vite build && node scripts/strip-dist-trailing-whitespace.cjs",
+    "build:mcp": "tsc -p tsconfig.mcp.json",
+    "mcp:classloop": "node dist-mcp/mcp/classloop-server.js",
+    "mcp:setup:composio": "node scripts/setup-composio-mcps.mjs",
     "test:import": "tsc -p tsconfig.test.json && node --experimental-specifier-resolution=node .test-build/tests/import-flow.test.js",
     "test:cloud": "tsc -p tsconfig.test.json && node --experimental-specifier-resolution=node .test-build/tests/cloud-sync.test.js",
     "test:entitlements": "tsc -p tsconfig.test.json && node tests/entitlement-gates.test.mjs",
+    "test:mcp": "npm run build:mcp && node tests/mcp-smoke.test.mjs",
     "test:security": "node scripts/security-baseline.cjs && node tests/api-security.test.mjs",
     "test:package:init": "node scripts/package-init-failure-smoke.cjs",
     "bootstrap": "node scripts/bootstrap-dependencies.cjs",
@@ -31,7 +35,7 @@
     "test:manual": "node scripts/manual-qa-checklist.cjs",
     "test:manual:write": "node scripts/manual-qa-checklist.cjs --write",
     "test:package:sync": "node scripts/verify-package-sync.cjs",
-    "test:all": "npm run build && npm run test:security && npm run test:package:init && npm run test:package:sync && npm run test:import && npm run test:cloud && npm run test:entitlements && npm run test:stripe && npm run test:browser && npm run test:web:local && npm run test:swift:mac && npm run test:desktop:state && npm run test:desktop:first-run && npm run test:release:distribution && npm run drill:rollback && npm run drill:incidents && npm run test:manual:write && git diff --check",
+    "test:all": "npm run build && npm run test:security && npm run test:package:init && npm run test:package:sync && npm run test:import && npm run test:cloud && npm run test:entitlements && npm run test:mcp && npm run test:stripe && npm run test:browser && npm run test:web:local && npm run test:swift:mac && npm run test:desktop:state && npm run test:desktop:first-run && npm run test:release:distribution && npm run drill:rollback && npm run drill:incidents && npm run test:manual:write && git diff --check",
     "drill:rollback": "node scripts/drill-release-rollback.cjs",
     "drill:incidents": "node scripts/drill-incident-response.cjs",
     "drill:ops": "npm run drill:rollback && npm run drill:incidents",
@@ -53,6 +57,8 @@
     "release:checksums": "node scripts/generate-release-checksums.cjs"
   },
   "dependencies": {
+    "@composio/core": "^0.10.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@stripe/stripe-js": "^9.6.0",
     "@supabase/supabase-js": "^2.105.4",
     "@vercel/analytics": "^2.0.1",
@@ -60,10 +66,12 @@
     "nodemailer": "^8.0.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "stripe": "^22.1.1"
+    "stripe": "^22.1.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
+    "@types/node": "^25.9.3",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",

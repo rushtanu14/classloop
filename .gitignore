@@ -1,6 +1,7 @@
 node_modules
 .build
 .test-build
+dist-mcp
 .env.local
 .env.*.local
 .classloop-data.json

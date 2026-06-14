@@ -648,10 +648,10 @@ test("public root shows landing page and can enter the app demo", async ({ page 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /^ClassLoop$/i })).toBeVisible();
   const heroCopy = page.locator(".landing-hero-copy");
-  await expect(heroCopy.getByRole("button")).toHaveCount(3);
+  await expect(heroCopy.getByRole("button")).toHaveCount(2);
   await expect(heroCopy.getByRole("button", { name: /open web demo/i })).toBeVisible();
   await expect(heroCopy.getByRole("button", { name: /add to phone/i })).toBeVisible();
-  await expect(heroCopy.getByRole("button", { name: /view screenshots/i })).toBeVisible();
+  await expect(heroCopy.getByRole("button", { name: /view screenshots/i })).toHaveCount(0);
   await expect(page.getByText("Class, club, and personal notes")).toBeVisible();
   await expect(page.getByText("Teacher review built in")).toBeVisible();
   await expect(page.getByText("Student-specific next steps")).toBeVisible();

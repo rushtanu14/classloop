@@ -3820,10 +3820,6 @@ function LandingPage({
                     <Smartphone size={20} />
                     Add to phone
                   </button>
-                  <button className="landing-secondary quiet" type="button" onClick={() => goToPage("screenshots")}>
-                    <Eye size={20} />
-                    View screenshots
-                  </button>
                 </div>
               </div>
               <button className="landing-screenshot-preview" type="button" onClick={() => goToPage("screenshots")}>

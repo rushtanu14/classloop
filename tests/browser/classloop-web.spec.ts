@@ -28,10 +28,10 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   const docsButton = page.getByRole("button", { name: /^docs$/i });
   const isWideViewport = (page.viewportSize()?.width ?? 0) > 920;
   const heroCopy = page.locator(".landing-hero-copy");
-  await expect(heroCopy.getByRole("button")).toHaveCount(3);
+  await expect(heroCopy.getByRole("button")).toHaveCount(2);
   await expect(heroCopy.getByRole("button", { name: /open web demo/i })).toBeVisible();
   await expect(heroCopy.getByRole("button", { name: /add to phone/i })).toBeVisible();
-  await expect(heroCopy.getByRole("button", { name: /view screenshots/i })).toBeVisible();
+  await expect(heroCopy.getByRole("button", { name: /view screenshots/i })).toHaveCount(0);
   await expect(heroCopy.getByRole("button", { name: /download|macos/i })).toHaveCount(0);
   await expect(page.locator(".landing-hero .landing-platform-list")).toHaveCount(0);
   if (isWideViewport) {

@@ -77,6 +77,7 @@ function emptyWorkspace() {
   return {
     accounts: [],
     sessions: [],
+    personalMeetings: [],
     draft: null,
     demoLoaded: false,
     classGroups: [],
@@ -314,6 +315,7 @@ function writeDataFile(payload) {
   const nextState = {
     accounts: Array.isArray(payload.accounts) ? payload.accounts : [],
     sessions: Array.isArray(payload.sessions) ? payload.sessions : [],
+    personalMeetings: Array.isArray(payload.personalMeetings) ? payload.personalMeetings : [],
     draft: payload.draft ?? null,
     demoLoaded: Boolean(payload.demoLoaded),
     classGroups: Array.isArray(payload.classGroups) ? payload.classGroups : [],
@@ -585,10 +587,10 @@ async function handleHostedApiProxy(request, response, parsed) {
 function validateStatePayload(payload) {
   rejectUnexpectedFields(
     payload,
-    ["accounts", "sessions", "draft", "demoLoaded", "classGroups", "rosterTemplates", "privacySettings", "auditLog", "billingProfile"],
+    ["accounts", "sessions", "personalMeetings", "draft", "demoLoaded", "classGroups", "rosterTemplates", "privacySettings", "auditLog", "billingProfile"],
     "ClassLoop state",
   );
-  ["accounts", "sessions", "classGroups", "rosterTemplates", "auditLog"].forEach((key) => {
+  ["accounts", "sessions", "personalMeetings", "classGroups", "rosterTemplates", "auditLog"].forEach((key) => {
     if (payload[key] !== undefined && !Array.isArray(payload[key])) {
       const error = new Error(`ClassLoop state.${key} must be an array.`);
       error.statusCode = 400;

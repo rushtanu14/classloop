@@ -1,4 +1,8 @@
 import { assertIpRateLimit, json, methodNotAllowed, sendApiError } from "../_shared.js";
+import {
+  classLoopComposioServerName,
+  composioIntegrationStatus,
+} from "../../composio-integrations.js";
 
 function emailConfig() {
   if (process.env.CLASSLOOP_SMTP_HOST) {
@@ -59,53 +63,17 @@ const localMcpCapabilities = {
   ],
 };
 
-const composioToolkits = [
-  {
-    id: "google_classroom",
-    label: "Google Classroom",
-    authConfigEnv: "COMPOSIO_GOOGLE_CLASSROOM_AUTH_CONFIG_ID",
-    mode: "preview_first",
-    allowedTools: [
-      "GOOGLE_CLASSROOM_LIST_COURSES",
-      "GOOGLE_CLASSROOM_LIST_STUDENTS",
-      "GOOGLE_CLASSROOM_LIST_ANNOUNCEMENTS",
-      "GOOGLE_CLASSROOM_CREATE_ANNOUNCEMENT",
-      "GOOGLE_CLASSROOM_CREATE_COURSE_WORK",
-      "GOOGLE_CLASSROOM_CREATE_COURSE_WORK_MATERIAL",
-    ],
-  },
-  {
-    id: "zoom",
-    label: "Zoom",
-    authConfigEnv: "COMPOSIO_ZOOM_AUTH_CONFIG_ID",
-    mode: "preview_first",
-    allowedTools: [
-      "ZOOM_LIST_MEETINGS",
-      "ZOOM_GET_MEETING",
-      "ZOOM_LIST_MEETING_PARTICIPANTS",
-      "ZOOM_LIST_RECORDINGS",
-      "ZOOM_GET_RECORDING",
-    ],
-  },
-  {
-    id: "gmail",
-    label: "Gmail",
-    authConfigEnv: "COMPOSIO_GMAIL_AUTH_CONFIG_ID",
-    mode: "draft_only",
-    allowedTools: ["GMAIL_CREATE_DRAFT", "GMAIL_FETCH_EMAILS", "GMAIL_SEARCH_EMAILS"],
-  },
-];
-
 function composioConfig() {
+  const toolkits = composioIntegrationStatus(process.env);
   return {
     configured: Boolean(process.env.COMPOSIO_API_KEY),
-    serverName: "classloop-preview-connectors",
+    serverName: classLoopComposioServerName,
     mcpConfigIdConfigured: Boolean(process.env.COMPOSIO_CLASSLOOP_MCP_CONFIG_ID),
     userIdConfigured: Boolean(process.env.COMPOSIO_CLASSLOOP_USER_ID),
-    toolkits: composioToolkits.map((toolkit) => ({
-      ...toolkit,
-      authConfigured: Boolean(process.env[toolkit.authConfigEnv]),
-    })),
+    configuredToolkitCount: toolkits.filter((toolkit) => toolkit.authConfigured).length,
+    coreToolkitCount: toolkits.filter((toolkit) => toolkit.priority === "core").length,
+    configuredCoreToolkitCount: toolkits.filter((toolkit) => toolkit.priority === "core" && toolkit.authConfigured).length,
+    toolkits,
   };
 }
 

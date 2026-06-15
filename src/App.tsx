@@ -409,12 +409,20 @@ type IntegrationStatus = {
     serverName: string;
     mcpConfigIdConfigured: boolean;
     userIdConfigured: boolean;
+    configuredToolkitCount?: number;
+    coreToolkitCount?: number;
+    configuredCoreToolkitCount?: number;
     toolkits: Array<{
       id: string;
+      toolkit?: string;
       label: string;
+      category?: string;
+      priority?: string;
+      purpose?: string;
       authConfigEnv: string;
       authConfigured: boolean;
       mode: string;
+      allowedToolsEnv?: string;
       allowedTools: string[];
     }>;
   };
@@ -8560,6 +8568,11 @@ function SyncBillingPage({
                   ? `${configuredComposioToolkits} of ${composioToolkits.length} connector auth configs are present for ${integrationStatus.composio.serverName}.`
                   : "Set COMPOSIO_API_KEY and connector auth config ids to enable preview connectors."}
               </small>
+              {integrationStatus?.composio?.coreToolkitCount ? (
+                <small>
+                  Core: {integrationStatus.composio.configuredCoreToolkitCount ?? 0} of {integrationStatus.composio.coreToolkitCount} configured.
+                </small>
+              ) : null}
             </span>
           </div>
           {composioToolkits.map((toolkit) => (
@@ -8571,7 +8584,11 @@ function SyncBillingPage({
                     ? `${toolkit.mode.replace("_", " ")} connector configured.`
                     : `Missing ${toolkit.authConfigEnv}.`}
                 </small>
-                <small>{toolkit.allowedTools.slice(0, 3).join(", ")}{toolkit.allowedTools.length > 3 ? "..." : ""}</small>
+                <small>
+                  {toolkit.category ?? "Connector"} · {toolkit.allowedTools.length} allowed preview tools
+                  {toolkit.priority === "core" ? " · core" : ""}
+                </small>
+                {toolkit.purpose && <small>{toolkit.purpose}</small>}
               </span>
             </div>
           ))}

@@ -94,32 +94,47 @@ final class ClassLoopSwiftApp: NSObject, NSApplicationDelegate, NSWindowDelegate
       if !startupRecoveryScheduled {
         startupRecoveryScheduled = true
         for delay in [0.75, 1.75] {
-          DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak webView] in
-            webView?.load(request)
+          DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak webView] in
+            guard let self, let webView else { return }
+            self.reloadLocalAppIfUnhealthy(request: request, in: webView, generation: loadGeneration)
           }
         }
       }
 
       DispatchQueue.main.asyncAfter(deadline: .now() + 2.75) { [weak self, weak webView] in
-        guard
-          let self,
-          let webView,
-          self.localLoadGeneration == loadGeneration
-        else {
-          return
-        }
-
-        let healthCheck = "Boolean(document.body && document.body.innerText && document.body.innerText.includes('ClassLoop'))"
-        webView.evaluateJavaScript(healthCheck) { result, error in
-          guard self.localLoadGeneration == loadGeneration else { return }
-          if error == nil, (result as? Bool) == true {
-            return
-          }
-          webView.load(request)
-        }
+        guard let self, let webView else { return }
+        self.reloadLocalAppIfUnhealthy(request: request, in: webView, generation: loadGeneration)
       }
     case .hosted(let url):
       webView.load(URLRequest(url: url))
+    }
+  }
+
+  private func reloadLocalAppIfUnhealthy(request: URLRequest, in webView: WKWebView, generation: Int) {
+    guard localLoadGeneration == generation else { return }
+
+    let healthCheck = """
+    Boolean(
+      document.body &&
+      document.body.innerText &&
+      document.body.innerText.includes('ClassLoop') &&
+      document.getElementById('root') &&
+      document.getElementById('root').children.length > 0
+    )
+    """
+    webView.evaluateJavaScript(healthCheck) { [weak self, weak webView] result, error in
+      guard
+        let self,
+        let webView,
+        self.localLoadGeneration == generation
+      else {
+        return
+      }
+
+      if error == nil, (result as? Bool) == true {
+        return
+      }
+      webView.load(request)
     }
   }
 

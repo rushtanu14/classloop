@@ -942,6 +942,31 @@ test("create account reuses an existing email instead of creating duplicate loca
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
 });
 
+test("auth entry buttons open the login and account forms from a compact desktop window", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The compact entry-card regression only needs one browser project.");
+  await page.setViewportSize({ width: 713, height: 455 });
+  await page.goto("/");
+  await page.evaluate(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+  });
+  await page.goto("/#/dashboard");
+
+  const entryActions = page.locator(".auth-entry-actions");
+  const createAccount = entryActions.getByRole("button", { name: /^create account$/i });
+  const logIn = entryActions.getByRole("button", { name: /^log in$/i });
+  await expect(createAccount).toBeVisible();
+  await expect(logIn).toBeVisible();
+
+  await logIn.click();
+  await expect(page.getByRole("heading", { name: /^sign in to classloop/i })).toBeVisible();
+
+  await page.reload();
+  await expect(createAccount).toBeVisible();
+  await createAccount.click();
+  await expect(page.getByRole("heading", { name: /^create your classloop account/i })).toBeVisible();
+});
+
 test("new accounts are cloud-backed and can sign in on a fresh device", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "The cloud-backed signup regression only needs one browser project.");
   const runId = Date.now().toString(36);

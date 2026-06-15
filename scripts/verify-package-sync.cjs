@@ -87,6 +87,10 @@ assert(
   swiftSource.includes("Bundle.main.resourceURL") && swiftSource.includes('appendingPathComponent("dist"') && swiftSource.includes("127.0.0.1"),
   "Swift macOS app must be able to serve the bundled dist inside ClassLoop.app.",
 );
+assert(
+  swiftSource.includes("reloadLocalAppIfUnhealthy") && !swiftSource.includes("webView?.load(request)"),
+  "Swift macOS startup recovery must health-check before reloading so first-click auth actions are not swallowed.",
+);
 
 const downloads = readJson("public/classloop-downloads.json");
 assert(

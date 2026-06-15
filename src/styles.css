@@ -4248,6 +4248,58 @@ button:disabled:hover {
   line-height: 1.45;
 }
 
+.import-integration-panel {
+  background: #f8fbfa;
+}
+
+.import-connector-grid,
+.post-transcript-actions,
+.zoom-transcript-picker {
+  display: grid;
+  gap: 10px;
+}
+
+.import-connector-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 58px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  background: #fffefa;
+  text-align: left;
+}
+
+button.import-connector-row {
+  cursor: pointer;
+}
+
+.import-connector-row.active {
+  border-color: rgba(15, 118, 110, 0.38);
+  background: #e8f8f5;
+}
+
+.import-connector-row > svg {
+  color: var(--primary);
+}
+
+.import-connector-row span,
+.post-transcript-actions > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.import-connector-row small,
+.post-transcript-actions small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .delivery-log-list,
 .publish-audit-list,
 .audit-list,

@@ -848,19 +848,35 @@ async function publishGeometrySample(page: Page) {
   await expect(page.getByText(/Follow-through tracker/i)).toBeVisible();
 }
 
-test("teacher can use template links, manual rosters, and Zoom cloud transcript import", async ({ page }, testInfo) => {
+test("teacher sees connector-gated imports and can paste transcript manually", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "The integration scaffold smoke runs once; responsive coverage comes from the main app smoke.");
   const runId = Date.now().toString(36);
+  const pastedTranscript = `[00:00:44] Ms. Rivera: Great. Who can tell me what an algorithm is?
+[00:00:57] Student (Priya Mehta): Is it like a set of steps to solve a problem?
+[00:01:14] Student (Jalen Thompson): [Chat] TikTok algorithm lol
+[00:10:31] Student (Keisha Brown): Step 1, pick up the bread bag and put two slices on the plate.
+[00:13:35] Ms. Rivera: Homework for Thursday: complete the algorithm design worksheet.`;
   await resetBrowser(page);
   await createAccount(page, "teacher", `Integration Teacher ${runId}`, `integrations-${runId}@classloop.test`, `teacher-pass-${runId}`);
 
   await page.getByRole("button", { name: /new session/i }).first().click();
+  await page.getByLabel(/session title/i).fill(`Connector gated import ${runId}`);
   const classTemplateCard = page.getByLabel(/google docs class template/i);
   await expect(classTemplateCard).toBeVisible();
   await expect(classTemplateCard.getByRole("link", { name: /make a copy/i })).toHaveAttribute("href", classTemplateCopyUrl);
   await expect(classTemplateCard.getByText(/template link is not connected yet/i)).toHaveCount(0);
   await expect(page.getByText(/roster source/i)).toHaveCount(0);
   await expect(page.getByRole("button", { name: /google classroom/i })).toHaveCount(0);
+  await expect(page.getByText(/zoom cloud import/i)).toHaveCount(0);
+  await expect(page.getByText(/CS4All Intro to Computational Thinking/i)).toHaveCount(0);
+  await expect(page.getByText(/Geometry Review: Similar Triangles/i)).toHaveCount(0);
+  await expect(page.getByLabel(/connect imports and follow-up integrations/i)).toContainText(/Connect Zoom/i);
+  await expect(page.getByLabel(/post-transcript integrations/i)).toHaveCount(0);
+  await page.getByLabel(/paste transcript text/i).fill(pastedTranscript);
+  await expect(page.getByLabel(/post-transcript integrations/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /calendar reminder/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /email reminder/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /classroom post/i })).toBeVisible();
   await page
     .locator(".summary-input-card")
     .getByLabel(/^Roster$/i)
@@ -873,15 +889,11 @@ test("teacher can use template links, manual rosters, and Zoom cloud transcript 
       ].join("\n"),
     );
 
-  await expect(page.getByText(/zoom cloud import/i)).toBeVisible();
-  await page.getByLabel(/search date or title/i).fill("CS4All");
-  await page.getByRole("button", { name: /import selected zoom transcript/i }).click();
-  await expect(page.getByText(/Imported Audio transcript VTT from CS4All Intro to Computational Thinking/i)).toBeVisible();
   await page.getByRole("button", { name: /generate draft/i }).click();
   await expect(page.locator(".review-page")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(/edit the draft before publishing/i)).toBeVisible();
   await page.getByRole("tab", { name: /^transcript$/i }).click();
-  await expect(page.getByText(/CS4All Intro to Computational Thinking transcript/i)).toBeVisible();
+  await expect(page.getByText(/Connector gated import/i).first()).toBeVisible();
   await expect(page.getByText(/Priya Mehta/i).first()).toBeVisible();
   await page.getByRole("tab", { name: /roster & matching/i }).click();
   await expect
@@ -897,9 +909,9 @@ test("teacher can use template links, manual rosters, and Zoom cloud transcript 
   await page.getByRole("button", { name: /publish to students/i }).click();
   await handleRosterPrompt(page);
   const exported = await downloadCurrentReportJson(page);
-  expect(exported.capture?.transcriptSource).toBe("zoom_cloud_transcript");
-  expect(exported.transcript).toBe("");
-  expect(exported.notes).toContain("Raw Zoom cloud transcript auto-deleted after draft generation.");
+  expect(exported.capture?.transcriptSource).toBe("paste");
+  expect(exported.transcript).toContain("Priya Mehta");
+  expect(exported.notes).not.toContain("Raw Zoom cloud transcript auto-deleted after draft generation.");
   expect(exported.students.map((student) => student.email)).toContain("acarter@cs4all.nyc");
   expect(exported.resources.some((resource) => resource.url.includes("classroom.google.com"))).toBe(false);
 });

@@ -1001,44 +1001,7 @@ type ZoomCloudMeetingOption = {
   }>;
 };
 
-
-const zoomCloudMeetingOptions: ZoomCloudMeetingOption[] = [
-  {
-    id: "zoom-cs4all-demo",
-    title: "CS4All Intro to Computational Thinking",
-    date: "2026-04-28",
-    files: [
-      {
-        id: "main-transcript",
-        label: "Audio transcript VTT",
-        transcript: `[00:00:44] Ms. Rivera: Great. Who can tell me what an algorithm is?
-[00:00:57] Student (Priya Mehta): Is it like a set of steps to solve a problem?
-[00:01:14] Student (Jalen Thompson): [Chat] TikTok algorithm lol
-[00:10:31] Student (Keisha Brown): Step 1, pick up the bread bag and put two slices on the plate.
-[00:11:48] Student (Priya Mehta): Break it into smaller parts?
-[00:13:35] Ms. Rivera: Homework for Thursday: complete the algorithm design worksheet on Google Classroom.`,
-      },
-      {
-        id: "chat-transcript",
-        label: "Chat transcript",
-        transcript: `[Chat] Priya Mehta: found this video -> https://www.youtube.com/watch?v=6hfOvs8pY1k
-[Chat] Leo Fernandez: decomposition video -> https://www.youtube.com/watch?v=QXjU9qTsYCc`,
-      },
-    ],
-  },
-  {
-    id: "zoom-geometry-demo",
-    title: "Geometry Review: Similar Triangles",
-    date: "2026-05-20",
-    files: [
-      {
-        id: "main-transcript",
-        label: "Audio transcript",
-        transcript: sampleTranscript,
-      },
-    ],
-  },
-];
+const zoomCloudMeetingOptions: ZoomCloudMeetingOption[] = [];
 
 function appendCapturedText(current: string, text: string) {
   const clean = text.replace(/\s+/g, " ").trim();
@@ -8726,10 +8689,14 @@ function ImportSession({
   const [fileName, setFileName] = useState("");
   const [templateDetails, setTemplateDetails] = useState<Record<string, string>>({});
   const [zoomSearch, setZoomSearch] = useState("");
-  const [selectedZoomMeetingId, setSelectedZoomMeetingId] = useState(zoomCloudMeetingOptions[0]?.id ?? "");
-  const [selectedZoomTranscriptFileId, setSelectedZoomTranscriptFileId] = useState(zoomCloudMeetingOptions[0]?.files[0]?.id ?? "");
+  const [selectedZoomMeetingId, setSelectedZoomMeetingId] = useState("");
+  const [selectedZoomTranscriptFileId, setSelectedZoomTranscriptFileId] = useState("");
+  const [zoomPickerOpen, setZoomPickerOpen] = useState(false);
   const [zoomCloudImported, setZoomCloudImported] = useState(false);
   const [zoomMessage, setZoomMessage] = useState("");
+  const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
+  const [integrationStatusMessage, setIntegrationStatusMessage] = useState("");
+  const [integrationActionMessage, setIntegrationActionMessage] = useState("");
   const [captureMode, setCaptureMode] = useState<SessionCaptureMode>("transcript");
   const [captureStatus, setCaptureStatus] = useState<"idle" | "recording" | "stopped">("idle");
   const [captureMessage, setCaptureMessage] = useState("");
@@ -8751,15 +8718,26 @@ function ImportSession({
   const captureStartedAtRef = useRef<number | null>(null);
   const liveSegmentCountRef = useRef(0);
   const activeTemplateFields = templateDetailFields[template];
+  const integrationToolkits = integrationStatus?.composio?.toolkits ?? [];
+  const composioConfigured = Boolean(integrationStatus?.composio?.configured);
+  const zoomToolkit = integrationToolkits.find((toolkit) => toolkit.id === "zoom");
+  const gmailToolkit = integrationToolkits.find((toolkit) => toolkit.id === "gmail");
+  const calendarToolkit = integrationToolkits.find((toolkit) => toolkit.id === "googlecalendar");
+  const classroomToolkit = integrationToolkits.find((toolkit) => toolkit.id === "google_classroom");
+  const zoomConnectorReady = Boolean(composioConfigured && zoomToolkit?.authConfigured);
+  const gmailConnectorReady = Boolean(composioConfigured && gmailToolkit?.authConfigured);
+  const calendarConnectorReady = Boolean(composioConfigured && calendarToolkit?.authConfigured);
+  const classroomConnectorReady = Boolean(composioConfigured && classroomToolkit?.authConfigured);
+  const connectedZoomMeetings = useMemo(() => (zoomConnectorReady ? zoomCloudMeetingOptions : []), [zoomConnectorReady]);
   const filteredZoomMeetings = useMemo(() => {
     const query = zoomSearch.trim().toLowerCase();
-    if (!query) return zoomCloudMeetingOptions;
-    return zoomCloudMeetingOptions.filter((meeting) =>
+    if (!query) return connectedZoomMeetings;
+    return connectedZoomMeetings.filter((meeting) =>
       [meeting.title, meeting.date].some((value) => value.toLowerCase().includes(query)),
     );
-  }, [zoomSearch]);
+  }, [connectedZoomMeetings, zoomSearch]);
   const selectedZoomMeeting =
-    zoomCloudMeetingOptions.find((meeting) => meeting.id === selectedZoomMeetingId) ?? filteredZoomMeetings[0] ?? zoomCloudMeetingOptions[0];
+    connectedZoomMeetings.find((meeting) => meeting.id === selectedZoomMeetingId) ?? filteredZoomMeetings[0];
   const selectedZoomTranscriptFile =
     selectedZoomMeeting?.files.find((file) => file.id === selectedZoomTranscriptFileId) ?? selectedZoomMeeting?.files[0];
   const matchingRosterTemplates = useMemo(
@@ -8803,9 +8781,30 @@ function ImportSession({
     : "";
 
   useEffect(() => {
-    if (!selectedZoomMeeting) return;
+    let active = true;
+    apiJson<IntegrationStatus>("/api/integrations/status")
+      .then((status) => {
+        if (!active) return;
+        setIntegrationStatus(status);
+        setIntegrationStatusMessage("");
+      })
+      .catch((error) => {
+        if (!active) return;
+        setIntegrationStatus(null);
+        setIntegrationStatusMessage(error instanceof Error ? error.message : "Unable to load connector status.");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedZoomMeeting) {
+      setSelectedZoomTranscriptFileId("");
+      return;
+    }
     setSelectedZoomTranscriptFileId(selectedZoomMeeting.files[0]?.id ?? "");
-  }, [selectedZoomMeetingId]);
+  }, [selectedZoomMeeting?.id]);
 
   useEffect(() => {
     const matchingTemplate = rosterTemplates.find((templateItem) => templateItem.sessionType === template);
@@ -8982,6 +8981,8 @@ function ImportSession({
     setTemplate("Math review");
     setCaptureMode("transcript");
     setZoomCloudImported(false);
+    setZoomMessage("");
+    setIntegrationActionMessage("");
     setTranscript(sampleTranscript);
     setStructuredTranscript(
       createStructuredTranscriptFromText(sampleTranscript, {
@@ -9000,8 +9001,28 @@ function ImportSession({
     onUseDemo();
   };
 
+  const openConnectorSettings = (connectorLabel: string) => {
+    setIntegrationActionMessage(`${connectorLabel} setup lives in Plan options for now.`);
+    navigate("billing");
+  };
+
+  const handleFollowUpIntegrationAction = (connectorLabel: string, ready: boolean) => {
+    if (!ready) {
+      openConnectorSettings(connectorLabel);
+      return;
+    }
+    setIntegrationActionMessage(`Generate the draft, then ClassLoop can prepare the ${connectorLabel} action for review.`);
+  };
+
   const importZoomCloudTranscript = () => {
-    if (!selectedZoomMeeting || !selectedZoomTranscriptFile) return;
+    if (!zoomConnectorReady) {
+      setZoomMessage("Connect Zoom before importing cloud transcripts.");
+      return;
+    }
+    if (!selectedZoomMeeting || !selectedZoomTranscriptFile) {
+      setZoomMessage("No Zoom transcript file is available from the connected account yet.");
+      return;
+    }
     setCaptureMode("transcript");
     setZoomCloudImported(true);
     setTranscript(selectedZoomTranscriptFile.transcript);
@@ -9013,12 +9034,7 @@ function ImportSession({
     );
     setFileName(`Zoom cloud: ${selectedZoomTranscriptFile.label}`);
     if (!title.trim()) setTitle(selectedZoomMeeting.title);
-    setNotes((current) =>
-      appendCapturedText(
-        current,
-        `Zoom cloud meeting: ${selectedZoomMeeting.title} (${formatDate(selectedZoomMeeting.date)}). Raw Zoom transcript should be deleted after recap generation; structured recap, tasks, resources, participation, and follow-ups remain.`,
-      ),
-    );
+    setIntegrationActionMessage("");
     setZoomMessage(`Imported ${selectedZoomTranscriptFile.label} from ${selectedZoomMeeting.title}.`);
   };
 
@@ -9027,6 +9043,8 @@ function ImportSession({
     setFileName(file.name);
     setCaptureMode("transcript");
     setZoomCloudImported(false);
+    setZoomMessage("");
+    setIntegrationActionMessage("");
     if (isTextTranscriptFile(file)) {
       const text = await readTranscriptFileText(file);
       setStructuredTranscript(createStructuredTranscriptFromText(text, { title: `${title || file.name} transcript`, source: "file" }));
@@ -9416,60 +9434,6 @@ function ImportSession({
             </div>
             {captureMode === "transcript" && (
               <>
-                <div className="capture-panel wide" aria-label="Zoom cloud transcript import">
-                  <div>
-                    <span className="eyebrow">Zoom cloud import</span>
-                    <h3>Import transcript-ready Zoom meetings.</h3>
-                    <p>
-                      Show recent meetings with transcript files, search by date or title, then choose the transcript
-                      file when Zoom has more than one.
-                    </p>
-                  </div>
-                  <div className="saved-roster-row">
-                    <label className="field compact">
-                      <span>Search date or title</span>
-                      <input value={zoomSearch} onChange={(event) => setZoomSearch(event.target.value)} placeholder="CS4All or 2026-04-28" />
-                    </label>
-                    <label className="field compact">
-                      <span>Transcript-ready meeting</span>
-                      <select value={selectedZoomMeeting?.id ?? ""} onChange={(event) => setSelectedZoomMeetingId(event.target.value)}>
-                        {filteredZoomMeetings.map((meeting) => (
-                          <option key={meeting.id} value={meeting.id}>
-                            {meeting.title} · {formatDate(meeting.date)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field compact">
-                      <span>Transcript file</span>
-                      <select
-                        value={selectedZoomTranscriptFile?.id ?? ""}
-                        onChange={(event) => setSelectedZoomTranscriptFileId(event.target.value)}
-                      >
-                        {(selectedZoomMeeting?.files ?? []).map((file) => (
-                          <option key={file.id} value={file.id}>
-                            {file.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  <div className="capture-guidance">
-                    <ShieldCheck size={17} />
-                    <div>
-                      <strong>Raw transcript retention</strong>
-                      <small>
-                        Zoom cloud transcript text is used to generate the recap, then removed from the saved session.
-                        Structured recap, tasks, resources, participation, and follow-ups remain.
-                      </small>
-                    </div>
-                  </div>
-                  <button className="ghost-button" type="button" onClick={importZoomCloudTranscript}>
-                    <Download size={17} />
-                    Import selected Zoom transcript
-                  </button>
-                  {zoomMessage && <p className="settings-message success">{zoomMessage}</p>}
-                </div>
                 <label className="upload-zone wide">
                   <UploadCloud size={24} />
                   <strong>{fileName || "Upload transcript, audio, or screen recording"}</strong>
@@ -9487,10 +9451,145 @@ function ImportSession({
                     onChange={(event) => {
                       setTranscript(event.target.value);
                       setStructuredTranscript(undefined);
+                      setZoomCloudImported(false);
+                      setFileName("");
+                      setZoomMessage("");
+                      setIntegrationActionMessage("");
                     }}
                     placeholder="Paste the raw transcript here..."
                   />
                 </label>
+                <div className="capture-panel wide import-integration-panel" aria-label="Connect imports and follow-up integrations">
+                  <div>
+                    <span className="eyebrow">Connected imports</span>
+                    <h3>Connect sources when you want one-click imports.</h3>
+                    <p>Manual paste and upload stay available even when no external connector is set up.</p>
+                  </div>
+                  <div className="import-connector-grid">
+                    <div className={`import-connector-row ${zoomConnectorReady ? "active" : ""}`}>
+                      <PlayCircle size={18} />
+                      <span>
+                        <strong>Zoom transcripts</strong>
+                        <small>{zoomConnectorReady ? "Connected for transcript imports." : "Not connected."}</small>
+                      </span>
+                      <button
+                        type="button"
+                        className={zoomConnectorReady ? "ghost-button" : "primary-button"}
+                        onClick={() => {
+                          if (!zoomConnectorReady) {
+                            openConnectorSettings("Zoom");
+                            return;
+                          }
+                          setZoomPickerOpen((open) => !open);
+                          setZoomMessage("");
+                        }}
+                      >
+                        {zoomConnectorReady ? "Choose transcript" : "Connect Zoom"}
+                      </button>
+                    </div>
+                    <div className="import-connector-row">
+                      <Link2 size={18} />
+                      <span>
+                        <strong>Drive, Docs, or Sheets</strong>
+                        <small>Use uploads for now, or connect document sources from settings.</small>
+                      </span>
+                      <button type="button" className="ghost-button" onClick={() => openConnectorSettings("Google Workspace")}>
+                        Connect
+                      </button>
+                    </div>
+                  </div>
+                  {zoomPickerOpen && zoomConnectorReady && (
+                    <div className="zoom-transcript-picker" aria-label="Zoom transcript picker">
+                      {connectedZoomMeetings.length > 0 ? (
+                        <>
+                          <div className="saved-roster-row">
+                            <label className="field compact">
+                              <span>Search date or title</span>
+                              <input value={zoomSearch} onChange={(event) => setZoomSearch(event.target.value)} placeholder="Search connected Zoom transcripts" />
+                            </label>
+                            <label className="field compact">
+                              <span>Transcript-ready meeting</span>
+                              <select value={selectedZoomMeeting?.id ?? ""} onChange={(event) => setSelectedZoomMeetingId(event.target.value)}>
+                                {filteredZoomMeetings.map((meeting) => (
+                                  <option key={meeting.id} value={meeting.id}>
+                                    {meeting.title} · {formatDate(meeting.date)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="field compact">
+                              <span>Transcript file</span>
+                              <select
+                                value={selectedZoomTranscriptFile?.id ?? ""}
+                                onChange={(event) => setSelectedZoomTranscriptFileId(event.target.value)}
+                              >
+                                {(selectedZoomMeeting?.files ?? []).map((file) => (
+                                  <option key={file.id} value={file.id}>
+                                    {file.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                          <button className="ghost-button" type="button" onClick={importZoomCloudTranscript}>
+                            <Download size={17} />
+                            Import selected Zoom transcript
+                          </button>
+                        </>
+                      ) : (
+                        <p className="settings-message" role="status">
+                          Zoom is configured, but no transcript files are loaded from a connected account yet.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {zoomMessage && <p className="settings-message success">{zoomMessage}</p>}
+                  {integrationStatusMessage && <p className="settings-message">{integrationStatusMessage}</p>}
+                  {transcript.trim() && (
+                    <div className="post-transcript-actions" aria-label="Post-transcript integrations">
+                      <div>
+                        <strong>After the transcript is in</strong>
+                        <small>Prepare follow-up actions from the generated draft.</small>
+                      </div>
+                      <div className="import-connector-grid">
+                        <button
+                          type="button"
+                          className={`import-connector-row ${calendarConnectorReady ? "active" : ""}`}
+                          onClick={() => handleFollowUpIntegrationAction("Calendar reminder", calendarConnectorReady)}
+                        >
+                          <CalendarDays size={18} />
+                          <span>
+                            <strong>Calendar reminder</strong>
+                            <small>{calendarConnectorReady ? "Ready after draft review." : "Connect Google Calendar."}</small>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`import-connector-row ${gmailConnectorReady ? "active" : ""}`}
+                          onClick={() => handleFollowUpIntegrationAction("email reminder", gmailConnectorReady)}
+                        >
+                          <Mail size={18} />
+                          <span>
+                            <strong>Email reminder</strong>
+                            <small>{gmailConnectorReady ? "Ready after draft review." : "Connect Gmail."}</small>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`import-connector-row ${classroomConnectorReady ? "active" : ""}`}
+                          onClick={() => handleFollowUpIntegrationAction("Classroom post", classroomConnectorReady)}
+                        >
+                          <Send size={18} />
+                          <span>
+                            <strong>Classroom post</strong>
+                            <small>{classroomConnectorReady ? "Ready after draft review." : "Connect Google Classroom."}</small>
+                          </span>
+                        </button>
+                      </div>
+                      {integrationActionMessage && <p className="settings-message">{integrationActionMessage}</p>}
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </div>

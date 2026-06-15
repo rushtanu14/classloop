@@ -1361,6 +1361,7 @@ select:focus-visible,
 }
 
 .auth-entry-panel {
+  position: relative;
   display: grid;
   justify-items: center;
   gap: 24px;
@@ -1399,6 +1400,8 @@ select:focus-visible,
 }
 
 .auth-entry-actions {
+  position: relative;
+  z-index: 2;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;

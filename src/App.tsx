@@ -62,25 +62,24 @@ import {
   sampleRoster,
   sampleTranscript,
 } from "./data";
-import { createStructuredTranscriptFromSegments, createStructuredTranscriptFromText, formatTranscriptTime } from "./transcript";
+import { createStructuredTranscriptFromText, formatTranscriptTime } from "./transcript";
+import { partitionSessionsAndDraftByRetention, partitionSessionsByRetention } from "./retention";
 import {
-  cloudRequest,
+  mergeOwnerCloudWorkspaceState,
+  parseCloudWorkspaceResponse,
+  toOwnerCloudWorkspaceState,
+} from "./cloudWorkspace";
+import {
   buildStripePaymentLinkUrl,
-  createBillingPortalSession,
+  cloudRequest,
   createCloudAccount,
-  createCheckoutSession,
-  createEmbeddedCheckoutSession,
   ensureCloudAccount,
   getBackendStatus,
   getCloudEmailRedirectUrl,
   getCloudProfile,
   getCloudSession,
-  hasStripePaymentLinkConfig,
-  getStripeBuyButtonConfig,
-  getStripePaymentLinkUrl,
   isManualProBillingProfile,
   isPaidPlan,
-  manualProBillingProfileForEmail,
   planCatalog,
   resendCloudConfirmation,
   requestCloudEmailChange,
@@ -132,6 +131,7 @@ type RouteKey =
   | "classes"
   | "rosters"
   | "analytics"
+  | "integrations"
   | "billing"
   | "checkout"
   | "tutorial"
@@ -290,6 +290,12 @@ type SharedState = {
   updatedAt?: string;
 };
 
+type CloudWorkspaceState = Omit<SharedState, "accounts" | "billingProfile">;
+type CloudWorkspaceSnapshot = {
+  state: Partial<CloudWorkspaceState>;
+  updatedAt?: string;
+};
+
 type SyncStatus = "connecting" | "shared" | "local";
 
 type NoticeSeverity = "info" | "warning" | "error";
@@ -396,7 +402,256 @@ type IntegrationStatus = {
     from?: string;
     replyTo?: string;
   };
+  localMcp?: {
+    available: boolean;
+    transport: string;
+    command: string;
+    args: string[];
+    redactionDefault: string;
+    resources: string[];
+    tools: string[];
+    prompts: string[];
+  };
+  composio?: {
+    configured: boolean;
+    serverName: string;
+    mcpConfigIdConfigured: boolean;
+    userIdConfigured: boolean;
+    configuredToolkitCount?: number;
+    coreToolkitCount?: number;
+    configuredCoreToolkitCount?: number;
+    toolkits: Array<{
+      id: string;
+      toolkit?: string;
+      label: string;
+      category?: string;
+      priority?: string;
+      purpose?: string;
+      authConfigEnv: string;
+      authConfigured: boolean;
+      mode: string;
+      allowedToolsEnv?: string;
+      allowedTools: string[];
+    }>;
+  };
 };
+
+type ComposioToolkitStatus = NonNullable<IntegrationStatus["composio"]>["toolkits"][number];
+
+type ClassLoopIntegrationWorkflow = {
+  id: string;
+  label: string;
+  icon: typeof Link2;
+  summary: string;
+  importUse?: string;
+  followUpUse?: string;
+  reviewRule: string;
+  unlocks: string[];
+};
+
+const classLoopIntegrationWorkflows: ClassLoopIntegrationWorkflow[] = [
+  {
+    id: "zoom",
+    label: "Zoom",
+    icon: PlayCircle,
+    summary: "Import transcript-ready Zoom meetings without showing sample data before a real account is configured.",
+    importUse: "Transcript picker, meeting metadata, participants, recordings, and AI summary availability.",
+    followUpUse: "Use transcript context to prepare student reminders and classwide follow-up drafts.",
+    reviewRule: "Teachers choose the meeting and transcript file before anything enters the draft.",
+    unlocks: ["Transcript-ready meeting picker", "Participant hints for roster matching", "Recording summary context"],
+  },
+  {
+    id: "google_classroom",
+    label: "Google Classroom",
+    icon: GraduationCap,
+    summary: "Read course rosters, materials, assignments, and announcements into the teacher review flow.",
+    importUse: "Roster import, recent coursework, resources, and course context.",
+    followUpUse: "Use existing classwide coursework and announcement context while reviewing the recap.",
+    reviewRule: "The current connector is read-only; Classroom posting remains a manual teacher action.",
+    unlocks: ["Course roster import", "Recent assignment/resource context", "Announcement context"],
+  },
+  {
+    id: "gmail",
+    label: "Gmail",
+    icon: Mail,
+    summary: "Create teacher-reviewed recap and reminder drafts from a teacher-owned mailbox.",
+    followUpUse: "Draft recap emails, missing-work reminders, and parent/guardian messages only after review.",
+    reviewRule: "Gmail remains draft-only; ClassLoop does not silently send messages.",
+    unlocks: ["Recap email drafts", "Reminder email drafts", "Mailbox search when explicitly requested"],
+  },
+  {
+    id: "googlecalendar",
+    label: "Google Calendar",
+    icon: CalendarDays,
+    summary: "Read calendar and event context while reviewing due dates, office hours, and next-class follow-ups.",
+    followUpUse: "Compare homework and follow-up dates with the teacher's existing schedule.",
+    reviewRule: "The current connector does not create or change calendar events.",
+    unlocks: ["Calendar list", "Existing event context", "Schedule conflict review"],
+  },
+  {
+    id: "googlemeet",
+    label: "Google Meet",
+    icon: PlayCircle,
+    summary: "Support Google Meet transcript-first imports for schools that use Meet instead of Zoom.",
+    importUse: "Meet recordings, transcript entries, conference records, and participant details.",
+    followUpUse: "Use Meet transcript context for the same review-first class recap workflow.",
+    reviewRule: "ClassLoop imports transcript records only after the teacher selects them.",
+    unlocks: ["Meet transcript import", "Participant hints", "Recording context"],
+  },
+  {
+    id: "googledrive",
+    label: "Google Drive",
+    icon: FileText,
+    summary: "Find teacher-owned class materials for explicit, reviewed imports.",
+    importUse: "Search class materials and copy resources into a class session draft.",
+    reviewRule: "The current connector searches files only; it does not create folders, share files, or change permissions.",
+    unlocks: ["Material search", "Teacher-selected file context"],
+  },
+  {
+    id: "googledocs",
+    label: "Google Docs",
+    icon: FileText,
+    summary: "Read teacher-selected documents as context for reviewed ClassLoop drafts.",
+    importUse: "Open or copy existing notes when teachers keep class artifacts in Docs.",
+    reviewRule: "The current connector reads documents only; it does not create or edit Docs.",
+    unlocks: ["Selected document context", "Existing class notes"],
+  },
+  {
+    id: "googlesheets",
+    label: "Google Sheets",
+    icon: ClipboardCheck,
+    summary: "Read roster, completion, or participation spreadsheets selected by the teacher.",
+    importUse: "Roster spreadsheet import and class tracker intake.",
+    followUpUse: "Use existing tracker context while reviewing completion and participation.",
+    reviewRule: "The current connector does not create or update spreadsheet cells.",
+    unlocks: ["Roster spreadsheet import", "Completion context", "Participation tracker context"],
+  },
+  {
+    id: "googletasks",
+    label: "Google Tasks",
+    icon: ListChecks,
+    summary: "Read teacher task lists for grading, check-ins, and next-class context.",
+    followUpUse: "Compare ClassLoop follow-up with existing teacher tasks.",
+    reviewRule: "The current connector does not create or update Google Tasks.",
+    unlocks: ["Task-list context", "Existing teacher tasks", "Next-class context"],
+  },
+  {
+    id: "googleforms",
+    label: "Google Forms",
+    icon: MessageSquare,
+    summary: "Read teacher-selected forms and responses for class follow-up context.",
+    followUpUse: "Review existing exit-ticket or check-in responses alongside the class recap.",
+    reviewRule: "The current connector does not create, edit, or share Forms.",
+    unlocks: ["Existing form context", "Response review", "Check-in context"],
+  },
+  {
+    id: "canvas",
+    label: "Canvas",
+    icon: BookOpen,
+    summary: "Support schools that use Canvas for courses, assignments, announcements, and submissions.",
+    importUse: "Course and assignment context for Canvas schools.",
+    followUpUse: "Existing Canvas assignment and announcement context.",
+    reviewRule: "The current connector reads Canvas context only.",
+    unlocks: ["Canvas course context", "Assignment context", "Announcement context"],
+  },
+  {
+    id: "blackboard",
+    label: "Blackboard",
+    icon: BookOpen,
+    summary: "Read Blackboard course and announcement context.",
+    importUse: "Course details and existing announcements.",
+    followUpUse: "Existing Blackboard announcement context.",
+    reviewRule: "The current connector does not post to Blackboard.",
+    unlocks: ["Blackboard course context", "Announcement context", "LMS review support"],
+  },
+  {
+    id: "outlook",
+    label: "Outlook",
+    icon: Mail,
+    summary: "Read Microsoft-school email/calendar context and create teacher-reviewed email drafts.",
+    followUpUse: "Draft Outlook messages and review existing calendar events.",
+    reviewRule: "Outlook email remains draft-only; the connector does not create calendar events.",
+    unlocks: ["Outlook message drafts", "Microsoft calendar context", "Inbox context when requested"],
+  },
+  {
+    id: "microsoft_teams",
+    label: "Microsoft Teams",
+    icon: MessageSquare,
+    summary: "Preview Teams meetings, channels, chats, and class communication context.",
+    importUse: "Teams meeting and channel context for Microsoft-school classes.",
+    followUpUse: "Use existing Teams context while preparing local ClassLoop follow-up.",
+    reviewRule: "The current connector does not post into Teams.",
+    unlocks: ["Teams meeting context", "Channel context", "Chat context"],
+  },
+  {
+    id: "slack",
+    label: "Slack",
+    icon: MessageSquare,
+    summary: "Search staff/team context for reviewed school operations follow-up.",
+    importUse: "Staff support context for pilots and operations.",
+    followUpUse: "Use existing Slack context while drafting local support or pilot notes.",
+    reviewRule: "The current connector does not post messages into Slack.",
+    unlocks: ["Channel search", "Support context", "Conversation history"],
+  },
+  {
+    id: "notion",
+    label: "Notion",
+    icon: FileText,
+    summary: "Search teacher-selected Notion pages for meeting, pilot, and school-operations context.",
+    importUse: "Search existing notes or pilot feedback when explicitly requested.",
+    followUpUse: "Use existing documentation as context for local ClassLoop follow-up.",
+    reviewRule: "The current connector does not create or update Notion pages.",
+    unlocks: ["Pilot feedback context", "Meeting docs", "Ops documentation search"],
+  },
+];
+
+const classLoopIntegrationWorkflowById = classLoopIntegrationWorkflows.reduce<Record<string, ClassLoopIntegrationWorkflow>>(
+  (workflows, workflow) => {
+    workflows[workflow.id] = workflow;
+    return workflows;
+  },
+  {},
+);
+
+const integrationPriorityLabels: Record<string, string> = {
+  core: "Core classroom workflows",
+  high: "High-value Google Workspace",
+  optional: "Optional school systems",
+};
+
+function workflowForToolkit(toolkit: ComposioToolkitStatus): ClassLoopIntegrationWorkflow {
+  return (
+    classLoopIntegrationWorkflowById[toolkit.id] ?? {
+      id: toolkit.id,
+      label: toolkit.label,
+      icon: Link2,
+      summary: toolkit.purpose || "Preview connector for teacher-reviewed ClassLoop workflows.",
+      reviewRule: "External actions require teacher review before sending, posting, sharing, or importing.",
+      unlocks: [toolkit.category ?? "Connector workflow"],
+    }
+  );
+}
+
+function integrationModeLabel(mode: string) {
+  return mode.replace(/_/g, " ");
+}
+
+function toolkitHasReadCapability(toolkit?: ComposioToolkitStatus) {
+  return Boolean(
+    toolkit?.allowedTools.some((tool) => /_(LIST|GET|SEARCH|FETCH|BATCH_GET)(_|$)/.test(tool)),
+  );
+}
+
+function toolkitHasDraftCapability(toolkit?: ComposioToolkitStatus) {
+  return Boolean(toolkit?.allowedTools.some((tool) => /CREATE(?:_EMAIL)?_DRAFT|CREATE_EMAIL_DRAFT/.test(tool)));
+}
+
+function toolkitCapabilityLabel(toolkit: ComposioToolkitStatus) {
+  if (!toolkit.authConfigured) return "Needs setup";
+  if (toolkitHasDraftCapability(toolkit)) return "Draft ready";
+  if (toolkitHasReadCapability(toolkit)) return "Read/search ready";
+  return "No safe tools";
+}
 
 type EmailDeliveryResult = {
   provider: string;
@@ -504,6 +759,89 @@ function classLoopBuildDetails() {
   return "";
 }
 
+async function ensureStripeCheckoutProfile(identity: StripeCheckoutIdentity) {
+  const profile = await getCloudProfile();
+  if (normalizeEmail(profile.email) !== normalizeEmail(identity.email)) {
+    throw new Error("The billing profile does not match this ClassLoop login. Sign in again before upgrading.");
+  }
+  return identity;
+}
+
+async function resolveStripeCheckoutIdentity(
+  auth: AuthSession,
+  localAuthSecret: LocalAuthSecret | null,
+): Promise<
+  | { kind: "ready"; identity: StripeCheckoutIdentity }
+  | { kind: "confirmation"; result: CloudAuthResult }
+  | { kind: "error"; message: string }
+> {
+  const normalizedAuthEmail = normalizeEmail(auth.email);
+  const existingSession = await getCloudSession();
+  if (
+    existingSession &&
+    normalizeEmail(existingSession.user.email ?? "") === normalizedAuthEmail
+  ) {
+    return {
+      kind: "ready",
+      identity: await ensureStripeCheckoutProfile({
+        email: normalizedAuthEmail,
+        userId: existingSession.user.id,
+      }),
+    };
+  }
+
+  const secretMatchesCurrentAccount =
+    localAuthSecret?.accountId === auth.accountId &&
+    localAuthSecret.role === auth.role &&
+    normalizeEmail(localAuthSecret.email) === normalizedAuthEmail;
+  if (!secretMatchesCurrentAccount || !localAuthSecret?.password) {
+    return {
+      kind: "error",
+      message: "Sign in again, then Upgrade to Pro will continue with this account.",
+    };
+  }
+
+  const result = await ensureCloudAccount(normalizedAuthEmail, localAuthSecret.password, {
+    role: auth.role,
+    name: auth.name,
+    redirectRoute: "billing",
+    source: "checkout_cloud_verification",
+  });
+  if (result.code === "email_confirmation_required") {
+    return { kind: "confirmation", result };
+  }
+  if (!result.ok || !result.session) {
+    return {
+      kind: "error",
+      message:
+        result.message ||
+        "Unable to prepare payment for this account. Sign in again, then retry Upgrade to Pro.",
+    };
+  }
+
+  const sessionEmail = normalizeEmail(result.session.user.email ?? "");
+  if (sessionEmail !== normalizedAuthEmail) {
+    return {
+      kind: "error",
+      message: "The connected cloud account does not match this ClassLoop login. Sign in again before upgrading.",
+    };
+  }
+  return {
+    kind: "ready",
+    identity: await ensureStripeCheckoutProfile({
+      email: sessionEmail,
+      userId: result.session.user.id,
+    }),
+  };
+}
+
+function openStripePaymentLink(identity: StripeCheckoutIdentity) {
+  window.location.href = buildStripePaymentLinkUrl({
+    email: identity.email,
+    clientReferenceId: identity.userId,
+  });
+}
+
 const navItems: NavItem[] = [
   { route: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { route: "new-session", label: "New session", icon: PlusCircle },
@@ -513,6 +851,7 @@ const navItems: NavItem[] = [
   { route: "report", label: "Session report", icon: ClipboardCheck },
   { route: "student", label: "Student view", icon: GraduationCap },
   { route: "analytics", label: "Analytics", icon: BarChart3 },
+  { route: "integrations", label: "Integrations", icon: Link2 },
   { route: "billing", label: "Plan options", icon: RefreshCw },
   { route: "tutorial", label: "How it works", icon: BookOpen },
   { route: "appearance", label: "Appearance", icon: Palette },
@@ -535,7 +874,7 @@ const studentNavItems: NavItem[] = [
 const teacherNavSections: Array<{ label: string; items: NavItem[] }> = [
   { label: "Classroom", items: navItems.filter((item) => ["dashboard", "new-session", "review", "report"].includes(item.route)) },
   { label: "Manage", items: navItems.filter((item) => ["classes", "rosters"].includes(item.route)) },
-  { label: "Insights", items: navItems.filter((item) => ["student", "analytics"].includes(item.route)) },
+  { label: "Insights", items: navItems.filter((item) => ["student", "analytics", "integrations"].includes(item.route)) },
   { label: "Settings", items: navItems.filter((item) => ["billing", "appearance", "privacy", "tutorial"].includes(item.route)) },
 ];
 
@@ -827,6 +1166,7 @@ const routeLabels: Record<RouteKey, string> = {
   classes: "Class manager",
   rosters: "Roster manager",
   analytics: "Teacher analytics",
+  integrations: "Integrations",
   billing: "Plan options",
   checkout: "Pro checkout",
   tutorial: "How it works",
@@ -971,44 +1311,7 @@ type ZoomCloudMeetingOption = {
   }>;
 };
 
-
-const zoomCloudMeetingOptions: ZoomCloudMeetingOption[] = [
-  {
-    id: "zoom-cs4all-demo",
-    title: "CS4All Intro to Computational Thinking",
-    date: "2026-04-28",
-    files: [
-      {
-        id: "main-transcript",
-        label: "Audio transcript VTT",
-        transcript: `[00:00:44] Ms. Rivera: Great. Who can tell me what an algorithm is?
-[00:00:57] Student (Priya Mehta): Is it like a set of steps to solve a problem?
-[00:01:14] Student (Jalen Thompson): [Chat] TikTok algorithm lol
-[00:10:31] Student (Keisha Brown): Step 1, pick up the bread bag and put two slices on the plate.
-[00:11:48] Student (Priya Mehta): Break it into smaller parts?
-[00:13:35] Ms. Rivera: Homework for Thursday: complete the algorithm design worksheet on Google Classroom.`,
-      },
-      {
-        id: "chat-transcript",
-        label: "Chat transcript",
-        transcript: `[Chat] Priya Mehta: found this video -> https://www.youtube.com/watch?v=6hfOvs8pY1k
-[Chat] Leo Fernandez: decomposition video -> https://www.youtube.com/watch?v=QXjU9qTsYCc`,
-      },
-    ],
-  },
-  {
-    id: "zoom-geometry-demo",
-    title: "Geometry Review: Similar Triangles",
-    date: "2026-05-20",
-    files: [
-      {
-        id: "main-transcript",
-        label: "Audio transcript",
-        transcript: sampleTranscript,
-      },
-    ],
-  },
-];
+const zoomCloudMeetingOptions: ZoomCloudMeetingOption[] = [];
 
 function appendCapturedText(current: string, text: string) {
   const clean = text.replace(/\s+/g, " ").trim();
@@ -1018,37 +1321,6 @@ function appendCapturedText(current: string, text: string) {
 
 function isTextTranscriptFile(file: File) {
   return /\.(txt|vtt|srt)$/i.test(file.name) || /^text\//i.test(file.type);
-}
-
-function transcriptSourceForFile(file: File): TranscriptSource {
-  return /^video\//i.test(file.type) || /\.(mp4|mov|webm)$/i.test(file.name) ? "screen_recording" : "whisper_transcription";
-}
-
-async function transcribeRecordingWithWhisper(file: Blob, options: { filename: string; source: TranscriptSource; title: string }) {
-  const response = await fetch("/api/transcribe", {
-    method: "POST",
-    headers: {
-      "Content-Type": file.type || "application/octet-stream",
-      "X-ClassLoop-Filename": options.filename,
-    },
-    body: file,
-  });
-  const isJson = response.headers.get("content-type")?.includes("application/json");
-  const payload = isJson ? await response.json().catch(() => ({})) : {};
-  if (!response.ok) {
-    throw new Error(
-      payload.error ||
-        "Recording transcription is not available right now. Paste or upload a transcript instead.",
-    );
-  }
-  const segments = Array.isArray(payload.segments) ? payload.segments : [];
-  return createStructuredTranscriptFromSegments(segments, {
-    title: options.title,
-    source: options.source,
-    model: payload.model || "whisper-1",
-    language: payload.language,
-    durationSeconds: payload.durationSeconds,
-  });
 }
 
 function liveCaptureSpeakerLabel(mode: SessionCaptureMode, segmentNumber: number) {
@@ -2277,7 +2549,6 @@ function App() {
   }, [auth, route]);
 
   useEffect(() => {
-    const manualProProfile = manualProBillingProfileForEmail(auth?.email ?? "");
     if (!sharedReady || !auth || auth.demo) {
       if (!auth || auth?.demo) setBillingProfile(defaultBillingProfile);
       return;
@@ -2287,26 +2558,22 @@ function App() {
       return;
     }
 
-    if (manualProProfile) {
-      setBillingProfile(manualProProfile);
-    }
-
     let active = true;
     getCloudSession()
       .then((session) => {
         if (!session) {
-          if (active) setBillingProfile(manualProProfile ?? defaultBillingProfile);
+          if (active) setBillingProfile(defaultBillingProfile);
           return null;
         }
         return getCloudProfile();
       })
       .then((profile) => {
         if (active && profile) {
-          setBillingProfile(manualProProfile ?? normalizeTrustedBillingProfile(profile.billingProfile));
+          setBillingProfile(normalizeTrustedBillingProfile(profile.billingProfile));
         }
       })
       .catch(() => {
-        if (active) setBillingProfile(manualProProfile ?? defaultBillingProfile);
+        if (active) setBillingProfile(defaultBillingProfile);
       });
 
     return () => {
@@ -2387,9 +2654,11 @@ function App() {
     billingProfile: defaultBillingProfile,
   });
 
-  const applyCloudState = (state: Partial<SharedState>) => {
-    const normalized = normalizeSharedState(state);
-    setAccounts(normalized.accounts);
+  const applyCloudState = (state: Partial<CloudWorkspaceState>) => {
+    if (!auth) return;
+    const normalized = normalizeSharedState(
+      mergeOwnerCloudWorkspaceState(currentState(), state, auth.email),
+    );
     setSessions(normalized.sessions);
     setPersonalMeetings(normalized.personalMeetings);
     setDraft(normalized.draft);
@@ -2398,7 +2667,6 @@ function App() {
     setRosterTemplates(normalized.rosterTemplates);
     setPrivacySettings(normalized.privacySettings);
     setAuditLog(normalized.auditLog);
-    setBillingProfile(defaultBillingProfile);
     lastSharedJsonRef.current = sharedStateJson(normalized);
   };
 
@@ -2738,8 +3006,12 @@ function App() {
     return getBackendStatus().supabaseConfigured && (testOverride || !import.meta.env.DEV);
   };
 
-  const prepareCloudAccountForLocalLogin = (account: Account, password: string, source: string) => {
-    if (!shouldAutoProvisionCloudAccount(account)) return;
+  const prepareCloudAccountForLocalLogin = async (
+    account: Account,
+    password: string,
+    source: string,
+  ): Promise<boolean> => {
+    if (!shouldAutoProvisionCloudAccount(account)) return false;
     const actor: AuthSession = {
       accountId: account.id,
       role: account.role,
@@ -2747,24 +3019,27 @@ function App() {
       name: account.name,
       demo: account.demo,
     };
-    void ensureCloudAccount(account.email, password, {
+    const result = await ensureCloudAccount(account.email, password, {
       role: account.role,
       name: account.name,
       source,
-    }).then((result) => {
-      if (result.ok) {
-        appendAudit("cloud_account_ready", "Cloud account prepared for this local login.", actor);
-        return;
-      }
-      if (result.code !== "not_configured") {
-        appendAudit("cloud_account_pending", result.message, actor);
-      }
     });
+    if (result.code === "email_confirmation_required") {
+      appendAudit("cloud_account_pending", result.message, actor);
+      return true;
+    }
+    if (result.ok) {
+      appendAudit("cloud_account_ready", "Cloud account prepared for this local login.", actor);
+      return false;
+    }
+    if (result.code !== "not_configured") {
+      appendAudit("cloud_account_pending", result.message, actor);
+    }
+    return false;
   };
 
   const signInAccount = async (account: Account, password?: string): Promise<AuthResult> => {
     const normalizedEmail = normalizeEmail(account.email);
-    setAuthLoading(true);
     try {
       await wait(420);
       if (publicDemoOnly && !account.demo) {
@@ -2773,7 +3048,11 @@ function App() {
 
       if (account.demo) demoSessionRef.current = true;
       const demoSession = account.demo ? ensureDemoSession() : undefined;
+      const cloudConfirmationPending = password
+        ? await prepareCloudAccountForLocalLogin(account, password, "classloop_local_signin")
+        : false;
 
+      setAuthLoading(true);
       if (account.role === "teacher") {
         setTheme(account.theme ?? defaultTheme);
         const nextAuth: AuthSession = {
@@ -2782,6 +3061,7 @@ function App() {
           email: normalizedEmail,
           name: account.name,
           demo: account.demo,
+          multiDevicePending: cloudConfirmationPending,
         };
         setAuth(nextAuth);
         appendAudit("login", "Teacher signed in.", {
@@ -2791,8 +3071,7 @@ function App() {
           name: account.name,
           demo: account.demo,
         });
-        if (password) prepareCloudAccountForLocalLogin(account, password, "classloop_local_signin");
-        navigate("dashboard");
+        navigate(route === "billing" || route === "checkout" ? "billing" : "dashboard");
         if (account.demo) startWalkthrough();
         return { ok: true };
       }
@@ -2805,6 +3084,7 @@ function App() {
           email: normalizedEmail,
           name: account.name,
           demo: account.demo,
+          multiDevicePending: cloudConfirmationPending,
         };
         setAuth(nextAuth);
         appendAudit("login", "Individual signed in.", {
@@ -2814,7 +3094,6 @@ function App() {
           name: account.name,
           demo: account.demo,
         });
-        if (password) prepareCloudAccountForLocalLogin(account, password, "classloop_local_signin");
         navigate("personal-dashboard");
         return { ok: true };
       }
@@ -2831,6 +3110,7 @@ function App() {
         name: student?.name ?? account.name,
         studentId: student?.id,
         demo: account.demo,
+        multiDevicePending: cloudConfirmationPending,
       };
       setAuth(nextAuth);
       appendAudit("login", "Student signed in.", {
@@ -2841,7 +3121,6 @@ function App() {
         studentId: student?.id,
         demo: account.demo,
       });
-      if (password) prepareCloudAccountForLocalLogin(account, password, "classloop_local_signin");
       navigate("student");
       if (account.demo) startWalkthrough();
       return { ok: true };
@@ -2890,7 +3169,15 @@ function App() {
     };
     setTheme(defaultTheme);
     setAuth({ accountId: account.id, role, email, name, multiDevicePending: options?.multiDevicePending });
-    navigate(role === "teacher" ? "dashboard" : role === "individual" ? "personal-dashboard" : "student");
+    navigate(
+      role === "teacher"
+        ? route === "billing" || route === "checkout"
+          ? "billing"
+          : "dashboard"
+        : role === "individual"
+          ? "personal-dashboard"
+          : "student",
+    );
     if (startWalkthroughAfterCreate) startWalkthrough();
     return { ok: true };
   };
@@ -3032,10 +3319,6 @@ function App() {
     if (!trimmedName) return { ok: false, message: "Enter a name for the account." };
     if (password.length < 8) return { ok: false, message: "Use at least 8 characters for the password." };
 
-    if (manualProBillingProfileForEmail(normalizedEmail)) {
-      return finishLocalAccountCreation(role, trimmedName, normalizedEmail, password);
-    }
-
     await wait(420);
     if (getBackendStatus().supabaseConfigured) {
         const cloudResult = await createCloudAccount(normalizedEmail, password, {
@@ -3044,9 +3327,6 @@ function App() {
           redirectRoute: "dashboard",
         });
         if (cloudResult.code === "email_confirmation_required") {
-          if (manualProBillingProfileForEmail(normalizedEmail)) {
-            return finishLocalAccountCreation(role, trimmedName, normalizedEmail, password);
-          }
           return {
             ok: false,
             code: "email_confirmation_required",
@@ -3302,6 +3582,12 @@ function App() {
           setLandingPage(page);
           window.location.hash = page === "home" ? "/home" : `/${page}`;
         }}
+        onUpgrade={() => {
+          setPublicDemoOnly(false);
+          setLandingMode(false);
+          setRoute("billing");
+          navigate("billing");
+        }}
         onOpenApp={() => {
           setPublicDemoOnly(true);
           setLandingMode(false);
@@ -3354,6 +3640,11 @@ function App() {
           onStartWalkthrough={startWalkthrough}
         />
         {workspaceNotice && <WorkspaceRecoveryNotice notice={workspaceNotice} />}
+        {auth.multiDevicePending && (
+          <p className="settings-message warning" role="status">
+            Local workspace is available. Confirm {auth.email} before cloud sync or Pro checkout can use this account.
+          </p>
+        )}
         {effectiveRoute === "dashboard" && <TeacherDashboard sessions={teacherSessions} draft={visibleDraft} billingProfile={billingProfile} />}
         {effectiveRoute === "personal-dashboard" && auth.role === "individual" && (
           <PersonalDashboard meetings={individualMeetings} />
@@ -3497,6 +3788,7 @@ function App() {
           />
         )}
         {effectiveRoute === "analytics" && <TeacherAnalytics sessions={teacherSessions} />}
+        {effectiveRoute === "integrations" && auth.role === "teacher" && <IntegrationsPage />}
         {effectiveRoute === "billing" && auth.role === "teacher" && (
           <SyncBillingPage
             auth={auth}
@@ -3515,7 +3807,6 @@ function App() {
             billingProfile={billingProfile}
             setBillingProfile={setBillingProfile}
             localAuthSecret={localAuthSecretRef.current}
-            appendAudit={appendAudit}
           />
         )}
         {effectiveRoute === "tutorial" && <TutorialPage auth={auth} />}
@@ -3529,6 +3820,18 @@ function App() {
             setPrivacySettings={setPrivacySettings}
             auditLog={auditLog}
             appendAudit={appendAudit}
+            purgeExpiredSessions={() => {
+              const result = partitionSessionsAndDraftByRetention(
+                teacherSessions,
+                visibleDraft,
+                privacySettings.retentionDays,
+              );
+              if (!result.expired.length) return 0;
+              const expiredIds = new Set(result.expired.map((session) => session.id));
+              setSessions((current) => current.filter((session) => !expiredIds.has(session.id)));
+              setDraft((current) => (current && expiredIds.has(current.id) ? null : current));
+              return result.expired.length;
+            }}
             clearClassData={() => {
               const teacherSessionIds = new Set(teacherSessions.map((session) => session.id));
               setSessions((current) => current.filter((session) => !teacherSessionIds.has(session.id)));
@@ -3601,10 +3904,12 @@ function CelebrationMomentToast({
 function LandingPage({
   page,
   onNavigate,
+  onUpgrade,
   onOpenApp,
 }: {
   page: LandingPageKey;
   onNavigate: (page: LandingPageKey) => void;
+  onUpgrade: () => void;
   onOpenApp: () => void;
 }) {
   const [downloadMessage, setDownloadMessage] = useState("");
@@ -3899,96 +4204,53 @@ function LandingPage({
     };
   }, []);
 
+  const showPublicNav = page !== "home";
+
   return (
     <main className={`landing-page landing-page-${page}`}>
-      <nav className="landing-nav" aria-label="ClassLoop public navigation">
-        <div className="landing-brand-block">
-          <button className="landing-brand" type="button" onClick={() => goToPage("home")}>
-            <span className="brand-mark">
-              <BrainCircuit size={24} />
-            </span>
-            <span>ClassLoop</span>
-          </button>
-          {classLoopBuildMarker() && (
-            <span className="landing-build-marker" title={classLoopBuildDetails()}>
-              {classLoopBuildMarker()}
-            </span>
-          )}
-        </div>
-        <div className="landing-links">
-          {publicNav.slice(1).map((item) => (
-            <button
-              key={item.page}
-              className={`landing-nav-link${page === item.page ? " active" : ""}`}
-              type="button"
-              onClick={() => goToPage(item.page)}
-              aria-current={page === item.page ? "page" : undefined}
-            >
-              {item.label}
+      {showPublicNav && (
+        <nav className="landing-nav" aria-label="ClassLoop public navigation">
+          <div className="landing-brand-block">
+            <button className="landing-brand" type="button" onClick={() => goToPage("home")}>
+              <span className="brand-mark">
+                <BrainCircuit size={24} />
+              </span>
+              <span>ClassLoop</span>
             </button>
-          ))}
-          <button className="landing-link-button" type="button" onClick={onOpenApp}>
-            Open demo
-          </button>
-        </div>
-      </nav>
+            {classLoopBuildMarker() && (
+              <span className="landing-build-marker" title={classLoopBuildDetails()}>
+                {classLoopBuildMarker()}
+              </span>
+            )}
+          </div>
+          <div className="landing-links">
+            {publicNav.slice(1).map((item) => (
+              <button
+                key={item.page}
+                className={`landing-nav-link${page === item.page ? " active" : ""}`}
+                type="button"
+                onClick={() => goToPage(item.page)}
+                aria-current={page === item.page ? "page" : undefined}
+              >
+                {item.label}
+              </button>
+            ))}
+            <button className="landing-link-button" type="button" onClick={onOpenApp}>
+              Open demo
+            </button>
+          </div>
+        </nav>
+      )}
 
       <div className="landing-route-frame">
         {page === "home" && (
-          <>
-            <section className="landing-hero">
-              <div className="landing-hero-copy">
-                <div className="landing-icon" aria-hidden="true">
-                  <Sparkles size={38} />
-                </div>
-                <h1>ClassLoop</h1>
-                <p>
-                  A follow-through workspace for classes, tutoring, clubs, workshops, and personal meetings, with
-                  the deepest workflow built for teachers who need student-ready next steps after class.
-                </p>
-                <div className="landing-proof-row" aria-label="ClassLoop product highlights">
-                  <span>Class, club, and personal notes</span>
-                  <span>Teacher review built in</span>
-                  <span>Student-specific next steps</span>
-                </div>
-                <div className="landing-actions landing-actions-hero">
-                  <button className="landing-primary" type="button" onClick={onOpenApp}>
-                    <PlayCircle size={20} />
-                    Open web demo
-                  </button>
-                  <button className="landing-secondary" type="button" onClick={handleMobileInstall}>
-                    <Smartphone size={20} />
-                    Add to phone
-                  </button>
-                </div>
-              </div>
-              <button className="landing-screenshot-preview" type="button" onClick={() => goToPage("screenshots")}>
-                <span className="landing-screenshot-label">Actual ClassLoop workflow preview</span>
-                <img
-                  src="/screenshots/classloop-import-review.svg"
-                  alt="ClassLoop teacher import and review screen showing transcript, roster matching, and student follow-up cards"
-                />
-              </button>
-            </section>
-
-            <section className="landing-home-paths" aria-label="ClassLoop website sections">
-              <article>
-                <strong>See the app</strong>
-                <p>Open a screenshot gallery for the teacher import flow, student dashboard, and private analytics.</p>
-                <button className="landing-secondary" type="button" onClick={() => goToPage("screenshots")}>View screenshots</button>
-              </article>
-              <article>
-                <strong>Understand the product</strong>
-                <p>Use separate pages for features, docs, privacy, support, and downloads instead of one crowded page.</p>
-                <button className="landing-secondary" type="button" onClick={() => goToPage("features")}>Explore features</button>
-              </article>
-              <article>
-                <strong>Trust the boundary</strong>
-                <p>See how sample demos, local desktop storage, and teacher review keep the public site honest.</p>
-                <button className="landing-secondary" type="button" onClick={() => goToPage("privacy")}>Review privacy</button>
-              </article>
-            </section>
-          </>
+          <section className="landing-hero landing-home-upgrade" aria-labelledby="landing-home-title">
+            <h1 id="landing-home-title">ClassLoop</h1>
+            <button className="landing-primary landing-upgrade-button" type="button" onClick={onUpgrade}>
+              <ShieldCheck size={20} />
+              Upgrade to Pro
+            </button>
+          </section>
         )}
 
         {page === "features" && (
@@ -6889,19 +7151,7 @@ function NewPersonalMeeting({
       return;
     }
 
-    try {
-      setWhisperStatus(`Transcribing ${file.name}...`);
-      const nextTranscript = await transcribeRecordingWithWhisper(file, {
-        filename: file.name,
-        source: transcriptSourceForFile(file),
-        title: `${title || file.name} transcript`,
-      });
-      setMinutes(nextTranscript.text);
-      setStructuredTranscript(nextTranscript);
-      setWhisperStatus("Transcript ready. Review speaker labels before generating.");
-    } catch (error) {
-      setWhisperStatus(error instanceof Error ? error.message : "Recording transcription failed.");
-    }
+    setWhisperStatus("Upload a .txt, .vtt, or .srt transcript. ClassLoop does not send recordings to a paid transcription service.");
   };
 
   return (
@@ -6921,11 +7171,11 @@ function NewPersonalMeeting({
             </label>
             <label className="upload-zone wide">
               <UploadCloud size={24} />
-              <strong>{uploadedRecordingName || "Upload meeting audio, screen recording, or transcript"}</strong>
-              <small>Audio and video can be transcribed when recording transcription is available.</small>
+              <strong>{uploadedRecordingName || "Upload a meeting transcript"}</strong>
+              <small>Use a .txt, .vtt, or .srt export. Recordings stay on your device.</small>
               <input
                 type="file"
-                accept=".txt,.vtt,.srt,audio/*,video/*,.mp3,.mp4,.m4a,.wav,.webm,.mov"
+                accept=".txt,.vtt,.srt,text/plain,text/vtt"
                 onChange={(event) => handlePersonalRecordingFile(event.target.files?.[0])}
               />
             </label>
@@ -7502,140 +7752,6 @@ function PlanRow({
   );
 }
 
-function StripePaymentLinkNote() {
-  if (!hasStripePaymentLinkConfig()) {
-    return (
-      <div className="stripe-direct-checkout-card inactive">
-        <span>
-          <strong>Stripe Payment Link</strong>
-          <small>Upgrade path is not configured for this build yet.</small>
-        </span>
-        <CircleAlert size={18} aria-hidden="true" />
-      </div>
-    );
-  }
-
-  let paymentHost = "Stripe";
-  try {
-    paymentHost = new URL(getStripePaymentLinkUrl()).hostname;
-  } catch {
-    paymentHost = "Stripe";
-  }
-
-  return (
-    <div className="stripe-direct-checkout-card">
-      <span>
-        <strong>Stripe Payment Link</strong>
-        <small>Upgrade opens directly on {paymentHost}; ClassLoop turns on Pro only after Stripe confirms payment.</small>
-      </span>
-      <ArrowUpRight size={18} aria-hidden="true" />
-    </div>
-  );
-}
-
-function useStripeBuyButtonScript(enabled: boolean) {
-  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-
-  useEffect(() => {
-    if (!enabled) {
-      setStatus("idle");
-      return;
-    }
-
-    if (window.customElements?.get("stripe-buy-button")) {
-      setStatus("ready");
-      return;
-    }
-
-    const src = "https://js.stripe.com/v3/buy-button.js";
-    let script = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
-    setStatus("loading");
-
-    const handleLoad = () => {
-      if (script) script.dataset.classloopLoaded = "true";
-      setStatus("ready");
-    };
-    const handleError = () => setStatus("error");
-
-    if (!script) {
-      script = document.createElement("script");
-      script.async = true;
-      script.src = src;
-      script.dataset.classloopStripeBuyButton = "true";
-      document.head.appendChild(script);
-    } else if (script.dataset.classloopLoaded === "true") {
-      setStatus("ready");
-      return;
-    }
-
-    script.addEventListener("load", handleLoad);
-    script.addEventListener("error", handleError);
-    return () => {
-      script?.removeEventListener("load", handleLoad);
-      script?.removeEventListener("error", handleError);
-    };
-  }, [enabled]);
-
-  return status;
-}
-
-function StripeBuyButtonFallback({
-  identity,
-  preparing,
-  disabled,
-  onPrepare,
-}: {
-  identity: StripeCheckoutIdentity | null;
-  preparing: boolean;
-  disabled: boolean;
-  onPrepare: () => void;
-}) {
-  const config = getStripeBuyButtonConfig();
-  const configured = Boolean(config.buyButtonId && config.publishableKey);
-  const scriptStatus = useStripeBuyButtonScript(Boolean(identity && configured));
-
-  return (
-    <div className={identity ? "stripe-buy-button-card ready" : "stripe-buy-button-card"}>
-      <div className="stripe-buy-button-copy">
-        <span>
-          <strong>Stripe Buy Button fallback</strong>
-          <small>
-            Use this if the direct Payment Link does not open. ClassLoop still sends your email and account id so Pro only unlocks after Stripe confirms payment.
-          </small>
-        </span>
-        <small className="theme-aware-note">The ClassLoop controls and fallback shell use the current theme accent.</small>
-      </div>
-
-      <button className={identity ? "ghost-button full" : "primary-button full"} type="button" onClick={onPrepare} disabled={disabled || preparing || !configured}>
-        <ShieldCheck size={17} aria-hidden="true" />
-        {preparing ? "Preparing Stripe button..." : identity ? "Refresh Stripe Buy Button" : "Prepare Stripe Buy Button fallback"}
-      </button>
-
-      {!configured && (
-        <p className="settings-message warning">
-          Stripe Buy Button fallback is not configured for this build.
-        </p>
-      )}
-
-      {identity && configured && (
-        <div className="stripe-buy-button-frame" data-script-status={scriptStatus}>
-          <stripe-buy-button
-            key={`${config.buyButtonId}-${identity.userId}-${identity.email}`}
-            buy-button-id={config.buyButtonId}
-            publishable-key={config.publishableKey}
-            client-reference-id={identity.userId}
-            customer-email={identity.email}
-          />
-          {scriptStatus === "loading" && <small>Loading Stripe Buy Button...</small>}
-          {scriptStatus === "error" && (
-            <small>Stripe Buy Button did not load. Use the direct Payment Link button above.</small>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function CloudEmailConfirmationOverlay({
   prompt,
   actionLabel,
@@ -7769,81 +7885,20 @@ function EmbeddedCheckoutPage({
   billingProfile,
   setBillingProfile,
   localAuthSecret,
-  appendAudit,
 }: {
   auth: AuthSession;
   billingProfile: BillingProfile;
   setBillingProfile: (profile: BillingProfile) => void;
   localAuthSecret: LocalAuthSecret | null;
-  appendAudit: (action: string, detail: string, actor?: AuthSession | null) => void;
 }) {
   const backendStatus = getBackendStatus();
   const billingReturnStatus = getParam("billing");
-  const [message, setMessage] = useState("Preparing Stripe Payment Link...");
+  const [message, setMessage] = useState("Preparing Stripe...");
   const [status, setStatus] = useState<"loading" | "opening" | "error" | "verifying" | "success">("loading");
-  const [connectedEmail, setConnectedEmail] = useState("");
   const [cloudConfirmation, setCloudConfirmation] = useState<CloudConfirmationPrompt | null>(null);
   const openedPaymentLinkRef = useRef(false);
   const isDemoAccount = Boolean(auth.demo);
   const hasPro = isPaidPlan(billingProfile);
-
-  const showCheckoutEmailConfirmation = useCallback(async (result: CloudAuthResult, fallbackEmail: string) => {
-    const prompt = cloudConfirmationFromResult(result, fallbackEmail, "checkout");
-    if (!prompt) return false;
-    setCloudConfirmation(prompt);
-    setStatus("loading");
-    setMessage("Confirm your email before checkout continues. ClassLoop sent another confirmation email.");
-    await resendCloudConfirmation(prompt.email, prompt.redirectUrl).catch(() => undefined);
-    return true;
-  }, []);
-
-  const ensureCheckoutCloudIdentity = useCallback(async () => {
-    const existingSession = await getCloudSession();
-    if (existingSession) {
-      const email = existingSession.user.email ?? "";
-      setConnectedEmail(email);
-      return { userId: existingSession.user.id, email };
-    }
-
-    const normalizedAuthEmail = normalizeEmail(auth.email);
-    const secretMatchesCurrentAccount =
-      localAuthSecret?.accountId === auth.accountId &&
-      localAuthSecret.role === auth.role &&
-      normalizeEmail(localAuthSecret.email) === normalizedAuthEmail;
-
-    if (!secretMatchesCurrentAccount || !localAuthSecret?.password) {
-      throw new Error("Sign in again, then Upgrade to Pro will continue with this account.");
-    }
-
-    setStatus("loading");
-    setMessage("Preparing your ClassLoop account for payment...");
-    let result = await signIntoCloud(normalizedAuthEmail, localAuthSecret.password);
-    if (await showCheckoutEmailConfirmation(result, normalizedAuthEmail)) return null;
-    if (!result.ok) {
-      result = await createCloudAccount(normalizedAuthEmail, localAuthSecret.password, {
-        role: "teacher",
-        name: auth.name,
-        redirectRoute: "billing",
-        source: "checkout_cloud_verification",
-      });
-      if (await showCheckoutEmailConfirmation(result, normalizedAuthEmail)) return null;
-    }
-    if (!result.ok || !result.session) {
-      throw new Error(
-        result.message ||
-          "Unable to prepare payment for this account. Sign in again, then retry Upgrade to Pro.",
-      );
-    }
-
-    const email = result.session.user.email ?? normalizedAuthEmail;
-    setConnectedEmail(email);
-    appendAudit("cloud_connect", `Prepared payment account for ${email}.`, auth);
-    return { userId: result.session.user.id, email };
-  }, [appendAudit, auth, localAuthSecret, showCheckoutEmailConfirmation]);
-
-  useEffect(() => {
-    getCloudSession().then((session) => setConnectedEmail(session?.user.email ?? ""));
-  }, []);
 
   useEffect(() => {
     if (billingReturnStatus !== "success" || isDemoAccount) return;
@@ -7895,28 +7950,32 @@ function EmbeddedCheckoutPage({
         setMessage("Demo account upgrades are disabled.");
         return;
       }
-      if (!backendStatus.stripePaymentLinkConfigured) {
-        setMessage("Online upgrades are not configured for this build yet.");
-        return;
-      }
-      if (!backendStatus.supabaseConfigured) {
+      if (!backendStatus.stripePaymentLinkConfigured || !backendStatus.supabaseConfigured) {
         setMessage("Online upgrades are unavailable right now. Try again later or contact ClassLoop support.");
         return;
       }
       setStatus("loading");
-      const identity = await ensureCheckoutCloudIdentity();
-      if (!identity) return;
+      const checkout = await resolveStripeCheckoutIdentity(auth, localAuthSecret);
+      if (checkout.kind === "confirmation") {
+        setCloudConfirmation(cloudConfirmationFromResult(checkout.result, auth.email, "checkout"));
+        setMessage("Confirm your email before checkout continues.");
+        return;
+      }
+      if (checkout.kind === "error") throw new Error(checkout.message);
       setStatus("opening");
       setMessage("Opening Stripe Payment Link. Pro turns on after payment is confirmed.");
-      window.location.href = buildStripePaymentLinkUrl({
-        email: identity.email,
-        clientReferenceId: identity.userId,
-      });
+      openStripePaymentLink(checkout.identity);
     } catch (error) {
       setStatus("error");
       setMessage(error instanceof Error ? error.message : "Online payment is not available right now.");
     }
-  }, [backendStatus.stripePaymentLinkConfigured, backendStatus.supabaseConfigured, ensureCheckoutCloudIdentity, isDemoAccount]);
+  }, [
+    auth,
+    backendStatus.stripePaymentLinkConfigured,
+    backendStatus.supabaseConfigured,
+    isDemoAccount,
+    localAuthSecret,
+  ]);
 
   useEffect(() => {
     if (billingReturnStatus === "success" || hasPro || openedPaymentLinkRef.current) return;
@@ -7935,7 +7994,7 @@ function EmbeddedCheckoutPage({
             <p>
               {manualPro
                 ? "This ClassLoop owner account already has Pro enabled."
-                : "This account has an active Pro subscription. Manage billing from Plan options."}
+                : "This account has an active Pro subscription."}
             </p>
           </div>
         </section>
@@ -7982,8 +8041,6 @@ function EmbeddedCheckoutPage({
                 <small>{message}</small>
               </span>
             </div>
-            {connectedEmail && <p className="settings-message success">Cloud account: {connectedEmail}</p>}
-            <StripePaymentLinkNote />
           </div>
         </Panel>
 
@@ -7998,8 +8055,8 @@ function EmbeddedCheckoutPage({
             <button className="primary-button" type="button" onClick={() => navigate("billing")}>
               Back to Plan options
             </button>
-            <button className="ghost-button" type="button" onClick={openPaymentLink} disabled={isDemoAccount || !backendStatus.supabaseConfigured || !backendStatus.stripePaymentLinkConfigured}>
-              Open Stripe Payment Link
+            <button className="ghost-button" type="button" onClick={openPaymentLink} disabled={isDemoAccount}>
+              Upgrade to Pro
             </button>
           </div>
         </Panel>
@@ -8008,14 +8065,266 @@ function EmbeddedCheckoutPage({
       {cloudConfirmation && (
         <CloudEmailConfirmationOverlay
           prompt={cloudConfirmation}
-          actionLabel="Back to Plan options"
+          actionLabel="Try checkout again"
           onClose={() => setCloudConfirmation(null)}
           onAction={() => {
             setCloudConfirmation(null);
-            navigate("billing");
+            void openPaymentLink();
           }}
           onResend={() => resendCloudConfirmation(cloudConfirmation.email, cloudConfirmation.redirectUrl)}
         />
+      )}
+    </div>
+  );
+}
+
+function IntegrationsPage() {
+  const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
+  const [integrationStatusMessage, setIntegrationStatusMessage] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    apiJson<IntegrationStatus>("/api/integrations/status")
+      .then((status) => {
+        if (!active) return;
+        setIntegrationStatus(status);
+        setIntegrationStatusMessage("");
+      })
+      .catch((error) => {
+        if (!active) return;
+        setIntegrationStatus(null);
+        setIntegrationStatusMessage(error instanceof Error ? error.message : "Unable to load integration status.");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const composioToolkits = integrationStatus?.composio?.toolkits ?? [];
+  const configuredComposioToolkits = composioToolkits.filter(
+    (toolkit) =>
+      toolkit.authConfigured &&
+      (toolkitHasReadCapability(toolkit) || toolkitHasDraftCapability(toolkit)),
+  ).length;
+  const coreToolkitCount = integrationStatus?.composio?.coreToolkitCount ?? composioToolkits.filter((toolkit) => toolkit.priority === "core").length;
+  const configuredCoreToolkitCount = composioToolkits.filter(
+    (toolkit) =>
+      toolkit.priority === "core" &&
+      toolkit.authConfigured &&
+      (toolkitHasReadCapability(toolkit) || toolkitHasDraftCapability(toolkit)),
+  ).length;
+  const localMcpToolCount = integrationStatus?.localMcp?.tools.length ?? 0;
+  const groupedToolkits = ["core", "high", "optional"]
+    .map((priority) => ({
+      priority,
+      label: integrationPriorityLabels[priority],
+      items: composioToolkits.filter((toolkit) => toolkit.priority === priority),
+    }))
+    .filter((group) => group.items.length > 0);
+
+  const workflowBuckets = [
+    {
+      title: "Easier imports",
+      icon: UploadCloud,
+      detail: "Zoom, Google Meet, Classroom, Drive, Docs, and Sheets bring transcript, roster, and material context into the import flow.",
+      connectors: ["Zoom", "Google Meet", "Google Classroom", "Drive", "Docs", "Sheets"],
+    },
+    {
+      title: "Review context and email drafts",
+      icon: CheckCircle2,
+      detail: "Gmail and Outlook can create drafts; Calendar, Classroom, Docs, Sheets, Tasks, and Forms currently provide read-only context.",
+      connectors: ["Google Calendar", "Gmail", "Google Classroom", "Google Docs", "Google Sheets", "Google Tasks", "Google Forms"],
+    },
+    {
+      title: "School ecosystem",
+      icon: Link2,
+      detail: "Canvas, Blackboard, Outlook, Teams, Slack, and Notion keep ClassLoop useful across school-specific systems.",
+      connectors: ["Canvas", "Blackboard", "Outlook", "Teams", "Slack", "Notion"],
+    },
+  ];
+
+  return (
+    <div className="page-stack">
+      <section className="review-banner">
+        <div>
+          <span className="eyebrow">Composio integrations</span>
+          <h2>Connect ClassLoop to the places teachers already work.</h2>
+          <p>
+            These connectors are built around CSB's ClassLoop direction: transcript-first imports, teacher-reviewed drafts, and no silent external posting.
+          </p>
+        </div>
+        <div className="integration-summary-strip" aria-label="Integration setup summary">
+          <span>
+            <strong>{configuredCoreToolkitCount}/{coreToolkitCount || 4}</strong>
+            <small>core connectors configured</small>
+          </span>
+          <span>
+            <strong>{configuredComposioToolkits}/{composioToolkits.length || classLoopIntegrationWorkflows.length}</strong>
+            <small>connectors with allowed tools</small>
+          </span>
+          <span>
+            <strong>{localMcpToolCount}</strong>
+            <small>local MCP tools</small>
+          </span>
+        </div>
+      </section>
+
+      <section className="content-grid two-columns align-start">
+        <Panel title="What integrations unlock" icon={Sparkles}>
+          <div className="integration-workflow-buckets">
+            {workflowBuckets.map((bucket) => {
+              const BucketIcon = bucket.icon;
+              return (
+                <article className="integration-bucket-card" key={bucket.title}>
+                  <BucketIcon size={18} aria-hidden="true" />
+                  <span>
+                    <strong>{bucket.title}</strong>
+                    <small>{bucket.detail}</small>
+                  </span>
+                  <div className="connector-chip-row" aria-label={`${bucket.title} connectors`}>
+                    {bucket.connectors.map((connector) => (
+                      <span className="connector-chip" key={connector}>
+                        {connector}
+                      </span>
+                    ))}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </Panel>
+
+        <Panel title="Setup status" icon={Settings2}>
+          <div className="settings-stack">
+            <div className={`integration-card ${integrationStatus?.composio?.configured ? "active" : ""}`}>
+              <span>
+                <strong>Composio API</strong>
+                <small>
+                  {integrationStatus?.composio?.configured
+                    ? `Ready for ${integrationStatus.composio.serverName}.`
+                    : "Set COMPOSIO_API_KEY before creating the ClassLoop MCP config."}
+                </small>
+              </span>
+            </div>
+            <div className={`integration-card ${integrationStatus?.composio?.mcpConfigIdConfigured ? "active" : ""}`}>
+              <span>
+                <strong>MCP config id</strong>
+                <small>
+                  {integrationStatus?.composio?.mcpConfigIdConfigured
+                    ? "COMPOSIO_CLASSLOOP_MCP_CONFIG_ID is present."
+                    : "Run npm run mcp:setup:composio -- --apply after adding auth config ids."}
+                </small>
+              </span>
+            </div>
+            <div className="integration-card">
+              <span>
+                <strong>Core Composio auth config IDs</strong>
+                <small>COMPOSIO_GOOGLE_CLASSROOM_AUTH_CONFIG_ID</small>
+                <small>COMPOSIO_ZOOM_AUTH_CONFIG_ID</small>
+                <small>COMPOSIO_GMAIL_AUTH_CONFIG_ID</small>
+                <small>COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID</small>
+              </span>
+            </div>
+            <div className={`integration-card ${integrationStatus?.email?.configured ? "active" : ""}`}>
+              <span>
+                <strong>Email delivery</strong>
+                <small>
+                  {integrationStatus?.email?.configured
+                    ? `${integrationStatus.email.provider}${integrationStatus.email.from ? ` from ${integrationStatus.email.from}` : ""}.`
+                    : "Gmail SMTP is still available as the free sender path for recap delivery."}
+                </small>
+              </span>
+            </div>
+            <div className={`integration-card ${integrationStatus?.localMcp?.available ? "active" : ""}`}>
+              <span>
+                <strong>Local ClassLoop MCP</strong>
+                <small>
+                  {integrationStatus?.localMcp?.available
+                    ? `${localMcpToolCount} tools over ${integrationStatus.localMcp.transport}; redaction defaults to ${integrationStatus.localMcp.redactionDefault}.`
+                    : "Build the local MCP server with npm run build:mcp."}
+                </small>
+              </span>
+            </div>
+            {integrationStatusMessage && <p className="settings-message">{integrationStatusMessage}</p>}
+            {!integrationStatus && !integrationStatusMessage && <p className="settings-message">Loading integration status...</p>}
+          </div>
+        </Panel>
+      </section>
+
+      {groupedToolkits.map((group) => (
+        <Panel title={group.label} icon={Link2} key={group.priority}>
+          <div className="integration-workflow-grid">
+            {group.items.map((toolkit) => {
+              const workflow = workflowForToolkit(toolkit);
+              const WorkflowIcon = workflow.icon;
+              const targetRoute: RouteKey = workflow.importUse ? "new-session" : "review";
+              const hasReadCapability = toolkitHasReadCapability(toolkit);
+              const hasDraftCapability = toolkitHasDraftCapability(toolkit);
+              const capabilityReady = toolkit.authConfigured && (hasReadCapability || hasDraftCapability);
+              return (
+                <article className={`integration-workflow-card ${capabilityReady ? "active" : ""}`} key={toolkit.id}>
+                  <div className="integration-workflow-card-header">
+                    <span className="integration-workflow-icon">
+                      <WorkflowIcon size={19} aria-hidden="true" />
+                    </span>
+                    <span>
+                      <strong>{workflow.label}</strong>
+                      <small>{toolkit.category ?? "ClassLoop connector"}</small>
+                    </span>
+                    <span className={capabilityReady ? "status-pill complete" : "status-pill"}>
+                      {toolkitCapabilityLabel(toolkit)}
+                    </span>
+                  </div>
+                  <p>{workflow.summary}</p>
+                  <div className="integration-workflow-detail">
+                    {workflow.importUse && (
+                      <span>
+                        <strong>Import</strong>
+                        <small>{workflow.importUse}</small>
+                      </span>
+                    )}
+                    {workflow.followUpUse && (
+                      <span>
+                        <strong>Follow-up</strong>
+                        <small>{workflow.followUpUse}</small>
+                      </span>
+                    )}
+                  </div>
+                  <div className="connector-chip-row">
+                    {workflow.unlocks.map((unlock) => (
+                      <span className="connector-chip" key={unlock}>
+                        {unlock}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="integration-workflow-footer">
+                    <small>
+                      {toolkit.authConfigured
+                        ? `${integrationModeLabel(toolkit.mode)} · ${toolkit.allowedTools.length} allowed tools`
+                        : `Set ${toolkit.authConfigEnv}`}
+                    </small>
+                    <button className="ghost-button" type="button" onClick={() => navigate(targetRoute)}>
+                      {workflow.importUse
+                        ? "Use in import"
+                        : hasDraftCapability
+                          ? "Use after draft"
+                          : hasReadCapability
+                            ? "Review context"
+                            : "View workflow"}
+                    </button>
+                  </div>
+                  <small className="integration-review-rule">{workflow.reviewRule}</small>
+                </article>
+              );
+            })}
+          </div>
+        </Panel>
+      ))}
+
+      {integrationStatus?.composio && composioToolkits.length === 0 && (
+        <Panel title="No Composio connector manifest loaded" icon={CircleAlert}>
+          <p className="settings-message">The integration status endpoint responded, but no connector toolkit list was returned.</p>
+        </Panel>
       )}
     </div>
   );
@@ -8035,7 +8344,7 @@ function SyncBillingPage({
   billingProfile: BillingProfile;
   setBillingProfile: (profile: BillingProfile) => void;
   currentState: () => SharedState;
-  applyCloudState: (state: Partial<SharedState>) => void;
+  applyCloudState: (state: Partial<CloudWorkspaceState>) => void;
   appendAudit: (action: string, detail: string, actor?: AuthSession | null) => void;
   sessionCount: number;
   localAuthSecret: LocalAuthSecret | null;
@@ -8046,15 +8355,46 @@ function SyncBillingPage({
   const [message, setMessage] = useState("");
   const [connectedEmail, setConnectedEmail] = useState("");
   const [cloudConfirmation, setCloudConfirmation] = useState<CloudConfirmationPrompt | null>(null);
-  const [stripeBuyButtonIdentity, setStripeBuyButtonIdentity] = useState<StripeCheckoutIdentity | null>(null);
-  const [preparingStripeBuyButton, setPreparingStripeBuyButton] = useState(false);
+  const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
+  const [integrationStatusMessage, setIntegrationStatusMessage] = useState("");
   const isDemoAccount = Boolean(auth.demo);
   const billingReturnStatus = getParam("billing");
   const demoBillingMessage =
     "Demo account upgrades are disabled. Create your own ClassLoop account to upgrade.";
 
   useEffect(() => {
-    getCloudSession().then((session) => setConnectedEmail(session?.user.email ?? ""));
+    let active = true;
+    getCloudSession()
+      .then(async (session) => {
+        if (!active) return;
+        setConnectedEmail(session?.user.email ?? "");
+        if (!session || isDemoAccount) return;
+        const profile = await getCloudProfile();
+        if (active) setBillingProfile(normalizeTrustedBillingProfile(profile.billingProfile));
+      })
+      .catch(() => {
+        if (active) setBillingProfile(defaultBillingProfile);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isDemoAccount, setBillingProfile]);
+
+  useEffect(() => {
+    let active = true;
+    apiJson<IntegrationStatus>("/api/integrations/status")
+      .then((status) => {
+        if (!active) return;
+        setIntegrationStatus(status);
+        setIntegrationStatusMessage("");
+      })
+      .catch((error) => {
+        if (!active) return;
+        setIntegrationStatusMessage(error instanceof Error ? error.message : "Unable to load connector status.");
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -8086,7 +8426,7 @@ function SyncBillingPage({
           return;
         }
         setMessage(
-          "Payment is still pending. ClassLoop will stay Free until payment is confirmed. Click Refresh plan if Pro is still pending after your receipt arrives.",
+          "Payment is still pending. ClassLoop will stay Free until Stripe confirms it.",
         );
       } catch (error) {
         if (!active) return;
@@ -8094,7 +8434,7 @@ function SyncBillingPage({
           retryTimer = window.setTimeout(() => void verifyPaidProfile(attempt + 1), 1500);
           return;
         }
-        setMessage(error instanceof Error ? error.message : "Unable to verify the payment yet. Sign in and click Refresh plan.");
+        setMessage(error instanceof Error ? error.message : "Unable to verify the payment yet.");
       }
     };
 
@@ -8123,15 +8463,6 @@ function SyncBillingPage({
     return true;
   };
 
-  const showCheckoutEmailConfirmation = async (result: CloudAuthResult, fallbackEmail: string) => {
-    const prompt = cloudConfirmationFromResult(result, fallbackEmail, "checkout");
-    if (!prompt) return false;
-    setCloudConfirmation(prompt);
-    setMessage("Confirm your email before checkout continues. ClassLoop sent another confirmation email.");
-    await resendCloudConfirmation(prompt.email, prompt.redirectUrl).catch(() => undefined);
-    return true;
-  };
-
   const connectCloud = async (mode: "signin" | "signup" = "signin") => {
     const result =
       mode === "signin"
@@ -8150,57 +8481,14 @@ function SyncBillingPage({
     }
   };
 
-  const ensureCheckoutCloudSession = async () => {
-    const existingSession = await getCloudSession();
-    if (existingSession) {
-      const email = existingSession.user.email ?? "";
-      setConnectedEmail(email);
-      return { userId: existingSession.user.id, email };
-    }
-
-    const normalizedAuthEmail = normalizeEmail(auth.email);
-    const secretMatchesCurrentAccount =
-      localAuthSecret?.accountId === auth.accountId &&
-      localAuthSecret.role === auth.role &&
-      normalizeEmail(localAuthSecret.email) === normalizedAuthEmail;
-
-    if (!secretMatchesCurrentAccount || !localAuthSecret?.password) {
-      setMessage("Sign in again, then Upgrade to Pro will continue with this account.");
-      return null;
-    }
-
-    setMessage("Preparing your ClassLoop account for payment...");
-    const signInResult = await signIntoCloud(normalizedAuthEmail, localAuthSecret.password);
-    if (await showCheckoutEmailConfirmation(signInResult, normalizedAuthEmail)) return null;
-    let result = signInResult;
-    if (!result.ok) {
-      result = await createCloudAccount(normalizedAuthEmail, localAuthSecret.password, {
-        role: "teacher",
-        name: auth.name,
-        redirectRoute: "billing",
-        source: "checkout_cloud_verification",
-      });
-      if (await showCheckoutEmailConfirmation(result, normalizedAuthEmail)) return null;
-    }
-    if (!result.ok || !result.session) {
-      setMessage(
-        result.message ||
-          "Unable to prepare payment for this account. Sign in again, then retry Upgrade to Pro.",
-      );
-      return null;
-    }
-
-    const email = result.session.user.email ?? normalizedAuthEmail;
-    setConnectedEmail(email);
-    appendAudit("cloud_connect", `Prepared payment account for ${email}.`);
-    return { userId: result.session.user.id, email };
-  };
-
   const uploadCloud = async () => {
     try {
-      await cloudRequest("/api/cloud-state", { method: "PUT", body: JSON.stringify(currentState()) });
-      setMessage("Uploaded this workspace to cloud sync.");
-      appendAudit("cloud_upload", "Uploaded workspace to cloud sync.");
+      await cloudRequest("/api/cloud-state", {
+        method: "PUT",
+        body: JSON.stringify(toOwnerCloudWorkspaceState(currentState(), auth.email)),
+      });
+      setMessage("Uploaded this account's workspace to cloud sync.");
+      appendAudit("cloud_upload", "Uploaded this account's workspace to cloud sync.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Cloud upload failed.");
     }
@@ -8208,14 +8496,31 @@ function SyncBillingPage({
 
   const downloadCloud = async () => {
     try {
-      const state = await cloudRequest<Partial<SharedState> | null>("/api/cloud-state");
-      if (!state) {
+      const response = await cloudRequest<CloudWorkspaceState | CloudWorkspaceSnapshot | null>("/api/cloud-state");
+      const snapshot = parseCloudWorkspaceResponse<CloudWorkspaceState>(response);
+      if (!snapshot) {
         setMessage("No cloud workspace has been saved yet.");
         return;
       }
-      applyCloudState(state);
-      setMessage("Downloaded the cloud workspace to this device.");
-      appendAudit("cloud_download", "Downloaded workspace from cloud sync.");
+      const local = toOwnerCloudWorkspaceState(currentState(), auth.email);
+      const hasLocalWorkspace =
+        local.sessions.length > 0 ||
+        local.personalMeetings.length > 0 ||
+        Boolean(local.draft) ||
+        local.classGroups.length > 0 ||
+        local.rosterTemplates.length > 0;
+      if (
+        hasLocalWorkspace &&
+        !window.confirm(
+          `Replace this account's local workspace with the cloud copy${snapshot.updatedAt ? ` saved ${new Date(snapshot.updatedAt).toLocaleString()}` : ""}? Other local accounts and billing access stay on this device.`,
+        )
+      ) {
+        setMessage("Cloud download canceled. Local work was not changed.");
+        return;
+      }
+      applyCloudState(snapshot.state);
+      setMessage("Downloaded this account's cloud workspace to this device.");
+      appendAudit("cloud_download", "Downloaded this account's workspace from cloud sync.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Cloud download failed.");
     }
@@ -8227,77 +8532,32 @@ function SyncBillingPage({
         setMessage(demoBillingMessage);
         return;
       }
-      if (!backendStatus.stripePaymentLinkConfigured) {
-        setMessage("Online upgrades are not configured for this build yet.");
-        return;
-      }
-      if (!backendStatus.supabaseConfigured) {
+      if (!backendStatus.stripePaymentLinkConfigured || !backendStatus.supabaseConfigured) {
         setMessage("Online upgrades are unavailable right now. Try again later or contact ClassLoop support.");
         return;
       }
-      const checkoutIdentity = await ensureCheckoutCloudSession();
-      if (!checkoutIdentity) {
+      setMessage("Preparing your ClassLoop account for payment...");
+      const checkout = await resolveStripeCheckoutIdentity(auth, localAuthSecret);
+      if (checkout.kind === "confirmation") {
+        setCloudConfirmation(cloudConfirmationFromResult(checkout.result, auth.email, "checkout"));
+        setMessage("Confirm your email before checkout continues.");
         return;
       }
+      if (checkout.kind === "error") throw new Error(checkout.message);
+      const profile = await getCloudProfile();
+      const verifiedProfile = normalizeTrustedBillingProfile(profile.billingProfile);
+      setBillingProfile(verifiedProfile);
+      if (isPaidPlan(verifiedProfile)) {
+        setMessage("Pro is already active for this account.");
+        return;
+      }
+      setConnectedEmail(checkout.identity.email);
+      appendAudit("cloud_connect", `Prepared payment account for ${checkout.identity.email}.`);
       setMessage("Opening Stripe Payment Link. Pro turns on after payment is confirmed.");
-      window.location.href = buildStripePaymentLinkUrl({
-        email: checkoutIdentity.email,
-        clientReferenceId: checkoutIdentity.userId,
-      });
+      openStripePaymentLink(checkout.identity);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Online payment is not available right now.");
     }
-  };
-
-  const prepareStripeBuyButton = async () => {
-    try {
-      if (isDemoAccount) {
-        setMessage(demoBillingMessage);
-        return;
-      }
-      if (!backendStatus.stripePaymentLinkConfigured) {
-        setMessage("Stripe Buy Button fallback is not configured for this build.");
-        return;
-      }
-      if (!backendStatus.supabaseConfigured) {
-        setMessage("Online upgrades are unavailable right now. Try again later or contact ClassLoop support.");
-        return;
-      }
-      setPreparingStripeBuyButton(true);
-      const checkoutIdentity = await ensureCheckoutCloudSession();
-      if (!checkoutIdentity) return;
-      setStripeBuyButtonIdentity(checkoutIdentity);
-      setMessage("Stripe Buy Button fallback is ready. Pro still turns on only after Stripe confirms payment.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to prepare the Stripe Buy Button right now.");
-    } finally {
-      setPreparingStripeBuyButton(false);
-    }
-  };
-
-  const openBillingPortal = async () => {
-    try {
-      if (isManualProBillingProfile(billingProfile)) {
-        setMessage("Billing management is not available for this account.");
-        return;
-      }
-      if (!backendStatus.supabaseConfigured || !connectedEmail) {
-        setMessage("Billing management appears after Pro is active on this account.");
-        return;
-      }
-      const portal = await createBillingPortalSession();
-      window.location.href = portal.url;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Billing management is not available right now.");
-    }
-  };
-
-  const downgradeToFree = () => {
-    if (isDemoAccount) {
-      setMessage(demoBillingMessage);
-      return;
-    }
-    setMessage("Use Manage billing to cancel or change your subscription. ClassLoop updates the plan after payment changes are confirmed.");
   };
 
   const disconnect = async () => {
@@ -8306,59 +8566,28 @@ function SyncBillingPage({
     setMessage("Cloud sync disconnected on this device.");
   };
 
-  const cloudProSteps = [
-    {
-      icon: KeyRound,
-      title: "Create a cloud account",
-      detail: "New ClassLoop accounts are cloud-backed by default. If ClassLoop asks for confirmation, click the email link before signing in elsewhere.",
-    },
-    {
-      icon: RefreshCw,
-      title: "Use any device",
-      detail: "Free accounts can upload this workspace to cloud sync, then download it on desktop, browser, or phone.",
-    },
-    {
-      icon: Sparkles,
-      title: "Upgrade only for Pro features",
-      detail: "Pro is for unlimited daily generation, advanced reports, and the two live class capture modes.",
-    },
-    {
-      icon: Mic2,
-      title: "Capture live classes",
-      detail: "Pro unlocks in-person class capture and online meeting capture; transcript upload remains the reliable Free path.",
-    },
-  ];
+  const composioToolkits = integrationStatus?.composio?.toolkits ?? [];
+  const configuredComposioToolkits = composioToolkits.filter(
+    (toolkit) =>
+      toolkit.authConfigured &&
+      (toolkitHasReadCapability(toolkit) || toolkitHasDraftCapability(toolkit)),
+  ).length;
+  const configuredCoreComposioToolkits = composioToolkits.filter(
+    (toolkit) =>
+      toolkit.priority === "core" &&
+      toolkit.authConfigured &&
+      (toolkitHasReadCapability(toolkit) || toolkitHasDraftCapability(toolkit)),
+  ).length;
+  const localMcpToolCount = integrationStatus?.localMcp?.tools.length ?? 0;
 
   return (
     <div className="page-stack">
       <section className="review-banner">
         <div>
-          <span className="eyebrow">Plan options</span>
-          <h2>Save time on every class follow-up.</h2>
-          <p>
-            Free includes transcript import, student follow-ups, and multi-device cloud sync. Pro is for teachers who want unlimited sessions,
-            in-person capture, online meeting capture, analytics, and exports without the one-session-per-day cap.
-          </p>
+          <span className="eyebrow">Upgrade</span>
+          <h2>Upgrade to Pro.</h2>
         </div>
       </section>
-
-      <Panel title="Cloud sync + Pro walkthrough" icon={Sparkles}>
-        <div className="pro-step-carousel" aria-label="Cloud and Pro setup steps">
-          {cloudProSteps.map((step, index) => {
-            const StepIcon = step.icon;
-            return (
-              <article className="pro-step-card" key={step.title}>
-                <span className="pro-step-number">Step {index + 1}</span>
-                <span className="pro-step-icon">
-                  <StepIcon size={20} aria-hidden="true" />
-                </span>
-                <strong>{step.title}</strong>
-                <small>{step.detail}</small>
-              </article>
-            );
-          })}
-        </div>
-      </Panel>
 
       <section className="content-grid two-columns align-start">
         <Panel title="Cloud workspace" icon={RefreshCw}>
@@ -8369,12 +8598,6 @@ function SyncBillingPage({
                   {backendStatus.supabaseConfigured
                     ? "Use the same ClassLoop account on desktop, browser, and phone. Free accounts can sync workspaces too."
                     : "Cloud sync is not available in this build. You can keep working on this device."}
-                </small>
-              </div>
-              <div className="integration-card soft-note">
-                <strong>Cloud sync is separate from Pro</strong>
-                <small>
-                  Free accounts can upload and download a workspace across devices. Pro only changes session limits, reports, and classroom capture tools.
                 </small>
               </div>
               <label className="field compact">
@@ -8430,33 +8653,6 @@ function SyncBillingPage({
                     </button>
                   </div>
                 </details>
-                <details className="settings-options-panel">
-                  <summary>
-                    <span>
-                      <strong>Billing options</strong>
-                      <small>Manage receipts, cards, cancellation, and plan changes.</small>
-                    </span>
-                    <ChevronDown size={18} aria-hidden="true" />
-                  </summary>
-                  <div className="settings-option-actions">
-                    <button className="settings-option-button" type="button" onClick={refreshProfile} disabled={!connectedEmail}>
-                      <RefreshCw size={18} aria-hidden="true" />
-                      <span>
-                        <strong>Refresh plan</strong>
-                        <small>Check whether a recent payment has been confirmed.</small>
-                      </span>
-                      <ChevronRight size={16} aria-hidden="true" />
-                    </button>
-                    <button className="settings-option-button" type="button" onClick={openBillingPortal}>
-                      <Settings2 size={18} aria-hidden="true" />
-                      <span>
-                        <strong>Manage billing</strong>
-                        <small>Open billing management for invoices, cards, cancellation, and plan changes.</small>
-                      </span>
-                      <ChevronRight size={16} aria-hidden="true" />
-                    </button>
-                  </div>
-                </details>
               </div>
               {message && <p className="settings-message">{message}</p>}
             </div>
@@ -8474,15 +8670,8 @@ function SyncBillingPage({
             <div className="settings-stack">
               <button className="primary-button full" type="button" onClick={() => void startCheckout()}>
                 <ShieldCheck size={17} />
-                Upgrade to Pro with Stripe
+                Upgrade to Pro
               </button>
-              <StripePaymentLinkNote />
-              <StripeBuyButtonFallback
-                identity={stripeBuyButtonIdentity}
-                preparing={preparingStripeBuyButton}
-                disabled={isDemoAccount || !backendStatus.supabaseConfigured}
-                onPrepare={() => void prepareStripeBuyButton()}
-              />
             </div>
           )}
           <div className="integration-card plan-card">
@@ -8496,42 +8685,73 @@ function SyncBillingPage({
         </Panel>
       </section>
 
-      <Panel title="What Pro unlocks after payment" icon={Sparkles}>
+      <Panel title="MCP and Composio connectors" icon={Link2}>
         <div className="settings-stack">
-          <div className="integration-card active">
-            <strong>Unlimited generated sessions</strong>
-            <small>
-              Create more than one class follow-up per day and keep reusable rosters, published student dashboards, and teacher reports moving without the Free daily cap.
-            </small>
+          <div className={`integration-card ${integrationStatus?.localMcp?.available ? "active" : ""}`}>
+            <span>
+              <strong>Local MCP server</strong>
+              <small>
+                {integrationStatus?.localMcp?.available
+                  ? `${localMcpToolCount} preview tools over ${integrationStatus.localMcp.transport}; raw transcripts stay redacted by default.`
+                  : "Build the local MCP server before connecting it to a desktop MCP client."}
+              </small>
+            </span>
           </div>
-          <div className="integration-card">
-            <strong>Live capture modes</strong>
-            <small>
-              Use in-person class capture or online meeting capture when Pro is active. Transcript upload remains available on Free.
-            </small>
+          <div className={`integration-card ${integrationStatus?.composio?.configured ? "active" : ""}`}>
+            <span>
+              <strong>Composio MCP config</strong>
+              <small>
+                {integrationStatus?.composio?.configured
+                  ? `${configuredComposioToolkits} of ${composioToolkits.length} connectors have auth plus allowed read/draft tools for ${integrationStatus.composio.serverName}.`
+                  : "Set COMPOSIO_API_KEY and connector auth config ids to enable preview connectors."}
+              </small>
+              {integrationStatus?.composio?.coreToolkitCount ? (
+                <small>
+                  Core: {configuredCoreComposioToolkits} of {integrationStatus.composio.coreToolkitCount} have allowed tools.
+                </small>
+              ) : null}
+            </span>
           </div>
-          <div className="integration-card">
-            <strong>Private analytics and report exports</strong>
-            <small>
-              Private analytics, JSON/CSV/print report exports, and trend views are the paid review layer for repeated classroom use.
-            </small>
-          </div>
+          {composioToolkits.map((toolkit) => {
+            const capabilityReady =
+              toolkit.authConfigured &&
+              (toolkitHasReadCapability(toolkit) || toolkitHasDraftCapability(toolkit));
+            return (
+              <div className={`integration-card ${capabilityReady ? "active" : ""}`} key={toolkit.id}>
+                <span>
+                  <strong>{toolkit.label}</strong>
+                  <small>
+                    {toolkit.authConfigured
+                      ? `${toolkitCapabilityLabel(toolkit)} · ${integrationModeLabel(toolkit.mode)}.`
+                      : `Missing ${toolkit.authConfigEnv}.`}
+                  </small>
+                  <small>
+                    {toolkit.category ?? "Connector"} · {toolkit.allowedTools.length} allowed tools
+                    {toolkit.priority === "core" ? " · core" : ""}
+                  </small>
+                  {toolkit.purpose && <small>{toolkit.purpose}</small>}
+                </span>
+              </div>
+            );
+          })}
+          {!integrationStatus && !integrationStatusMessage && <p className="settings-message">Loading connector status...</p>}
+          {integrationStatusMessage && <p className="settings-message">{integrationStatusMessage}</p>}
         </div>
       </Panel>
 
       {cloudConfirmation && (
         <CloudEmailConfirmationOverlay
           prompt={cloudConfirmation}
-          actionLabel={cloudConfirmation.context === "cloud-login" ? "Try cloud sign-in again" : "Try upgrade again"}
+          actionLabel={cloudConfirmation.context === "checkout" ? "Try checkout again" : "Try cloud sign-in again"}
           onClose={() => setCloudConfirmation(null)}
           onAction={() => {
-            const context = cloudConfirmation.context;
+            const retryCheckout = cloudConfirmation.context === "checkout";
             setCloudConfirmation(null);
-            if (context === "cloud-login") {
+            if (retryCheckout) {
+              void startCheckout();
+            } else {
               void connectCloud();
-              return;
             }
-            void startCheckout();
           }}
           onResend={() => resendCloudConfirmation(cloudConfirmation.email, cloudConfirmation.redirectUrl)}
         />
@@ -8625,17 +8845,20 @@ function ImportSession({
   const [fileName, setFileName] = useState("");
   const [templateDetails, setTemplateDetails] = useState<Record<string, string>>({});
   const [zoomSearch, setZoomSearch] = useState("");
-  const [selectedZoomMeetingId, setSelectedZoomMeetingId] = useState(zoomCloudMeetingOptions[0]?.id ?? "");
-  const [selectedZoomTranscriptFileId, setSelectedZoomTranscriptFileId] = useState(zoomCloudMeetingOptions[0]?.files[0]?.id ?? "");
+  const [selectedZoomMeetingId, setSelectedZoomMeetingId] = useState("");
+  const [selectedZoomTranscriptFileId, setSelectedZoomTranscriptFileId] = useState("");
+  const [zoomPickerOpen, setZoomPickerOpen] = useState(false);
   const [zoomCloudImported, setZoomCloudImported] = useState(false);
   const [zoomMessage, setZoomMessage] = useState("");
+  const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
+  const [integrationStatusMessage, setIntegrationStatusMessage] = useState("");
+  const [integrationActionMessage, setIntegrationActionMessage] = useState("");
   const [captureMode, setCaptureMode] = useState<SessionCaptureMode>("transcript");
   const [captureStatus, setCaptureStatus] = useState<"idle" | "recording" | "stopped">("idle");
   const [captureMessage, setCaptureMessage] = useState("");
   const [planMessage, setPlanMessage] = useState("");
   const [recordedSeconds, setRecordedSeconds] = useState(0);
   const [recordedAudioUrl, setRecordedAudioUrl] = useState("");
-  const [recordedAudioBlob, setRecordedAudioBlob] = useState<Blob | null>(null);
   const [recordedAudioLabel, setRecordedAudioLabel] = useState("");
   const [structuredTranscript, setStructuredTranscript] = useState<StructuredTranscript | undefined>();
   const [whisperStatus, setWhisperStatus] = useState("");
@@ -8650,15 +8873,39 @@ function ImportSession({
   const captureStartedAtRef = useRef<number | null>(null);
   const liveSegmentCountRef = useRef(0);
   const activeTemplateFields = templateDetailFields[template];
+  const integrationToolkits = integrationStatus?.composio?.toolkits ?? [];
+  const composioConfigured = Boolean(integrationStatus?.composio?.configured);
+  const zoomToolkit = integrationToolkits.find((toolkit) => toolkit.id === "zoom");
+  const gmailToolkit = integrationToolkits.find((toolkit) => toolkit.id === "gmail");
+  const calendarToolkit = integrationToolkits.find((toolkit) => toolkit.id === "googlecalendar");
+  const classroomToolkit = integrationToolkits.find((toolkit) => toolkit.id === "google_classroom");
+  const meetToolkit = integrationToolkits.find((toolkit) => toolkit.id === "googlemeet");
+  const driveToolkit = integrationToolkits.find((toolkit) => toolkit.id === "googledrive");
+  const docsToolkit = integrationToolkits.find((toolkit) => toolkit.id === "googledocs");
+  const sheetsToolkit = integrationToolkits.find((toolkit) => toolkit.id === "googlesheets");
+  const tasksToolkit = integrationToolkits.find((toolkit) => toolkit.id === "googletasks");
+  const formsToolkit = integrationToolkits.find((toolkit) => toolkit.id === "googleforms");
+  const zoomConnectorReady = Boolean(composioConfigured && zoomToolkit?.authConfigured && toolkitHasReadCapability(zoomToolkit));
+  const gmailConnectorReady = Boolean(composioConfigured && gmailToolkit?.authConfigured && toolkitHasDraftCapability(gmailToolkit));
+  const calendarConnectorReady = Boolean(composioConfigured && calendarToolkit?.authConfigured && toolkitHasReadCapability(calendarToolkit));
+  const classroomConnectorReady = Boolean(composioConfigured && classroomToolkit?.authConfigured && toolkitHasReadCapability(classroomToolkit));
+  const meetConnectorReady = Boolean(composioConfigured && meetToolkit?.authConfigured && toolkitHasReadCapability(meetToolkit));
+  const driveConnectorReady = Boolean(composioConfigured && driveToolkit?.authConfigured && toolkitHasReadCapability(driveToolkit));
+  const docsConnectorReady = Boolean(composioConfigured && docsToolkit?.authConfigured && toolkitHasReadCapability(docsToolkit));
+  const sheetsConnectorReady = Boolean(composioConfigured && sheetsToolkit?.authConfigured && toolkitHasReadCapability(sheetsToolkit));
+  const tasksConnectorReady = Boolean(composioConfigured && tasksToolkit?.authConfigured && toolkitHasReadCapability(tasksToolkit));
+  const formsConnectorReady = Boolean(composioConfigured && formsToolkit?.authConfigured && toolkitHasReadCapability(formsToolkit));
+  const workspaceImportReady = driveConnectorReady || docsConnectorReady || sheetsConnectorReady;
+  const connectedZoomMeetings = useMemo(() => (zoomConnectorReady ? zoomCloudMeetingOptions : []), [zoomConnectorReady]);
   const filteredZoomMeetings = useMemo(() => {
     const query = zoomSearch.trim().toLowerCase();
-    if (!query) return zoomCloudMeetingOptions;
-    return zoomCloudMeetingOptions.filter((meeting) =>
+    if (!query) return connectedZoomMeetings;
+    return connectedZoomMeetings.filter((meeting) =>
       [meeting.title, meeting.date].some((value) => value.toLowerCase().includes(query)),
     );
-  }, [zoomSearch]);
+  }, [connectedZoomMeetings, zoomSearch]);
   const selectedZoomMeeting =
-    zoomCloudMeetingOptions.find((meeting) => meeting.id === selectedZoomMeetingId) ?? filteredZoomMeetings[0] ?? zoomCloudMeetingOptions[0];
+    connectedZoomMeetings.find((meeting) => meeting.id === selectedZoomMeetingId) ?? filteredZoomMeetings[0];
   const selectedZoomTranscriptFile =
     selectedZoomMeeting?.files.find((file) => file.id === selectedZoomTranscriptFileId) ?? selectedZoomMeeting?.files[0];
   const matchingRosterTemplates = useMemo(
@@ -8702,9 +8949,30 @@ function ImportSession({
     : "";
 
   useEffect(() => {
-    if (!selectedZoomMeeting) return;
+    let active = true;
+    apiJson<IntegrationStatus>("/api/integrations/status")
+      .then((status) => {
+        if (!active) return;
+        setIntegrationStatus(status);
+        setIntegrationStatusMessage("");
+      })
+      .catch((error) => {
+        if (!active) return;
+        setIntegrationStatus(null);
+        setIntegrationStatusMessage(error instanceof Error ? error.message : "Unable to load connector status.");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedZoomMeeting) {
+      setSelectedZoomTranscriptFileId("");
+      return;
+    }
     setSelectedZoomTranscriptFileId(selectedZoomMeeting.files[0]?.id ?? "");
-  }, [selectedZoomMeetingId]);
+  }, [selectedZoomMeeting?.id]);
 
   useEffect(() => {
     const matchingTemplate = rosterTemplates.find((templateItem) => templateItem.sessionType === template);
@@ -8818,10 +9086,11 @@ function ImportSession({
             : "In-person class capture is running. Place the device where discussion is clear and keep ClassLoop open.";
       }
 
+      // Track the acquired source before constructing dependent resources so
+      // every later failure path can release camera/microphone/screen tracks.
+      mediaStreamRef.current = stream;
       if (recordedAudioUrl) {
-        URL.revokeObjectURL(recordedAudioUrl);
         setRecordedAudioUrl("");
-        setRecordedAudioBlob(null);
         setRecordedAudioLabel("");
       }
       recordedChunksRef.current = [];
@@ -8837,15 +9106,13 @@ function ImportSession({
           if (!recordedChunksRef.current.length) return;
           const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || "audio/webm" });
           const nextUrl = URL.createObjectURL(blob);
-          setRecordedAudioBlob(blob);
           setRecordedAudioUrl(nextUrl);
           setRecordedAudioLabel(`${captureModeLabels[mode]} · ${Math.max(1, recordedSeconds || 1)}s`);
         };
-        recorder.start();
         mediaRecorderRef.current = recorder;
+        recorder.start();
       }
 
-      mediaStreamRef.current = stream;
       captureStartedAtRef.current = Date.now();
       setRecordedSeconds(0);
       setCaptureStatus("recording");
@@ -8859,6 +9126,21 @@ function ImportSession({
 
       startSpeechRecognition(mode);
     } catch {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {
+          // The recorder itself failed; the source tracks still need cleanup.
+        }
+      }
+      mediaRecorderRef.current = null;
+      speechRecognitionRef.current?.stop();
+      speechRecognitionRef.current = null;
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+      if (captureTimerRef.current !== null) window.clearInterval(captureTimerRef.current);
+      captureTimerRef.current = null;
+      captureStartedAtRef.current = null;
       setCaptureStatus("idle");
       setCaptureMessage("Capture permission was not granted, or this browser cannot capture that source. You can still paste or upload the transcript.");
     }
@@ -8872,8 +9154,12 @@ function ImportSession({
       speechRecognitionRef.current?.stop();
       mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
       if (captureTimerRef.current) window.clearInterval(captureTimerRef.current);
-      if (recordedAudioUrl) URL.revokeObjectURL(recordedAudioUrl);
     };
+  }, []);
+
+  useEffect(() => {
+    if (!recordedAudioUrl) return;
+    return () => URL.revokeObjectURL(recordedAudioUrl);
   }, [recordedAudioUrl]);
 
   const loadSample = () => {
@@ -8881,6 +9167,8 @@ function ImportSession({
     setTemplate("Math review");
     setCaptureMode("transcript");
     setZoomCloudImported(false);
+    setZoomMessage("");
+    setIntegrationActionMessage("");
     setTranscript(sampleTranscript);
     setStructuredTranscript(
       createStructuredTranscriptFromText(sampleTranscript, {
@@ -8899,8 +9187,40 @@ function ImportSession({
     onUseDemo();
   };
 
+  const openConnectorSettings = (connectorLabel: string) => {
+    setIntegrationActionMessage(`${connectorLabel} setup details live in Integrations.`);
+    navigate("integrations");
+  };
+
+  const handleFollowUpIntegrationAction = (
+    connectorLabel: string,
+    ready: boolean,
+    capability: "draft" | "read",
+  ) => {
+    if (!ready) {
+      openConnectorSettings(connectorLabel);
+      return;
+    }
+    setIntegrationActionMessage(
+      capability === "draft"
+        ? `Generate the draft, then ClassLoop can prepare the ${connectorLabel} for review.`
+        : `${connectorLabel} is connected for read-only context. ClassLoop will not create or change records in that service.`,
+    );
+  };
+
+  const handleReadyImportConnector = (connectorLabel: string) => {
+    setZoomMessage(`${connectorLabel} is configured. ClassLoop will show connected records here once the import endpoint returns files for this account.`);
+  };
+
   const importZoomCloudTranscript = () => {
-    if (!selectedZoomMeeting || !selectedZoomTranscriptFile) return;
+    if (!zoomConnectorReady) {
+      setZoomMessage("Connect Zoom before importing cloud transcripts.");
+      return;
+    }
+    if (!selectedZoomMeeting || !selectedZoomTranscriptFile) {
+      setZoomMessage("No Zoom transcript file is available from the connected account yet.");
+      return;
+    }
     setCaptureMode("transcript");
     setZoomCloudImported(true);
     setTranscript(selectedZoomTranscriptFile.transcript);
@@ -8912,12 +9232,7 @@ function ImportSession({
     );
     setFileName(`Zoom cloud: ${selectedZoomTranscriptFile.label}`);
     if (!title.trim()) setTitle(selectedZoomMeeting.title);
-    setNotes((current) =>
-      appendCapturedText(
-        current,
-        `Zoom cloud meeting: ${selectedZoomMeeting.title} (${formatDate(selectedZoomMeeting.date)}). Raw Zoom transcript should be deleted after recap generation; structured recap, tasks, resources, participation, and follow-ups remain.`,
-      ),
-    );
+    setIntegrationActionMessage("");
     setZoomMessage(`Imported ${selectedZoomTranscriptFile.label} from ${selectedZoomMeeting.title}.`);
   };
 
@@ -8926,6 +9241,8 @@ function ImportSession({
     setFileName(file.name);
     setCaptureMode("transcript");
     setZoomCloudImported(false);
+    setZoomMessage("");
+    setIntegrationActionMessage("");
     if (isTextTranscriptFile(file)) {
       const text = await readTranscriptFileText(file);
       setStructuredTranscript(createStructuredTranscriptFromText(text, { title: `${title || file.name} transcript`, source: "file" }));
@@ -8935,37 +9252,7 @@ function ImportSession({
       return;
     }
 
-    try {
-      setWhisperStatus(`Transcribing ${file.name}...`);
-      const nextTranscript = await transcribeRecordingWithWhisper(file, {
-        filename: file.name,
-        source: transcriptSourceForFile(file),
-        title: `${title || file.name} transcript`,
-      });
-      setStructuredTranscript(nextTranscript);
-      setTranscript(nextTranscript.text);
-      setWhisperStatus("Transcript ready. Review speakers before generating.");
-      setCaptureMessage(`Transcribed ${file.name}.`);
-    } catch (error) {
-      setWhisperStatus(error instanceof Error ? error.message : "Recording transcription failed.");
-    }
-  };
-
-  const transcribeRecordedCapture = async () => {
-    if (!recordedAudioBlob) return;
-    try {
-      setWhisperStatus("Transcribing captured audio...");
-      const nextTranscript = await transcribeRecordingWithWhisper(recordedAudioBlob, {
-        filename: `${captureMode}-${Date.now().toString(36)}.webm`,
-        source: "whisper_transcription",
-        title: `${title || captureModeLabels[captureMode]} transcript`,
-      });
-      setStructuredTranscript(nextTranscript);
-      setTranscript((current) => appendCapturedText(current, nextTranscript.text));
-      setWhisperStatus("Transcript added. Review unknown speakers before publishing.");
-    } catch (error) {
-      setWhisperStatus(error instanceof Error ? error.message : "Recording transcription failed.");
-    }
+    setWhisperStatus("Upload a .txt, .vtt, or .srt transcript. ClassLoop does not send recordings to a paid transcription service.");
   };
 
   const generateDraft = () => {
@@ -9092,6 +9379,118 @@ function ImportSession({
       setLoadedRosterTemplateId("");
     }
   };
+
+  const importConnectorRows = [
+    {
+      id: "zoom",
+      icon: PlayCircle,
+      title: "Zoom transcripts",
+      detail: zoomConnectorReady ? "Connected for transcript-ready meeting imports." : "Meeting transcript picker after Zoom setup.",
+      ready: zoomConnectorReady,
+      buttonLabel: zoomConnectorReady ? "Choose" : "Connect",
+      onClick: () => {
+        if (!zoomConnectorReady) {
+          openConnectorSettings("Zoom");
+          return;
+        }
+        setZoomPickerOpen((open) => !open);
+        setZoomMessage("");
+      },
+    },
+    {
+      id: "googlemeet",
+      icon: PlayCircle,
+      title: "Google Meet transcripts",
+      detail: meetConnectorReady ? "Connected for Meet recordings and transcript entries." : "Meet transcript imports for Google schools.",
+      ready: meetConnectorReady,
+      buttonLabel: meetConnectorReady ? "Check" : "Connect",
+      onClick: () => (meetConnectorReady ? handleReadyImportConnector("Google Meet") : openConnectorSettings("Google Meet")),
+    },
+    {
+      id: "google_classroom",
+      icon: GraduationCap,
+      title: "Classroom roster/resources",
+      detail: classroomConnectorReady ? "Connected for course rosters, coursework, and materials." : "Course roster and material context after Classroom setup.",
+      ready: classroomConnectorReady,
+      buttonLabel: classroomConnectorReady ? "Check" : "Connect",
+      onClick: () => (classroomConnectorReady ? handleReadyImportConnector("Google Classroom") : openConnectorSettings("Google Classroom")),
+    },
+    {
+      id: "google_workspace",
+      icon: FileText,
+      title: "Drive, Docs, or Sheets",
+      detail: workspaceImportReady ? "Connected for class files, notes, rosters, or tracker sheets." : "Class materials, note docs, and roster spreadsheets.",
+      ready: workspaceImportReady,
+      buttonLabel: workspaceImportReady ? "Check" : "Connect",
+      onClick: () => (workspaceImportReady ? handleReadyImportConnector("Google Workspace") : openConnectorSettings("Google Workspace")),
+    },
+  ];
+
+  const postTranscriptIntegrationRows = [
+    {
+      id: "calendar",
+      icon: CalendarDays,
+      title: "Calendar context",
+      detail: calendarConnectorReady ? "Read-only schedule context connected." : "Connect Google Calendar for schedule context.",
+      ready: calendarConnectorReady,
+      connectorLabel: "Google Calendar",
+      capability: "read" as const,
+    },
+    {
+      id: "gmail",
+      icon: Mail,
+      title: "Email reminder",
+      detail: gmailConnectorReady ? "Ready as a Gmail draft after review." : "Connect Gmail.",
+      ready: gmailConnectorReady,
+      connectorLabel: "email reminder",
+      capability: "draft" as const,
+    },
+    {
+      id: "classroom",
+      icon: Send,
+      title: "Classroom context",
+      detail: classroomConnectorReady ? "Read-only course and announcement context connected." : "Connect Google Classroom for class context.",
+      ready: classroomConnectorReady,
+      connectorLabel: "Google Classroom",
+      capability: "read" as const,
+    },
+    {
+      id: "docs",
+      icon: FileText,
+      title: "Docs context",
+      detail: docsConnectorReady ? "Read-only selected-document context connected." : "Connect Google Docs for document context.",
+      ready: docsConnectorReady,
+      connectorLabel: "Google Docs",
+      capability: "read" as const,
+    },
+    {
+      id: "sheets",
+      icon: ClipboardCheck,
+      title: "Sheets context",
+      detail: sheetsConnectorReady ? "Read-only roster and tracker context connected." : "Connect Google Sheets for tracker context.",
+      ready: sheetsConnectorReady,
+      connectorLabel: "Google Sheets",
+      capability: "read" as const,
+    },
+    {
+      id: "tasks",
+      icon: ListChecks,
+      title: "Tasks context",
+      detail: tasksConnectorReady ? "Read-only teacher task context connected." : "Connect Google Tasks for task context.",
+      ready: tasksConnectorReady,
+      connectorLabel: "Google Tasks",
+      capability: "read" as const,
+    },
+    {
+      id: "forms",
+      icon: MessageSquare,
+      title: "Forms context",
+      detail: formsConnectorReady ? "Read-only form and response context connected." : "Connect Google Forms for response context.",
+      ready: formsConnectorReady,
+      connectorLabel: "Google Forms",
+      capability: "read" as const,
+    },
+  ];
 
   return (
     <div className="page-stack">
@@ -9292,10 +9691,7 @@ function ImportSession({
                     <small>{recordedAudioLabel || `${captureModeLabels[captureMode]} captured`}</small>
                   </div>
                   <audio controls src={recordedAudioUrl} />
-                  <button className="ghost-button" type="button" onClick={transcribeRecordedCapture} disabled={!recordedAudioBlob}>
-                    <Sparkles size={17} />
-                    Transcribe recording
-                  </button>
+                  <small>Playback stays local. Live browser speech segments remain reviewable above.</small>
                 </div>
               )}
               {captureMode !== "transcript" && (
@@ -9315,67 +9711,13 @@ function ImportSession({
             </div>
             {captureMode === "transcript" && (
               <>
-                <div className="capture-panel wide" aria-label="Zoom cloud transcript import">
-                  <div>
-                    <span className="eyebrow">Zoom cloud import</span>
-                    <h3>Import transcript-ready Zoom meetings.</h3>
-                    <p>
-                      Show recent meetings with transcript files, search by date or title, then choose the transcript
-                      file when Zoom has more than one.
-                    </p>
-                  </div>
-                  <div className="saved-roster-row">
-                    <label className="field compact">
-                      <span>Search date or title</span>
-                      <input value={zoomSearch} onChange={(event) => setZoomSearch(event.target.value)} placeholder="CS4All or 2026-04-28" />
-                    </label>
-                    <label className="field compact">
-                      <span>Transcript-ready meeting</span>
-                      <select value={selectedZoomMeeting?.id ?? ""} onChange={(event) => setSelectedZoomMeetingId(event.target.value)}>
-                        {filteredZoomMeetings.map((meeting) => (
-                          <option key={meeting.id} value={meeting.id}>
-                            {meeting.title} · {formatDate(meeting.date)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="field compact">
-                      <span>Transcript file</span>
-                      <select
-                        value={selectedZoomTranscriptFile?.id ?? ""}
-                        onChange={(event) => setSelectedZoomTranscriptFileId(event.target.value)}
-                      >
-                        {(selectedZoomMeeting?.files ?? []).map((file) => (
-                          <option key={file.id} value={file.id}>
-                            {file.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  <div className="capture-guidance">
-                    <ShieldCheck size={17} />
-                    <div>
-                      <strong>Raw transcript retention</strong>
-                      <small>
-                        Zoom cloud transcript text is used to generate the recap, then removed from the saved session.
-                        Structured recap, tasks, resources, participation, and follow-ups remain.
-                      </small>
-                    </div>
-                  </div>
-                  <button className="ghost-button" type="button" onClick={importZoomCloudTranscript}>
-                    <Download size={17} />
-                    Import selected Zoom transcript
-                  </button>
-                  {zoomMessage && <p className="settings-message success">{zoomMessage}</p>}
-                </div>
                 <label className="upload-zone wide">
                   <UploadCloud size={24} />
-                  <strong>{fileName || "Upload transcript, audio, or screen recording"}</strong>
-                  <small>Text files load directly. Audio and video recordings are transcribed when the service is available.</small>
+                  <strong>{fileName || "Upload a transcript"}</strong>
+                  <small>Use a .txt, .vtt, or .srt export. Audio and video are never uploaded for paid transcription.</small>
                   <input
                     type="file"
-                    accept=".txt,.vtt,.srt,audio/*,video/*,.mp3,.mp4,.m4a,.wav,.webm,.mov"
+                    accept=".txt,.vtt,.srt,text/plain,text/vtt"
                     onChange={(event) => handleTranscriptFile(event.target.files?.[0])}
                   />
                 </label>
@@ -9386,10 +9728,119 @@ function ImportSession({
                     onChange={(event) => {
                       setTranscript(event.target.value);
                       setStructuredTranscript(undefined);
+                      setZoomCloudImported(false);
+                      setFileName("");
+                      setZoomMessage("");
+                      setIntegrationActionMessage("");
                     }}
                     placeholder="Paste the raw transcript here..."
                   />
                 </label>
+                <div className="capture-panel wide import-integration-panel" aria-label="Connect imports and follow-up integrations">
+                  <div>
+                    <span className="eyebrow">Connected imports</span>
+                    <h3>Connect sources when you want one-click imports.</h3>
+                    <p>Manual paste and upload stay available even when no external connector is set up.</p>
+                  </div>
+                  <div className="import-connector-grid">
+                    {importConnectorRows.map((connector) => {
+                      const ConnectorIcon = connector.icon;
+                      return (
+                        <div className={`import-connector-row ${connector.ready ? "active" : ""}`} key={connector.id}>
+                          <ConnectorIcon size={18} />
+                          <span>
+                            <strong>{connector.title}</strong>
+                            <small>{connector.detail}</small>
+                          </span>
+                          <button type="button" className={connector.ready ? "ghost-button" : "primary-button"} onClick={connector.onClick}>
+                            {connector.buttonLabel}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {zoomPickerOpen && zoomConnectorReady && (
+                    <div className="zoom-transcript-picker" aria-label="Zoom transcript picker">
+                      {connectedZoomMeetings.length > 0 ? (
+                        <>
+                          <div className="saved-roster-row">
+                            <label className="field compact">
+                              <span>Search date or title</span>
+                              <input value={zoomSearch} onChange={(event) => setZoomSearch(event.target.value)} placeholder="Search connected Zoom transcripts" />
+                            </label>
+                            <label className="field compact">
+                              <span>Transcript-ready meeting</span>
+                              <select value={selectedZoomMeeting?.id ?? ""} onChange={(event) => setSelectedZoomMeetingId(event.target.value)}>
+                                {filteredZoomMeetings.map((meeting) => (
+                                  <option key={meeting.id} value={meeting.id}>
+                                    {meeting.title} · {formatDate(meeting.date)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="field compact">
+                              <span>Transcript file</span>
+                              <select
+                                value={selectedZoomTranscriptFile?.id ?? ""}
+                                onChange={(event) => setSelectedZoomTranscriptFileId(event.target.value)}
+                              >
+                                {(selectedZoomMeeting?.files ?? []).map((file) => (
+                                  <option key={file.id} value={file.id}>
+                                    {file.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                          <button className="ghost-button" type="button" onClick={importZoomCloudTranscript}>
+                            <Download size={17} />
+                            Import selected Zoom transcript
+                          </button>
+                        </>
+                      ) : (
+                        <p className="settings-message" role="status">
+                          Zoom is configured, but no transcript files are loaded from a connected account yet.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {zoomMessage && <p className="settings-message success">{zoomMessage}</p>}
+                  {integrationStatusMessage && <p className="settings-message">{integrationStatusMessage}</p>}
+                  {transcript.trim() && (
+                    <div className="post-transcript-actions" aria-label="Post-transcript integrations">
+                      <div>
+                        <strong>After the transcript is in</strong>
+                        <small>Use connected read-only context or prepare a Gmail draft from the generated draft.</small>
+                      </div>
+                      <div className="import-connector-grid">
+                        {postTranscriptIntegrationRows.map((connector) => {
+                          const ConnectorIcon = connector.icon;
+                          return (
+                            <button
+                              type="button"
+                              className={`import-connector-row ${connector.ready ? "active" : ""}`}
+                              onClick={() =>
+                                handleFollowUpIntegrationAction(
+                                  connector.connectorLabel,
+                                  connector.ready,
+                                  connector.capability,
+                                )
+                              }
+                              key={connector.id}
+                            >
+                              <ConnectorIcon size={18} />
+                              <span>
+                                <strong>{connector.title}</strong>
+                                <small>{connector.detail}</small>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {integrationActionMessage && <p className="settings-message">{integrationActionMessage}</p>}
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -9720,7 +10171,7 @@ function ReviewDraft({
         <section className="content-grid align-start">
           <StructuredTranscriptPanel
             transcript={draft.structuredTranscript}
-            emptyDetail="Paste a transcript or transcribe a recording to keep a cleaned, speaker-labeled meeting transcript."
+            emptyDetail="Paste or upload a transcript to keep a cleaned, speaker-labeled meeting transcript."
           />
         </section>
       )}
@@ -10838,6 +11289,12 @@ function PublishPreview({
     }))
     .filter((option) => option.email && !option.email.endsWith("@classloop.local"));
   const recipientCount = selectedEmailRecipients.length;
+  const classroomToolkit = integrationStatus?.composio?.toolkits.find((toolkit) => toolkit.id === "google_classroom");
+  const classroomComposioContextReady = Boolean(
+    integrationStatus?.composio?.configured &&
+      classroomToolkit?.authConfigured &&
+      toolkitHasReadCapability(classroomToolkit),
+  );
   const currentPublishAudit = draft.publishAudit ?? makePublishAudit(draft);
   const blockingImportWarnings = unresolvedBlockingImportWarnings(draft);
   const updatePreviewSession = (sessionId: string, updater: (session: Session) => Session) => {
@@ -10851,7 +11308,9 @@ function PublishPreview({
   };
   const previewClassroomPost = () => {
     setClassroomPostMessage(
-      `Edited ${classroomPostType} is ready. Classroom posting is not connected yet, so copy this draft into your classroom tool.`,
+      classroomComposioContextReady
+        ? `Edited ${classroomPostType} is ready locally. The connected Classroom tools are read-only, so copy this reviewed draft into Classroom yourself.`
+        : `Edited ${classroomPostType} is ready locally. Classroom posting is not connected, so copy this draft into your classroom tool.`,
     );
   };
   const sendStudentEmails = async () => {
@@ -10867,7 +11326,6 @@ function PublishPreview({
         method: "POST",
         body: JSON.stringify({
           sessionId: draft.id,
-          ownerEmail: draft.ownerEmail,
           recipients: selectedEmailRecipients,
           includeAccessInstructions: magicLinksEnabled,
         }),
@@ -11037,9 +11495,11 @@ function PublishPreview({
             <div className="capture-guidance">
               <ShieldCheck size={17} />
               <div>
-                <strong>Integration status</strong>
+                <strong>{classroomComposioContextReady ? "Read-only Classroom context connected" : "Integration status"}</strong>
                 <small>
-                  Classroom posting is not connected yet. Review the draft here, then copy it into your classroom tool.
+                  {classroomComposioContextReady
+                    ? "Google Classroom course and announcement context is available through Composio, but the allowed tools cannot post this draft."
+                    : "Classroom posting is not connected yet. Review the draft here, then copy it into your classroom tool."}
                 </small>
               </div>
             </div>
@@ -12263,6 +12723,7 @@ function PrivacyControlsPage({
   setPrivacySettings,
   auditLog,
   appendAudit,
+  purgeExpiredSessions,
   clearClassData,
 }: {
   auth: AuthSession;
@@ -12272,6 +12733,7 @@ function PrivacyControlsPage({
   setPrivacySettings: React.Dispatch<React.SetStateAction<PrivacySettings>>;
   auditLog: AuditLogEntry[];
   appendAudit: (action: string, detail: string, actor?: AuthSession | null) => void;
+  purgeExpiredSessions: () => number;
   clearClassData: () => void;
 }) {
   const exportData = () => {
@@ -12297,6 +12759,23 @@ function PrivacyControlsPage({
     if (!window.confirm("Delete this teacher workspace's class sessions and drafts? Accounts will remain.")) return;
     clearClassData();
     appendAudit("delete_class_data", "Deleted class sessions and current draft from the teacher workspace.");
+  };
+
+  const enforceRetention = () => {
+    const preview = partitionSessionsByRetention(sessions, privacySettings.retentionDays);
+    if (!preview.expired.length) {
+      appendAudit("retention_review", `No sessions exceeded the ${privacySettings.retentionDays}-day retention window.`);
+      return;
+    }
+    if (
+      !window.confirm(
+        `Delete ${preview.expired.length} session${preview.expired.length === 1 ? "" : "s"} older than ${privacySettings.retentionDays} days? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    const deleted = purgeExpiredSessions();
+    appendAudit("retention_enforced", `Deleted ${deleted} expired session${deleted === 1 ? "" : "s"}.`);
   };
 
   return (
@@ -12330,10 +12809,10 @@ function PrivacyControlsPage({
             <button
               className="ghost-button full"
               type="button"
-              onClick={() => appendAudit("retention_review", `Reviewed ${sessions.length} sessions against retention settings.`)}
+              onClick={enforceRetention}
             >
               <Search size={17} />
-              Review retention
+              Enforce retention
             </button>
           </div>
         </Panel>

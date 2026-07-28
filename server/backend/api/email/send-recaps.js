@@ -18,6 +18,21 @@ function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+export function assertRecapEmailAuthorization({ user, profile, session }) {
+  if (!user?.email || !(user.email_confirmed_at || user.confirmed_at)) {
+    throw httpError(403, "Confirm your account email before sending student recaps.");
+  }
+  if (profile?.role !== "teacher") {
+    throw httpError(403, "Only teacher accounts can send student recaps.");
+  }
+  if (profile?.email_delivery_enabled !== true) {
+    throw httpError(403, "Hosted email delivery is not enabled for this workspace.");
+  }
+  if (normalizeEmail(session?.ownerEmail) !== normalizeEmail(user.email)) {
+    throw httpError(403, "Only the authenticated teacher who owns this session can send recap emails.");
+  }
+}
+
 function studentEmail(student) {
   return normalizeEmail(student?.linkedAccountEmail || student?.email);
 }
@@ -213,6 +228,17 @@ async function loadWorkspaceState(supabase, userId) {
   return data.state;
 }
 
+async function loadEmailDeliveryProfile(supabase, userId) {
+  const { data, error } = await supabase
+    .from("classloop_profiles")
+    .select("role,email_delivery_enabled")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw httpError(403, "A ClassLoop teacher profile is required.");
+  return data;
+}
+
 async function saveWorkspaceState(supabase, userId, state) {
   const payload = validateCloudWorkspaceStatePayload(state);
   const { error } = await supabase.from("classloop_workspace_state").upsert({
@@ -237,14 +263,13 @@ export default async function handler(request, response) {
     );
 
     const state = await loadWorkspaceState(supabase, user.id);
+    const profile = await loadEmailDeliveryProfile(supabase, user.id);
     const sessions = Array.isArray(state.sessions) ? state.sessions : [];
     const sessionIndex = sessions.findIndex((item) => item.id === body.sessionId);
     const session = sessions[sessionIndex];
     if (!session) throw httpError(404, "Published session was not found.");
     if (session.status !== "published") throw httpError(409, "Publish the session before sending recap emails.");
-    if (normalizeEmail(session.ownerEmail) !== normalizeEmail(body.ownerEmail)) {
-      throw httpError(403, "Only the teacher who owns this session can send recap emails.");
-    }
+    assertRecapEmailAuthorization({ user, profile, session });
 
     const result = await sendRecapEmails(session, body.recipients, body.includeAccessInstructions);
     const nextState = {

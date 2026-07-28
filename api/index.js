@@ -9,7 +9,6 @@ import feedback from "../server/backend/api/feedback.js";
 import integrationsStatus from "../server/backend/api/integrations/status.js";
 import profile from "../server/backend/api/profile.js";
 import supabaseKeepalive from "../server/backend/api/ops/supabase-keepalive.js";
-import transcribe from "../server/backend/api/transcribe.js";
 import { json } from "../server/backend/api/_shared.js";
 
 export const config = {
@@ -30,7 +29,6 @@ const handlers = new Map([
   ["integrations/status", integrationsStatus],
   ["ops/supabase-keepalive", supabaseKeepalive],
   ["profile", profile],
-  ["transcribe", transcribe],
 ]);
 
 function routeFromRequest(request) {

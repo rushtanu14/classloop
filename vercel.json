@@ -32,7 +32,7 @@
         },
         {
           "key": "Permissions-Policy",
-          "value": "accelerometer=(), ambient-light-sensor=(), autoplay=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), microphone=(), payment=(), usb=(), xr-spatial-tracking=()"
+          "value": "accelerometer=(), ambient-light-sensor=(), autoplay=(), camera=(), display-capture=(self), geolocation=(), gyroscope=(), microphone=(self), payment=(), usb=(), xr-spatial-tracking=()"
         }
       ]
     }

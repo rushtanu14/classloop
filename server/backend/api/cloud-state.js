@@ -4,6 +4,14 @@ import { validateCloudWorkspaceStatePayload } from "./validators.js";
 const CLOUD_STATE_RATE_LIMIT = { endpoint: "cloud-state", limit: 120, windowMs: 60 * 1000 };
 const CLOUD_STATE_BODY_MAX_BYTES = 3_500_000;
 
+export function cloudStateReadResponse(row) {
+  const updatedAt = typeof row?.updated_at === "string" ? row.updated_at : "";
+  return {
+    payload: row?.state ?? null,
+    headers: updatedAt ? { "X-ClassLoop-Updated-At": updatedAt } : {},
+  };
+}
+
 export default async function handler(request, response) {
   try {
     assertIpRateLimit(request, response, CLOUD_STATE_RATE_LIMIT);
@@ -17,7 +25,8 @@ export default async function handler(request, response) {
         .eq("owner_id", user.id)
         .maybeSingle();
       if (error) throw error;
-      return json(response, 200, data?.state ?? null);
+      const readResponse = cloudStateReadResponse(data);
+      return json(response, 200, readResponse.payload, readResponse.headers);
     }
 
     if (request.method === "PUT") {

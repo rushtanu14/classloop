@@ -88,11 +88,8 @@ export function resolveCloudStateConflict<T>(
 }
 
 export function shouldQueueCloudRequest(method = "GET") {
-  return ["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase());
-}
-
-function operationKey(operation: Pick<QueuedCloudOperation, "path" | "method" | "body">) {
-  return `${operation.method.toUpperCase()} ${operation.path} ${operation.body ?? ""}`;
+  void method;
+  return false;
 }
 
 export function enqueueCloudOperation(
@@ -100,23 +97,9 @@ export function enqueueCloudOperation(
   operation: Pick<QueuedCloudOperation, "path" | "method" | "body">,
   now = new Date(),
 ) {
-  const normalized = {
-    ...operation,
-    method: operation.method.toUpperCase(),
-    body: operation.body,
-  };
-  const key = operationKey(normalized);
-  const existing = queue.find((item) => operationKey(item) === key);
-  if (existing) return queue;
-  return [
-    ...queue,
-    {
-      ...normalized,
-      id: `cloud-op-${now.getTime().toString(36)}-${queue.length}`,
-      createdAt: now.toISOString(),
-      attempts: 0,
-    },
-  ];
+  void operation;
+  void now;
+  return queue;
 }
 
 export async function flushCloudOperationQueue(

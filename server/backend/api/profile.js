@@ -20,13 +20,12 @@ export function profilePatchColumns(payload = {}) {
   if (typeof payload.noTrainingOnStudentData === "boolean") {
     allowed.no_training_on_student_data = payload.noTrainingOnStudentData;
   }
-  if (payload.role === "teacher" || payload.role === "student" || payload.role === "individual") {
-    allowed.role = payload.role;
-  }
   return allowed;
 }
 
 async function ensureProfile(supabase, user) {
+  const requestedRole = user?.user_metadata?.role;
+  const initialRole = ["teacher", "student", "individual"].includes(requestedRole) ? requestedRole : "teacher";
   const { data, error } = await supabase
     .from("classloop_profiles")
     .select("email, role, plan_tier, subscription_status, stripe_customer_id, current_period_end, no_training_on_student_data")
@@ -40,7 +39,7 @@ async function ensureProfile(supabase, user) {
     .insert({
       id: user.id,
       email: user.email || "",
-      role: "teacher",
+      role: initialRole,
       plan_tier: "free",
       subscription_status: "not_configured",
       no_training_on_student_data: true,

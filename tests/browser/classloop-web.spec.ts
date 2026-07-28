@@ -24,30 +24,15 @@ const gotoHostedRoute = async (page: Page, route: string) => {
 test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   await gotoHostedRoute(page, "/?demoOnly=1");
   await expect(page.getByRole("heading", { name: /^ClassLoop$/i })).toBeVisible();
-  const screenshotsButton = page.getByRole("button", { name: /^screenshots$/i });
-  const docsButton = page.getByRole("button", { name: /^docs$/i });
-  const isWideViewport = (page.viewportSize()?.width ?? 0) > 920;
-  const heroCopy = page.locator(".landing-hero-copy");
-  await expect(heroCopy.getByRole("button")).toHaveCount(2);
-  await expect(heroCopy.getByRole("button", { name: /open web demo/i })).toBeVisible();
-  await expect(heroCopy.getByRole("button", { name: /add to phone/i })).toBeVisible();
-  await expect(heroCopy.getByRole("button", { name: /view screenshots/i })).toHaveCount(0);
-  await expect(heroCopy.getByRole("button", { name: /download|macos/i })).toHaveCount(0);
+  const homeHero = page.locator(".landing-home-upgrade");
+  await expect(page.locator(".landing-page-home button")).toHaveCount(1);
+  await expect(homeHero.getByRole("button")).toHaveCount(1);
+  await expect(homeHero.getByRole("button", { name: /^upgrade to pro$/i })).toBeVisible();
   await expect(page.locator(".landing-hero .landing-platform-list")).toHaveCount(0);
-  if (isWideViewport) {
-    await expect(screenshotsButton).toBeVisible();
-    if (await docsButton.isVisible().catch(() => false)) {
-      await expect(docsButton).toBeVisible();
-    } else {
-      await expect(page.getByRole("button", { name: /^privacy$/i })).toBeVisible();
-    }
-    await expect(page.getByRole("button", { name: /^support$/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /^download$/i })).toBeVisible();
-  }
-  await expect(page.getByRole("button", { name: /open web demo/i })).toBeVisible();
-  await expect(page.getByText("Class, club, and personal notes")).toBeVisible();
-  await expect(page.getByText("Teacher review built in")).toBeVisible();
-  await expect(page.getByText("Student-specific next steps")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^open demo$/i })).toHaveCount(0);
+  await expect(page.getByText("Class, club, and personal notes")).toHaveCount(0);
+  await expect(page.getByText("Teacher review built in")).toHaveCount(0);
+  await expect(page.getByText("Student-specific next steps")).toHaveCount(0);
   await expect(page.getByRole("button", { name: /^beta$/i })).toHaveCount(0);
   await expectNoUnnamedInteractive(page, ".landing-page");
   await expectContrast(page, landingContrastSelectors);
@@ -55,16 +40,14 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
     await expectReadableMobileLayout(page, ".landing-page");
   }
 
-  if (await screenshotsButton.isVisible().catch(() => false)) {
-    await screenshotsButton.click();
-    await expect(page.getByRole("heading", { name: /screenshots: how classloop works/i })).toBeVisible();
-    await expect(page.getByRole("img", { name: /teacher import and review screen/i })).toBeVisible();
-    await expect(page.getByRole("img", { name: /student dashboard/i })).toBeVisible();
-    await expect(page.getByRole("img", { name: /teacher analytics screen/i })).toBeVisible();
-    await expect(page.locator(".landing-card-kicker").filter({ hasText: /^Teacher workflow$/ })).toBeVisible();
-    await expect(page.locator(".landing-card-kicker").filter({ hasText: /^Student workspace$/ })).toBeVisible();
-    await expect(page.locator(".landing-card-kicker").filter({ hasText: /^Support signals$/ })).toBeVisible();
-  }
+  await gotoHostedRoute(page, "/?demoOnly=1#/screenshots");
+  await expect(page.getByRole("heading", { name: /screenshots: how classloop works/i })).toBeVisible();
+  await expect(page.getByRole("img", { name: /teacher import and review screen/i })).toBeVisible();
+  await expect(page.getByRole("img", { name: /student dashboard/i })).toBeVisible();
+  await expect(page.getByRole("img", { name: /teacher analytics screen/i })).toBeVisible();
+  await expect(page.locator(".landing-card-kicker").filter({ hasText: /^Teacher workflow$/ })).toBeVisible();
+  await expect(page.locator(".landing-card-kicker").filter({ hasText: /^Student workspace$/ })).toBeVisible();
+  await expect(page.locator(".landing-card-kicker").filter({ hasText: /^Support signals$/ })).toBeVisible();
 
   await gotoHostedRoute(page, "/?demoOnly=1#/beta");
   await expect(page.getByText(/run a 15-minute classloop beta test/i)).toHaveCount(0);
@@ -168,7 +151,7 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
     }
   }
 
-  await gotoHostedRoute(page, "/?demoOnly=1");
+  await gotoHostedRoute(page, "/?demoOnly=1#/features");
   await page.getByRole("button", { name: /open web demo|open demo/i }).first().click();
   await expect(page.getByRole("heading", { name: /try classloop as a teacher or student/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /demo teacher side/i })).toBeVisible();
@@ -192,12 +175,7 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   await page.getByRole("button", { name: /^plan options$/i }).click();
   await expect(page.locator(".stripe-pricing-table-shell")).toHaveCount(0);
   await expect(page.getByRole("status").filter({ hasText: /Demo account upgrades are disabled/i })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /What Pro unlocks after payment/i })).toBeVisible();
-  await expect(page.locator(".pro-step-card").getByText("Create a cloud account", { exact: true })).toBeVisible();
-  await expect(page.getByText(/Free accounts can upload this workspace to cloud sync/i)).toBeVisible();
-  await expect(page.getByText(/Live capture modes/i)).toBeVisible();
-  await expect(page.getByText(/Private analytics and report exports/i)).toBeVisible();
-  await expect(page.getByText(/Transcript upload remains available on Free/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /upgrade to pro/i })).toBeVisible();
 });
 
 test("hosted public screenshots and privacy routes expose compliance boundaries", async ({ page }) => {

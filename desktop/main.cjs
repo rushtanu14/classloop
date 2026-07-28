@@ -48,7 +48,7 @@ const securityHeaders = {
   "X-Frame-Options": "DENY",
   "Content-Security-Policy":
     "default-src 'self'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-src 'self' https://js.stripe.com https://checkout.stripe.com https://hooks.stripe.com https://buy.stripe.com; child-src 'self' https://js.stripe.com https://checkout.stripe.com https://hooks.stripe.com https://buy.stripe.com; frame-ancestors 'none'; base-uri 'self'; form-action 'none'",
-  "Permissions-Policy": "camera=(), geolocation=(), microphone=(self), display-capture=()",
+  "Permissions-Policy": "camera=(), geolocation=(), microphone=(self), display-capture=(self)",
 };
 
 const mimeTypes = {
@@ -409,7 +409,7 @@ function emailConfig() {
   };
 }
 
-function textForStudentEmail(session, student) {
+function textForStudentEmail(session, student, includeAccessInstructions = false) {
   const followUp = Array.isArray(session.followUps)
     ? session.followUps.find((item) => item.studentId === student.id)
     : null;
@@ -432,6 +432,15 @@ function textForStudentEmail(session, student) {
       : "",
     "",
     "Open ClassLoop with your roster email to see the full student dashboard.",
+    includeAccessInstructions
+      ? [
+          "",
+          "Student access:",
+          `- Use this roster email: ${studentEmail(student)}`,
+          "- Open ClassLoop and choose Student sign in.",
+          "- If ClassLoop sends an access email, use the link or code sent to this address.",
+        ].join("\n")
+      : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -481,7 +490,7 @@ async function sendRecapEmails(session, options = {}) {
         replyTo: config.replyTo,
         to,
         subject: `ClassLoop recap: ${session.title || "Session follow-up"}`,
-        text: textForStudentEmail(session, student),
+        text: textForStudentEmail(session, student, options.includeAccessInstructions),
       });
       recipients.push(to);
     } catch (error) {
@@ -611,13 +620,18 @@ function validateStatePayload(payload) {
 }
 
 function validateEmailRequestPayload(payload) {
-  rejectUnexpectedFields(payload, ["sessionId", "ownerEmail", "recipients"], "Email request");
+  rejectUnexpectedFields(payload, ["sessionId", "recipients", "includeAccessInstructions"], "Email request");
   const sessionId = String(payload.sessionId || "").trim();
-  const ownerEmail = normalizeEmail(payload.ownerEmail);
   const recipients = Array.isArray(payload.recipients) ? payload.recipients.map((email) => normalizeEmail(email)).filter(Boolean) : undefined;
+  const includeAccessInstructions = payload.includeAccessInstructions ?? false;
 
-  if (!sessionId || sessionId.length > 160 || !ownerEmail || ownerEmail.length > 320) {
-    const error = new Error("Session id and owner email are required before sending recap emails.");
+  if (!sessionId || sessionId.length > 160) {
+    const error = new Error("Session id is required before sending recap emails.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (typeof includeAccessInstructions !== "boolean") {
+    const error = new Error("Email request includeAccessInstructions must be a boolean.");
     error.statusCode = 400;
     throw error;
   }
@@ -631,7 +645,19 @@ function validateEmailRequestPayload(payload) {
     error.statusCode = 400;
     throw error;
   }
-  return { sessionId, ownerEmail, recipients };
+  return { sessionId, recipients, includeAccessInstructions };
+}
+
+function assertLocalRecapEmailAuthorization(state, session) {
+  const ownerEmail = normalizeEmail(session?.ownerEmail);
+  const ownerAccount = (Array.isArray(state?.accounts) ? state.accounts : []).find(
+    (account) => account?.role === "teacher" && normalizeEmail(account.email) === ownerEmail,
+  );
+  if (!ownerEmail || !ownerAccount) {
+    const error = new Error("Only a teacher-owned session in this encrypted desktop workspace can send recap emails.");
+    error.statusCode = 403;
+    throw error;
+  }
 }
 
 async function handleStateApi(request, response) {
@@ -685,7 +711,6 @@ async function handleEmailApi(request, response) {
   try {
     const body = validateEmailRequestPayload(await readJsonRequest(request, LOCAL_EMAIL_BODY_MAX_BYTES));
     const sessionId = body.sessionId;
-    const ownerEmail = body.ownerEmail;
 
     const state = readDataFile({ throwOnError: true });
     const session = (Array.isArray(state.sessions) ? state.sessions : []).find((item) => item.id === sessionId);
@@ -697,12 +722,12 @@ async function handleEmailApi(request, response) {
       sendJson(response, 409, { error: "Publish the session before sending recap emails." });
       return true;
     }
-    if (normalizeEmail(session.ownerEmail) !== ownerEmail) {
-      sendJson(response, 403, { error: "Only the teacher who owns this session can send recap emails." });
-      return true;
-    }
+    assertLocalRecapEmailAuthorization(state, session);
 
-    const result = await sendRecapEmails(session, { onlyEmails: body.recipients });
+    const result = await sendRecapEmails(session, {
+      onlyEmails: body.recipients,
+      includeAccessInstructions: body.includeAccessInstructions,
+    });
     sendJson(response, 200, result);
   } catch (error) {
     sendJson(response, error.statusCode || 500, { error: error.message || "Unable to send student emails." });

@@ -87,6 +87,7 @@ function verifyNoHighConfidenceSecrets(files) {
 function verifyLocalStorageSecurity() {
   const appSource = readText("src/App.tsx");
   const cloudSource = readText("src/cloud.ts");
+  const cloudSyncSource = readText("src/cloudSync.ts");
 
   const secureBlock = appSource.match(/const secureLocalKeys = \{([\s\S]*?)\};/);
   if (!secureBlock) fail("secureLocalKeys block was not found.");
@@ -101,10 +102,10 @@ function verifyLocalStorageSecurity() {
     ["AES-GCM browser fallback encryption", /crypto\.subtle\.encrypt\(\{ name: "AES-GCM"/],
     ["legacy plaintext migration removal", /localStorage\.removeItem\(legacyKey\)/],
     ["demo sessions filtered from persistence", /sessions: state\.sessions\.filter\(\(session\) => !isDemoOwnedSession\(session\)\)/],
-    ["offline queue is ClassLoop-namespaced", /const offlineQueueKey = "classloop:cloud-offline-queue:v1"/],
+    ["sensitive cloud writes are never queued", /export function shouldQueueCloudRequest[\s\S]*?return false/],
   ];
   requiredStorageControls.forEach(([label, pattern]) => {
-    if (!pattern.test(label === "offline queue is ClassLoop-namespaced" ? cloudSource : appSource)) {
+    if (!pattern.test(label === "sensitive cloud writes are never queued" ? cloudSyncSource : appSource)) {
       fail(`Missing storage control: ${label}`);
     }
   });
@@ -148,10 +149,15 @@ function verifyDesktopAndHostedSecurity() {
   const webhook = readText("server/backend/api/billing/webhook.js");
   const keepalive = readText("server/backend/api/ops/supabase-keepalive.js");
   const schema = readText("supabase/schema.sql");
+  const apiDispatcher = readText("api/index.js");
+  const envExample = readText(".env.example");
+  const vercelConfig = readText("vercel.json");
 
   const checks = [
     ["desktop uses current ClassLoop data filename", desktop, /const dataFileName = "\.classloop-data\.json"/],
     ["desktop uses prompt-free ClassLoop storage key", desktop, /const dataKeyFileName = "\.classloop-storage-key"/],
+    ["desktop permits same-origin microphone capture", desktop, /microphone=\(self\)/],
+    ["desktop permits same-origin display capture", desktop, /display-capture=\(self\)/],
     ["desktop encrypts state with AES-GCM", desktop, /crypto\.createCipheriv\("aes-256-gcm"/],
     ["desktop writes restrictive data-file permissions", desktop, /mode: 0o600/],
     ["desktop blocks untrusted mutating local API origins", desktop, /Blocked untrusted local API origin/],
@@ -187,6 +193,8 @@ function verifyDesktopAndHostedSecurity() {
     ["hosted recap email has user rate limiting", emailRecaps, /requireUser\(request, response, \{ rateLimit: EMAIL_USER_RATE_LIMIT \}/],
     ["hosted recap email validates payload schema", emailRecaps, /validateEmailRecapPayload/],
     ["hosted recap email reloads cloud state server-side", emailRecaps, /loadWorkspaceState\(supabase, user\.id\)/],
+    ["hosted recap email uses authenticated ownership", emailRecaps, /normalizeEmail\(session\?\.ownerEmail\)[\s\S]*?normalizeEmail\(user\.email\)/i],
+    ["hosted recap email requires an administrator delivery grant", emailRecaps, /email_delivery_enabled/],
     ["hosted recap email writes delivery state after send", emailRecaps, /markSessionEmailsSent/],
     ["Stripe client pins current SDK API version", readText("server/backend/api/billing/stripe-client.js"), /apiVersion: stripeApiVersion/],
     ["anonymous feedback has IP rate limiting", feedback, /assertIpRateLimit\(request, response/],
@@ -218,7 +226,21 @@ function verifyDesktopAndHostedSecurity() {
     ["Supabase keepalive uses dedicated env credentials", keepalive, /SUPABASE_KEEPALIVE_EMAIL/],
     ["workspace RLS enabled", schema, /alter table public\.classloop_workspace_state enable row level security/i],
     ["workspace own-record policy exists", schema, /workspace_state_select_own/i],
+    ["profile roles include individual accounts", schema, /role in \('teacher', 'student', 'individual'\)/i],
+    ["email delivery is disabled until an administrator grants it", schema, /email_delivery_enabled boolean not null default false/i],
+    ["legacy cloud snapshots strip local accounts", schema, /state - 'accounts' - 'billingProfile'/i],
+    ["cross-account class memberships have RLS", schema, /classloop_class_memberships enable row level security/i],
+    ["published follow-ups use normalized records", schema, /create table if not exists public\.classloop_publications/i],
+    ["hosted app permits same-origin microphone capture", vercelConfig, /microphone=\(self\)/],
+    ["hosted app permits same-origin display capture", vercelConfig, /display-capture=\(self\)/],
   ];
+
+  if (/route === "transcribe"/.test(apiDispatcher)) {
+    fail("Anonymous paid transcription must not be exposed by the hosted API dispatcher.");
+  }
+  if (/OPENAI_API_KEY|OPENAI_TRANSCRIBE_MODEL/.test(envExample)) {
+    fail("The free-first app must not advertise paid OpenAI transcription credentials.");
+  }
 
   checks.forEach(([label, source, pattern]) => {
     if (!pattern.test(source)) fail(`Missing security control: ${label}`);

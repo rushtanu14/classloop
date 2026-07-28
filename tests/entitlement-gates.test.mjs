@@ -49,14 +49,10 @@ assert.equal(
 );
 assert.deepEqual(
   manualProBillingProfileForEmail(" RUSHILCPM02@gmail.com "),
-  {
-    tier: "pro",
-    status: "active",
-    customerId: "manual_pro_rushilcpm02_gmail_com",
-  },
-  "Rushil's owner email should resolve to a trusted manual Pro profile",
+  null,
+  "The browser must never mint a paid entitlement from an email address",
 );
-assert.equal(isPaidPlan(manualProBillingProfileForEmail("rushilcpm02@gmail.com")), true, "Manual owner Pro should unlock paid features");
+assert.equal(isPaidPlan(manualProBillingProfileForEmail("rushilcpm02@gmail.com")), false, "Only the authenticated server profile may unlock a manual grant");
 assert.equal(manualProBillingProfileForEmail("teacher@classloop.test"), null, "Other emails should not receive manual Pro");
 assert.equal(
   isPaidPlan({ tier: "pro", status: "trialing", customerId: "cus_trial" }),
@@ -192,7 +188,7 @@ const maliciousPatch = profilePatchColumns({
 });
 assert.deepEqual(
   maliciousPatch,
-  { role: "teacher", no_training_on_student_data: false },
+  { no_training_on_student_data: false },
   "Profile PATCH must ignore client-submitted paid entitlement fields",
 );
 

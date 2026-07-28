@@ -1,10 +1,7 @@
 import { createClient, type Session as SupabaseSession, type SupabaseClient } from "@supabase/supabase-js";
 import {
   cloudAuthStateFromSession,
-  enqueueCloudOperation,
-  flushCloudOperationQueue,
   shouldQueueCloudRequest,
-  type QueuedCloudOperation,
 } from "./cloudSync.js";
 
 export type PlanTier = "free" | "pro";
@@ -82,21 +79,16 @@ export const planCatalog = [
 const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
 const supabaseUrl = viteEnv.VITE_SUPABASE_URL;
 const supabaseAnonKey = viteEnv.VITE_SUPABASE_ANON_KEY;
-const stripePublishableKey = viteEnv.VITE_STRIPE_PUBLISHABLE_KEY || "";
-const stripePricingTableId = viteEnv.VITE_STRIPE_PRICING_TABLE_ID || "";
-const stripePaymentLinkUrl = viteEnv.VITE_STRIPE_PAYMENT_LINK_URL || "";
-const stripeBuyButtonId = viteEnv.VITE_STRIPE_BUY_BUTTON_ID || "";
-const stripeBuyButtonPublishableKey = viteEnv.VITE_STRIPE_BUY_BUTTON_PUBLISHABLE_KEY || stripePublishableKey;
+const stripePaymentLinkUrl = viteEnv.VITE_STRIPE_PAYMENT_LINK_URL?.trim() ?? "";
 const classLoopPublicUrl = viteEnv.VITE_CLASSLOOP_PUBLIC_URL || "https://classloop-followup.vercel.app";
 const offlineQueueKey = "classloop:cloud-offline-queue:v1";
-const manualProEmails = new Set(["rushilcpm02@gmail.com"]);
 
 let supabaseClient: SupabaseClient | null = null;
 
 export function getBackendStatus(): BackendStatus {
   const supabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
-  const stripeConfigured = Boolean(viteEnv.VITE_STRIPE_PRO_PRICE_ID || stripePaymentLinkUrl);
-  const stripeEmbeddedConfigured = Boolean(stripePublishableKey);
+  const stripeConfigured = Boolean(stripePaymentLinkUrl);
+  const stripeEmbeddedConfigured = false;
   const stripePaymentLinkConfigured = Boolean(stripePaymentLinkUrl);
   return {
     supabaseConfigured,
@@ -107,35 +99,19 @@ export function getBackendStatus(): BackendStatus {
   };
 }
 
-export function getStripePublishableKey() {
-  return stripePublishableKey || "";
-}
-
-export function getStripePricingTableConfig() {
-  return {
-    pricingTableId: stripePricingTableId || "",
-    publishableKey: stripePublishableKey || "",
-  };
-}
-
 export function getStripePaymentLinkUrl() {
   return stripePaymentLinkUrl;
 }
 
-export function hasStripePaymentLinkConfig() {
-  return Boolean(stripePaymentLinkUrl);
-}
-
-export function getStripeBuyButtonConfig() {
-  return {
-    buyButtonId: stripeBuyButtonId || "",
-    publishableKey: stripeBuyButtonPublishableKey || "",
-  };
-}
-
-export function buildStripePaymentLinkUrl({ email, clientReferenceId }: { email?: string; clientReferenceId?: string } = {}) {
+export function buildStripePaymentLinkUrl({
+  email,
+  clientReferenceId,
+}: {
+  email?: string;
+  clientReferenceId?: string;
+} = {}) {
   if (!stripePaymentLinkUrl) {
-    throw new Error("Stripe Payment Link is not configured for this build.");
+    throw new Error("Stripe Payment Link is not configured for this ClassLoop build.");
   }
   const url = new URL(stripePaymentLinkUrl);
   if (email) url.searchParams.set("prefilled_email", normalizeCloudEmail(email));
@@ -187,17 +163,13 @@ export function isPaidPlan(profile?: BillingProfile | null) {
 }
 
 export function isManualProEmail(email = "") {
-  return normalizeCloudEmail(email) ? manualProEmails.has(normalizeCloudEmail(email)) : false;
+  void email;
+  return false;
 }
 
 export function manualProBillingProfileForEmail(email = ""): BillingProfile | null {
-  const normalized = normalizeCloudEmail(email);
-  if (!isManualProEmail(normalized)) return null;
-  return {
-    tier: "pro",
-    status: "active",
-    customerId: `manual_pro_${normalized.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`,
-  };
+  void email;
+  return null;
 }
 
 export function isManualProBillingProfile(profile?: BillingProfile | null) {
@@ -258,31 +230,19 @@ function isEmailConfirmationError(error: unknown) {
   return code === "email_not_confirmed" || /email.*not.*confirmed|confirm.*email|email.*confirmation/i.test(text);
 }
 
-function readCloudQueue(): QueuedCloudOperation[] {
-  const storage = cloudQueueStorage();
-  if (!storage) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(storage.getItem(offlineQueueKey) ?? "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeCloudQueue(queue: QueuedCloudOperation[]) {
+function clearLegacyCloudQueue() {
   const storage = cloudQueueStorage();
   if (!storage) return;
-  if (!queue.length) {
-    storage.removeItem(offlineQueueKey);
-    return;
-  }
-  storage.setItem(offlineQueueKey, JSON.stringify(queue.slice(-25)));
+  storage.removeItem(offlineQueueKey);
 }
 
+// Previous builds could leave raw request bodies in this plaintext queue.
+// Clear it as soon as this module loads, including while the user is signed out.
+clearLegacyCloudQueue();
+
 export function getQueuedCloudOperationCount() {
-  return readCloudQueue().length;
+  clearLegacyCloudQueue();
+  return 0;
 }
 
 async function authorizedCloudFetch(path: string, operation: RequestInit, accessToken: string) {
@@ -297,25 +257,8 @@ async function authorizedCloudFetch(path: string, operation: RequestInit, access
 }
 
 export async function flushQueuedCloudRequests() {
-  const session = await getCloudSession();
-  const authState = cloudAuthStateFromSession(session);
-  if (authState.status !== "signed_in") {
-    return { flushed: 0, remaining: readCloudQueue() };
-  }
-
-  const result = await flushCloudOperationQueue(readCloudQueue(), async (operation) => {
-    const response = await authorizedCloudFetch(
-      operation.path,
-      {
-        method: operation.method,
-        body: operation.body,
-      },
-      authState.accessToken,
-    );
-    if (!response.ok) throw new Error(`Queued cloud request failed with status ${response.status}.`);
-  });
-  writeCloudQueue(result.remaining);
-  return result;
+  clearLegacyCloudQueue();
+  return { flushed: 0, remaining: [] };
 }
 
 export async function signIntoCloud(email: string, password: string): Promise<CloudAuthResult> {
@@ -490,7 +433,7 @@ export async function ensureCloudAccount(email: string, password: string, option
 export async function signOutCloud() {
   const client = getSupabaseClient();
   if (client) await client.auth.signOut();
-  writeCloudQueue([]);
+  clearLegacyCloudQueue();
 }
 
 export async function cloudRequest<T>(path: string, options: RequestInit = {}) {
@@ -507,17 +450,7 @@ export async function cloudRequest<T>(path: string, options: RequestInit = {}) {
   try {
     response = await authorizedCloudFetch(path, options, authState.accessToken);
   } catch (error) {
-    const method = options.method ?? "GET";
-    if (shouldQueueCloudRequest(method)) {
-      writeCloudQueue(
-        enqueueCloudOperation(readCloudQueue(), {
-          path,
-          method,
-          body: typeof options.body === "string" ? options.body : undefined,
-        }),
-      );
-      throw new Error("Network unavailable. Queued cloud sync operation for retry.");
-    }
+    if (shouldQueueCloudRequest(options.method ?? "GET")) throw new Error("Cloud request failed.");
     throw error;
   }
   const data = await response.json().catch(() => ({}));
@@ -525,24 +458,6 @@ export async function cloudRequest<T>(path: string, options: RequestInit = {}) {
     throw new Error(data.error || "Cloud request failed. Try again later.");
   }
   return data as T;
-}
-
-export async function createCheckoutSession(tier: Exclude<PlanTier, "free">) {
-  return cloudRequest<{ url: string }>("/api/billing/checkout", {
-    method: "POST",
-    body: JSON.stringify({ tier }),
-  });
-}
-
-export async function createEmbeddedCheckoutSession(tier: Exclude<PlanTier, "free">) {
-  return cloudRequest<{ clientSecret: string }>("/api/billing/checkout", {
-    method: "POST",
-    body: JSON.stringify({ tier, uiMode: "embedded" }),
-  });
-}
-
-export async function createBillingPortalSession() {
-  return cloudRequest<{ url: string }>("/api/billing/portal", { method: "POST" });
 }
 
 export async function getCloudProfile() {

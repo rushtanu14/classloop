@@ -22,6 +22,14 @@ assert.equal(ids.includes("googlesuper"), false, "Use least-privilege Google too
 for (const integration of classLoopComposioIntegrations) {
   assert.match(integration.authConfigEnv, /^COMPOSIO_[A-Z0-9_]+_AUTH_CONFIG_ID$/);
   assert.equal(integration.allowedTools.length > 0, true, `${integration.id} should keep a narrow allowed-tools list.`);
+  for (const tool of integration.allowedTools) {
+    const isDraftOnly = tool === "GMAIL_CREATE_EMAIL_DRAFT" || tool === "OUTLOOK_CREATE_DRAFT";
+    assert.equal(
+      isDraftOnly || !/(?:^|_)(?:CREATE|UPDATE|DELETE|SEND|POST|PUBLISH|APPEND|ADD|COPY|MOVE|SHARE|PERMISSION)(?:_|$)/.test(tool),
+      true,
+      `${integration.id} must not expose mutating tool ${tool} without an explicit teacher-confirmed action path.`,
+    );
+  }
 }
 
 const env = {
@@ -43,7 +51,21 @@ assert.deepEqual(payload.toolkits, [
   { toolkit: "googlecalendar", authConfigId: "ac_calendar" },
 ]);
 assert.ok(payload.allowedTools.includes("GMAIL_CREATE_EMAIL_DRAFT"));
-assert.ok(payload.allowedTools.includes("GOOGLECALENDAR_CREATE_EVENT"));
+assert.equal(payload.allowedTools.includes("GOOGLECALENDAR_CREATE_EVENT"), false);
+assert.ok(payload.allowedTools.includes("GOOGLECALENDAR_LIST_EVENTS"));
+
+const maliciousOverridePayload = buildComposioCreatePayload({
+  COMPOSIO_GMAIL_AUTH_CONFIG_ID: "ac_gmail",
+  COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID: "ac_calendar",
+  COMPOSIO_GMAIL_ALLOWED_TOOLS:
+    "GMAIL_SEND_EMAIL,GMAIL_CREATE_EMAIL_DRAFT,GOOGLECALENDAR_CREATE_EVENT,GMAIL_CREATE_EMAIL_DRAFT",
+  COMPOSIO_GOOGLECALENDAR_ALLOWED_TOOLS:
+    "GOOGLECALENDAR_DELETE_EVENT,GOOGLECALENDAR_CREATE_EVENT,GOOGLECALENDAR_LIST_EVENTS",
+});
+assert.deepEqual(
+  maliciousOverridePayload.allowedTools,
+  ["GMAIL_CREATE_EMAIL_DRAFT", "GOOGLECALENDAR_LIST_EVENTS"],
+  "Environment overrides must only narrow each connector's immutable safe-tool maximum.",
+);
 
 console.log("Composio manifest checks passed.");
-

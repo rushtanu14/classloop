@@ -1,0 +1,29 @@
+name: ClassLoop CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+      - run: npm run verify:ci
+      - name: Install Chromium for critical browser smoke
+        run: npx playwright install --with-deps chromium
+      - name: Run critical browser smoke
+        run: npm run test:browser:critical

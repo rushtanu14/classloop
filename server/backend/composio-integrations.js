@@ -10,14 +10,11 @@ export const classLoopComposioIntegrations = [
     priority: "core",
     authConfigEnv: "COMPOSIO_GOOGLE_CLASSROOM_AUTH_CONFIG_ID",
     mode: "preview_first",
-    purpose: "Preview course rosters, class announcements, coursework, and materials before teacher-confirmed posting.",
+    purpose: "Read course rosters, announcements, coursework, and materials for teacher-reviewed imports.",
     allowedTools: [
       "GOOGLE_CLASSROOM_LIST_COURSES",
       "GOOGLE_CLASSROOM_LIST_STUDENTS",
       "GOOGLE_CLASSROOM_LIST_ANNOUNCEMENTS",
-      "GOOGLE_CLASSROOM_CREATE_ANNOUNCEMENT",
-      "GOOGLE_CLASSROOM_CREATE_COURSE_WORK",
-      "GOOGLE_CLASSROOM_CREATE_COURSE_WORK_MATERIAL",
     ],
   },
   {
@@ -57,12 +54,10 @@ export const classLoopComposioIntegrations = [
     priority: "core",
     authConfigEnv: "COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID",
     mode: "preview_first",
-    purpose: "Prepare class follow-up events, reminders, office-hours holds, and next meeting drafts for teacher approval.",
+    purpose: "Read calendars and events so teachers can review schedule context inside ClassLoop.",
     allowedTools: [
       "GOOGLECALENDAR_LIST_CALENDARS",
       "GOOGLECALENDAR_LIST_EVENTS",
-      "GOOGLECALENDAR_CREATE_EVENT",
-      "GOOGLECALENDAR_UPDATE_EVENT",
     ],
   },
   {
@@ -91,13 +86,9 @@ export const classLoopComposioIntegrations = [
     priority: "high",
     authConfigEnv: "COMPOSIO_GOOGLE_DRIVE_AUTH_CONFIG_ID",
     mode: "preview_first",
-    purpose: "Search teacher-owned class materials, create export folders, and prepare shared resources for review.",
+    purpose: "Search teacher-owned class materials for explicit, reviewed imports.",
     allowedTools: [
       "GOOGLEDRIVE_SEARCH_FILES",
-      "GOOGLEDRIVE_CREATE_FOLDER",
-      "GOOGLEDRIVE_CREATE_FILE_FROM_TEXT",
-      "GOOGLEDRIVE_COPY_FILE",
-      "GOOGLEDRIVE_CREATE_PERMISSION",
     ],
   },
   {
@@ -108,12 +99,9 @@ export const classLoopComposioIntegrations = [
     priority: "high",
     authConfigEnv: "COMPOSIO_GOOGLE_DOCS_AUTH_CONFIG_ID",
     mode: "preview_first",
-    purpose: "Create teacher-reviewed recap documents, meeting notes, support-safe reports, and handoff drafts.",
+    purpose: "Read teacher-selected documents for explicit, reviewed imports.",
     allowedTools: [
-      "GOOGLEDOCS_CREATE_DOCUMENT",
-      "GOOGLEDOCS_CREATE_DOCUMENT_MARKDOWN",
       "GOOGLEDOCS_GET_DOCUMENT",
-      "GOOGLEDOCS_COPY_DOCUMENT",
     ],
   },
   {
@@ -124,13 +112,9 @@ export const classLoopComposioIntegrations = [
     priority: "high",
     authConfigEnv: "COMPOSIO_GOOGLE_SHEETS_AUTH_CONFIG_ID",
     mode: "preview_first",
-    purpose: "Import roster spreadsheets and prepare teacher-reviewed analytics or completion exports.",
+    purpose: "Read teacher-selected roster and analytics spreadsheets for reviewed imports.",
     allowedTools: [
       "GOOGLESHEETS_BATCH_GET_SPREADSHEET",
-      "GOOGLESHEETS_CREATE_SPREADSHEET",
-      "GOOGLESHEETS_ADD_SHEET_TO_EXISTING_SPREADSHEET",
-      "GOOGLESHEETS_APPEND_VALUES",
-      "GOOGLESHEETS_UPDATE_VALUES",
     ],
   },
   {
@@ -141,12 +125,10 @@ export const classLoopComposioIntegrations = [
     priority: "optional",
     authConfigEnv: "COMPOSIO_GOOGLE_TASKS_AUTH_CONFIG_ID",
     mode: "preview_first",
-    purpose: "Prepare teacher personal task reminders for follow-up, grading, and next-class prep.",
+    purpose: "Read teacher task lists for follow-up and next-class context.",
     allowedTools: [
       "GOOGLETASKS_LIST_TASK_LISTS",
       "GOOGLETASKS_LIST_TASKS",
-      "GOOGLETASKS_CREATE_TASK",
-      "GOOGLETASKS_UPDATE_TASK",
     ],
   },
   {
@@ -157,8 +139,8 @@ export const classLoopComposioIntegrations = [
     priority: "optional",
     authConfigEnv: "COMPOSIO_GOOGLE_FORMS_AUTH_CONFIG_ID",
     mode: "preview_first",
-    purpose: "Prepare teacher-reviewed exit tickets, check-ins, and feedback forms.",
-    allowedTools: ["GOOGLEFORMS_CREATE_FORM", "GOOGLEFORMS_GET_FORM", "GOOGLEFORMS_LIST_RESPONSES"],
+    purpose: "Read teacher-selected forms and responses for reviewed imports.",
+    allowedTools: ["GOOGLEFORMS_GET_FORM", "GOOGLEFORMS_LIST_RESPONSES"],
   },
   {
     id: "canvas",
@@ -173,8 +155,6 @@ export const classLoopComposioIntegrations = [
       "CANVAS_LIST_COURSES",
       "CANVAS_LIST_ASSIGNMENTS",
       "CANVAS_LIST_ANNOUNCEMENTS",
-      "CANVAS_CREATE_ASSIGNMENT",
-      "CANVAS_CREATE_ANNOUNCEMENT",
     ],
   },
   {
@@ -189,7 +169,6 @@ export const classLoopComposioIntegrations = [
     allowedTools: [
       "BLACKBOARD_LIST_COURSES",
       "BLACKBOARD_LIST_ANNOUNCEMENTS",
-      "BLACKBOARD_CREATE_ANNOUNCEMENT",
       "BLACKBOARD_GET_COURSE_DETAILS",
     ],
   },
@@ -201,8 +180,8 @@ export const classLoopComposioIntegrations = [
     priority: "optional",
     authConfigEnv: "COMPOSIO_OUTLOOK_AUTH_CONFIG_ID",
     mode: "draft_only",
-    purpose: "Support Microsoft-school email and calendar draft workflows without bypassing teacher review.",
-    allowedTools: ["OUTLOOK_LIST_MESSAGES", "OUTLOOK_CREATE_DRAFT", "OUTLOOK_LIST_EVENTS", "OUTLOOK_CREATE_EVENT"],
+    purpose: "Read Microsoft-school email/calendar context and create email drafts for teacher review.",
+    allowedTools: ["OUTLOOK_LIST_MESSAGES", "OUTLOOK_CREATE_DRAFT", "OUTLOOK_LIST_EVENTS"],
   },
   {
     id: "microsoft_teams",
@@ -217,7 +196,6 @@ export const classLoopComposioIntegrations = [
       "MICROSOFT_TEAMS_LIST_TEAMS",
       "MICROSOFT_TEAMS_LIST_CHANNELS",
       "MICROSOFT_TEAMS_LIST_CHATS",
-      "MICROSOFT_TEAMS_CREATE_MEETING",
     ],
   },
   {
@@ -239,10 +217,17 @@ export const classLoopComposioIntegrations = [
     priority: "optional",
     authConfigEnv: "COMPOSIO_NOTION_AUTH_CONFIG_ID",
     mode: "preview_first",
-    purpose: "Prepare teacher-reviewed meeting notes, pilot feedback, product tasks, and school ops documentation.",
-    allowedTools: ["NOTION_SEARCH_NOTION_PAGE", "NOTION_CREATE_NOTION_PAGE", "NOTION_UPDATE_NOTION_PAGE"],
+    purpose: "Search teacher-selected Notion pages for reviewed context imports.",
+    allowedTools: ["NOTION_SEARCH_NOTION_PAGE"],
   },
 ];
+
+const immutableAllowedToolsByIntegrationId = new Map(
+  classLoopComposioIntegrations.map((integration) => [
+    integration.id,
+    Object.freeze([...integration.allowedTools]),
+  ]),
+);
 
 export function splitEnvList(value = "") {
   return value
@@ -254,7 +239,10 @@ export function splitEnvList(value = "") {
 export function allowedToolsForIntegration(integration, env = process.env) {
   const overrideName = `COMPOSIO_${integration.id.toUpperCase()}_ALLOWED_TOOLS`;
   const override = splitEnvList(env[overrideName]);
-  return override.length ? override : integration.allowedTools;
+  const safeMaximum = immutableAllowedToolsByIntegrationId.get(integration.id) ?? [];
+  if (!override.length) return [...safeMaximum];
+  const requested = new Set(override);
+  return safeMaximum.filter((tool) => requested.has(tool));
 }
 
 export function composioIntegrationStatus(env = process.env) {

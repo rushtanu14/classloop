@@ -11,6 +11,16 @@ import {
 
 const serverName = classLoopComposioServerName;
 const userId = process.env.COMPOSIO_CLASSLOOP_USER_ID || defaultClassLoopComposioUserId;
+const flags = new Set(process.argv.slice(2));
+
+function generatedUrlOutput(url) {
+  return flags.has("--show-url")
+    ? { url }
+    : {
+        urlConfigured: Boolean(url),
+        url: "[redacted; rerun with --show-url in a private terminal]",
+      };
+}
 
 function desiredConfig() {
   const toolkits = composioIntegrationStatus(process.env);
@@ -60,7 +70,7 @@ async function applyConfig() {
         serverName,
         mcpConfigId: mcp.id,
         userId,
-        url: generated.url,
+        ...generatedUrlOutput(generated.url),
         instructions: [
           "Save COMPOSIO_CLASSLOOP_MCP_CONFIG_ID to your server environment.",
           "Give MCP clients the generated URL only after the teacher has connected the matching Composio account.",
@@ -80,10 +90,8 @@ async function generateUrl() {
   if (!mcpConfigId) throw new Error("COMPOSIO_CLASSLOOP_MCP_CONFIG_ID is required for --generate.");
   const composio = new Composio({ apiKey });
   const generated = await composio.mcp.generate(userId, mcpConfigId);
-  console.log(JSON.stringify({ serverName, mcpConfigId, userId, url: generated.url }, null, 2));
+  console.log(JSON.stringify({ serverName, mcpConfigId, userId, ...generatedUrlOutput(generated.url) }, null, 2));
 }
-
-const flags = new Set(process.argv.slice(2));
 
 try {
   if (flags.has("--apply")) {

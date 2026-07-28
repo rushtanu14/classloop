@@ -304,6 +304,13 @@ select:focus-visible,
   padding: 48px 0 64px;
 }
 
+.landing-page-home .landing-route-frame {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 32px 0;
+}
+
 .landing-hero {
   display: grid;
   grid-template-columns: minmax(0, 0.92fr) minmax(420px, 1.08fr);
@@ -316,6 +323,23 @@ select:focus-visible,
   display: grid;
   justify-items: start;
   gap: 24px;
+}
+
+.landing-home-upgrade {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  align-content: center;
+  gap: 28px;
+  min-height: 0;
+  text-align: center;
+}
+
+.landing-hero.landing-home-upgrade h1 {
+  font-size: clamp(3rem, 8vw, 6.8rem);
+}
+
+.landing-upgrade-button {
+  min-width: min(320px, 100%);
 }
 
 .landing-icon {
@@ -3845,139 +3869,6 @@ button:disabled:hover {
   background: #e8f8f5;
 }
 
-.stripe-checkout-shell {
-  min-height: 560px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #fff;
-}
-
-.stripe-checkout-shell.inactive {
-  display: none;
-}
-
-.stripe-checkout-shell iframe {
-  display: block;
-  width: 100%;
-  min-height: 560px;
-  border: 0;
-}
-
-.stripe-pricing-table-shell {
-  display: block;
-  min-height: 580px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #fff;
-}
-
-.stripe-pricing-table-shell stripe-pricing-table {
-  display: block;
-  width: 100%;
-  min-height: 580px;
-}
-
-.stripe-pricing-table-shell iframe {
-  display: block;
-  width: 100%;
-  min-height: 580px;
-  border: 0;
-}
-
-.stripe-pricing-table-stack {
-  display: grid;
-  gap: 12px;
-}
-
-.stripe-direct-checkout-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-}
-
-.stripe-direct-checkout-card span {
-  display: grid;
-  gap: 3px;
-}
-
-.stripe-direct-checkout-card strong {
-  color: var(--heading);
-}
-
-.stripe-direct-checkout-card small {
-  color: var(--muted);
-  line-height: 1.45;
-}
-
-.stripe-buy-button-card {
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid color-mix(in srgb, var(--primary) 44%, var(--line));
-  border-radius: 12px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--primary-soft) 72%, transparent), transparent 70%),
-    var(--surface);
-}
-
-.stripe-buy-button-card.ready {
-  box-shadow: 0 14px 34px color-mix(in srgb, var(--primary) 16%, transparent);
-}
-
-.stripe-buy-button-copy {
-  display: grid;
-  gap: 8px;
-}
-
-.stripe-buy-button-copy span {
-  display: grid;
-  gap: 4px;
-}
-
-.stripe-buy-button-copy strong {
-  color: var(--heading);
-}
-
-.stripe-buy-button-copy small,
-.stripe-buy-button-frame small,
-.theme-aware-note {
-  color: var(--muted);
-  line-height: 1.45;
-}
-
-.stripe-buy-button-frame {
-  display: grid;
-  gap: 8px;
-  min-height: 48px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface-strong);
-}
-
-.stripe-buy-button-frame stripe-buy-button {
-  display: block;
-  width: 100%;
-}
-
-.stripe-pricing-table-shell.placeholder {
-  min-height: auto;
-  padding: 16px;
-}
-
-.stripe-pricing-table-shell.placeholder stripe-pricing-table {
-  height: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
 .capture-mode-card.locked {
   border-style: dashed;
   color: var(--muted);
@@ -4246,6 +4137,145 @@ button:disabled:hover {
   display: block;
   color: var(--muted);
   line-height: 1.45;
+}
+
+.integration-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  min-width: min(100%, 480px);
+}
+
+.integration-summary-strip span,
+.integration-bucket-card,
+.integration-workflow-card {
+  border: 1px solid var(--line);
+  background: rgba(255, 254, 250, 0.86);
+}
+
+.integration-summary-strip span {
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+  border-radius: 12px;
+}
+
+.integration-summary-strip strong {
+  color: var(--heading);
+  font-size: 1.2rem;
+}
+
+.integration-summary-strip small {
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.integration-workflow-buckets,
+.integration-workflow-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.integration-workflow-grid {
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+}
+
+.integration-bucket-card,
+.integration-workflow-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+}
+
+.integration-bucket-card {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+}
+
+.integration-bucket-card > svg,
+.integration-workflow-icon {
+  color: var(--primary);
+}
+
+.integration-bucket-card span,
+.integration-workflow-card-header > span:not(.status-pill),
+.integration-workflow-detail span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.integration-bucket-card small,
+.integration-workflow-card p,
+.integration-workflow-card small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.integration-bucket-card .connector-chip-row {
+  grid-column: 1 / -1;
+}
+
+.connector-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.connector-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 4px 8px;
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  border-radius: 999px;
+  color: var(--heading);
+  background: #eef7f1;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.integration-workflow-card.active {
+  border-color: rgba(15, 118, 110, 0.36);
+  background: #f3fbf8;
+}
+
+.integration-workflow-card-header,
+.integration-workflow-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.integration-workflow-card-header {
+  align-items: flex-start;
+}
+
+.integration-workflow-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--primary-soft);
+}
+
+.integration-workflow-detail {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed rgba(15, 118, 110, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.integration-review-rule {
+  display: block;
+  padding-top: 2px;
 }
 
 .import-integration-panel {
@@ -7256,8 +7286,8 @@ th {
   background: #bae6fd;
 }
 
-:root[data-theme="abyssal"] :is(.delivery-log-row, .audit-row, .capture-mode-card, .integration-card, .cloud-confirmation-steps li, .stripe-buy-button-card, .stripe-buy-button-frame),
-:root[data-theme="graphite"] :is(.delivery-log-row, .audit-row, .capture-mode-card, .integration-card, .cloud-confirmation-steps li, .stripe-buy-button-card, .stripe-buy-button-frame) {
+:root[data-theme="abyssal"] :is(.delivery-log-row, .audit-row, .capture-mode-card, .integration-card, .cloud-confirmation-steps li),
+:root[data-theme="graphite"] :is(.delivery-log-row, .audit-row, .capture-mode-card, .integration-card, .cloud-confirmation-steps li) {
   color: var(--readable-ink);
   border-color: var(--readable-line);
   background: var(--readable-surface);
@@ -7274,8 +7304,8 @@ th {
   color: var(--readable-ink);
 }
 
-:root[data-theme="abyssal"] :is(.delivery-log-row span, .audit-row span, .delivery-log-row small, .audit-row small, .capture-consent, .switch-row, .cloud-confirmation-steps small, .cloud-confirmation-note, .stripe-buy-button-copy small, .stripe-buy-button-frame small, .theme-aware-note),
-:root[data-theme="graphite"] :is(.delivery-log-row span, .audit-row span, .delivery-log-row small, .audit-row small, .capture-consent, .switch-row, .cloud-confirmation-steps small, .cloud-confirmation-note, .stripe-buy-button-copy small, .stripe-buy-button-frame small, .theme-aware-note) {
+:root[data-theme="abyssal"] :is(.delivery-log-row span, .audit-row span, .delivery-log-row small, .audit-row small, .capture-consent, .switch-row, .cloud-confirmation-steps small, .cloud-confirmation-note),
+:root[data-theme="graphite"] :is(.delivery-log-row span, .audit-row span, .delivery-log-row small, .audit-row small, .capture-consent, .switch-row, .cloud-confirmation-steps small, .cloud-confirmation-note) {
   color: var(--readable-muted);
 }
 

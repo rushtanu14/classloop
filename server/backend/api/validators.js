@@ -208,18 +208,6 @@ const themeSchema = {
   imageUrl: field.string({ max: 2_048, optional: true, defaultValue: "" }),
 };
 
-const accountSchema = {
-  id: requiredTrimmed(160, looseIdPattern),
-  role: field.enum(["teacher", "student", "individual"]),
-  email: field.string({ max: 320, pattern: emailPattern }),
-  name: requiredTrimmed(160),
-  passwordHash: field.string({ max: 512 }),
-  createdAt: requiredIsoDate,
-  theme: field.object(themeSchema, { optional: true }),
-  submittedProductFeedbackKeys: field.array(requiredTrimmed(320), { max: 500, optional: true, defaultValue: [] }),
-  demo: field.boolean({ optional: true, defaultValue: false }),
-};
-
 const personalTaskSchema = {
   id: requiredTrimmed(160, looseIdPattern),
   title: requiredTrimmed(300),
@@ -304,17 +292,9 @@ const auditLogEntrySchema = {
   createdAt: requiredIsoDate,
 };
 
-const billingProfileSchema = {
-  tier: field.enum(["free", "pro"]),
-  status: field.enum(billingStatuses),
-  customerId: optionalTrimmed(120),
-  currentPeriodEnd: optionalIsoDate,
-};
-
 // Hosted sync stores a whole workspace snapshot, so the top-level state and known
 // nested records are schema-checked before writing to Supabase JSONB.
 const cloudWorkspaceStateSchema = {
-  accounts: field.array(field.object(accountSchema), { max: 500 }),
   sessions: field.array(field.object(sessionSchema), { max: 250 }),
   personalMeetings: field.array(field.object(personalMeetingSchema), { max: 500, optional: true, defaultValue: [] }),
   draft: field.nullableObject(sessionSchema),
@@ -323,7 +303,6 @@ const cloudWorkspaceStateSchema = {
   rosterTemplates: field.array(field.object(rosterTemplateSchema), { max: 100 }),
   privacySettings: field.object(privacySettingsSchema),
   auditLog: field.array(field.object(auditLogEntrySchema), { max: 2_000 }),
-  billingProfile: field.object(billingProfileSchema),
 };
 
 export function validateFeedbackPayload(payload) {
@@ -352,11 +331,10 @@ export function validateProfilePatchPayload(payload) {
     payload,
     {
       noTrainingOnStudentData: field.boolean({ optional: true }),
-      role: field.enum(["teacher", "student", "individual"], { optional: true }),
     },
     { name: "profile update" },
   );
-  if (patch.noTrainingOnStudentData === undefined && patch.role === undefined) {
+  if (patch.noTrainingOnStudentData === undefined) {
     throw httpError(400, "No supported profile updates were provided.");
   }
   return patch;
@@ -390,9 +368,8 @@ export function validateEmailRecapPayload(payload) {
     payload,
     {
       sessionId: requiredTrimmed(160, looseIdPattern),
-      ownerEmail: field.string({ max: 320, pattern: emailPattern }),
       recipients: field.array(field.string({ max: 320, pattern: emailPattern }), {
-        max: 500,
+        max: 100,
         optional: true,
         defaultValue: undefined,
       }),
@@ -406,5 +383,9 @@ export function validateCloudWorkspaceStatePayload(payload) {
   if (!isPlainObject(payload)) {
     throw httpError(400, "Cloud workspace state must be an object.");
   }
-  return validateSchema(payload, cloudWorkspaceStateSchema, { name: "cloud workspace state" });
+  const legacySensitiveFields = new Set(["accounts", "billingProfile"]);
+  const workspacePayload = Object.fromEntries(
+    Object.entries(payload).filter(([key]) => !legacySensitiveFields.has(key)),
+  );
+  return validateSchema(workspacePayload, cloudWorkspaceStateSchema, { name: "cloud workspace state" });
 }

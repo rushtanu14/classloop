@@ -38,5 +38,17 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 650,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("@supabase")) return "supabase";
+          if (id.includes("@stripe")) return "stripe";
+          if (id.includes("lucide-react")) return "icons";
+          if (id.includes("react")) return "react";
+          return "vendor";
+        },
+      },
+    },
   },
 });

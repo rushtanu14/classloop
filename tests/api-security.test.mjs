@@ -1,6 +1,9 @@
 import { strict as assert } from "node:assert";
+import fs from "node:fs";
+import vm from "node:vm";
 import { assertCronAuthorization } from "../server/backend/api/ops/supabase-keepalive.js";
 import { assertIpRateLimit, httpError, readJsonBody, sendApiError } from "../server/backend/api/_shared.js";
+import { cloudStateReadResponse } from "../server/backend/api/cloud-state.js";
 import {
   validateBillingAccountPayload,
   validateCheckoutPayload,
@@ -10,6 +13,7 @@ import {
   validateProfilePatchPayload,
 } from "../server/backend/api/validators.js";
 import { billingPreparedProfileRow } from "../server/backend/api/billing/prepare-account.js";
+import { assertRecapEmailAuthorization } from "../server/backend/api/email/send-recaps.js";
 
 function assertThrowsStatus(fn, statusCode, messagePattern) {
   assert.throws(
@@ -19,6 +23,32 @@ function assertThrowsStatus(fn, statusCode, messagePattern) {
       if (messagePattern) assert.match(error.message, messagePattern);
       return true;
     },
+  );
+}
+
+function loadDesktopEmailContract() {
+  const source = fs.readFileSync(new URL("../desktop/main.cjs", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /assertLocalRecapEmailAuthorization\(state, session\)/,
+    "Desktop recap delivery must authorize against the server-loaded workspace and session.",
+  );
+  assert.match(
+    source,
+    /includeAccessInstructions:\s*body\.includeAccessInstructions/,
+    "Desktop recap delivery must forward the validated access-instructions choice.",
+  );
+  const start = source.indexOf("function isPlainObject");
+  const end = source.indexOf("async function handleStateApi");
+  assert.ok(start >= 0 && end > start, "Desktop email contract functions should remain available for regression testing.");
+  return vm.runInNewContext(
+    `${source.slice(start, end)}
+    ({
+      assertLocalRecapEmailAuthorization,
+      textForStudentEmail,
+      validateEmailRequestPayload,
+    });`,
+    { Buffer, process, URL },
   );
 }
 
@@ -62,7 +92,6 @@ function mockResponse() {
 }
 
 const validWorkspaceState = {
-  accounts: [],
   sessions: [],
   personalMeetings: [],
   draft: null,
@@ -77,10 +106,6 @@ const validWorkspaceState = {
     noTrainingOnStudentData: true,
   },
   auditLog: [],
-  billingProfile: {
-    tier: "free",
-    status: "not_configured",
-  },
 };
 
 const validFeedback = validateFeedbackPayload({
@@ -99,6 +124,39 @@ assertThrowsStatus(
   400,
   /unsupported field/i,
 );
+const confirmedTeacher = {
+  id: "teacher-1",
+  email: "teacher@classloop.test",
+  email_confirmed_at: "2026-07-27T00:00:00.000Z",
+};
+const ownedPublishedSession = {
+  id: "session-1",
+  ownerEmail: "teacher@classloop.test",
+  status: "published",
+};
+assert.doesNotThrow(() => assertRecapEmailAuthorization({
+  user: confirmedTeacher,
+  profile: { role: "teacher", email_delivery_enabled: true },
+  session: ownedPublishedSession,
+}));
+assertThrowsStatus(
+  () => assertRecapEmailAuthorization({
+    user: confirmedTeacher,
+    profile: { role: "teacher", email_delivery_enabled: false },
+    session: ownedPublishedSession,
+  }),
+  403,
+  /not enabled/i,
+);
+assertThrowsStatus(
+  () => assertRecapEmailAuthorization({
+    user: { ...confirmedTeacher, email: "attacker@classloop.test" },
+    profile: { role: "teacher", email_delivery_enabled: true },
+    session: ownedPublishedSession,
+  }),
+  403,
+  /authenticated teacher/i,
+);
 assertThrowsStatus(
   () => validateFeedbackPayload({ rating: "5", role: "student", source: "student_followup_popup" }),
   400,
@@ -110,13 +168,11 @@ assertThrowsStatus(
   /string, number, or boolean/i,
 );
 
-assert.deepEqual(validateProfilePatchPayload({ role: "teacher", noTrainingOnStudentData: false }), {
-  role: "teacher",
+assert.deepEqual(validateProfilePatchPayload({ noTrainingOnStudentData: false }), {
   noTrainingOnStudentData: false,
 });
-assert.deepEqual(validateProfilePatchPayload({ role: "individual" }), { role: "individual" });
+assertThrowsStatus(() => validateProfilePatchPayload({ role: "teacher" }), 400, /unsupported field/i);
 assertThrowsStatus(() => validateProfilePatchPayload({ plan_tier: "pro" }), 400, /unsupported field/i);
-assertThrowsStatus(() => validateProfilePatchPayload({ role: "owner" }), 400, /one of/i);
 
 assert.deepEqual(validateCheckoutPayload({ tier: "pro", uiMode: "embedded" }), { tier: "pro", uiMode: "embedded" });
 assertThrowsStatus(() => validateCheckoutPayload({ tier: "free" }), 400, /one of/i);
@@ -157,19 +213,108 @@ assert.equal(preparedOwnerProfile.subscription_status, "active");
 assert.equal(preparedOwnerProfile.stripe_customer_id, "manual_pro_rushilcpm02_gmail_com");
 assert.deepEqual(validateEmailRecapPayload({
   sessionId: "session-1",
-  ownerEmail: "teacher@classloop.test",
   recipients: ["maya@classloop.test"],
   includeAccessInstructions: true,
 }), {
   sessionId: "session-1",
-  ownerEmail: "teacher@classloop.test",
   recipients: ["maya@classloop.test"],
   includeAccessInstructions: true,
 });
-assertThrowsStatus(() => validateEmailRecapPayload({ sessionId: "session-1", ownerEmail: "teacher@classloop.test", bcc: ["attacker@classloop.test"] }), 400, /unsupported field/i);
-assertThrowsStatus(() => validateEmailRecapPayload({ sessionId: "session-1", ownerEmail: "teacher@classloop.test", recipients: ["bad-email"] }), 400, /expected format/i);
+assertThrowsStatus(() => validateEmailRecapPayload({ sessionId: "session-1", ownerEmail: "attacker@classloop.test" }), 400, /unsupported field/i);
+assertThrowsStatus(() => validateEmailRecapPayload({ sessionId: "session-1", bcc: ["attacker@classloop.test"] }), 400, /unsupported field/i);
+assertThrowsStatus(() => validateEmailRecapPayload({ sessionId: "session-1", recipients: ["bad-email"] }), 400, /expected format/i);
+assertThrowsStatus(
+  () => validateEmailRecapPayload({
+    sessionId: "session-1",
+    recipients: Array.from({ length: 101 }, (_, index) => `student${index}@classloop.test`),
+  }),
+  400,
+  /at most 100/i,
+);
+
+const desktopEmailContract = loadDesktopEmailContract();
+const desktopEmailPayload = desktopEmailContract.validateEmailRequestPayload({
+  sessionId: "session-1",
+  recipients: ["MAYA@CLASSLOOP.TEST"],
+  includeAccessInstructions: true,
+});
+assert.equal(desktopEmailPayload.sessionId, "session-1");
+assert.deepEqual([...desktopEmailPayload.recipients], ["maya@classloop.test"]);
+assert.equal(desktopEmailPayload.includeAccessInstructions, true);
+assertThrowsStatus(
+  () => desktopEmailContract.validateEmailRequestPayload({
+    sessionId: "session-1",
+    ownerEmail: "attacker@classloop.test",
+  }),
+  400,
+  /unsupported field/i,
+);
+assertThrowsStatus(
+  () => desktopEmailContract.validateEmailRequestPayload({
+    sessionId: "session-1",
+    includeAccessInstructions: "yes",
+  }),
+  400,
+  /must be a boolean/i,
+);
+const desktopTeacherState = {
+  accounts: [{ role: "teacher", email: "teacher@classloop.test" }],
+};
+assert.doesNotThrow(() =>
+  desktopEmailContract.assertLocalRecapEmailAuthorization(desktopTeacherState, ownedPublishedSession),
+);
+assertThrowsStatus(
+  () => desktopEmailContract.assertLocalRecapEmailAuthorization(
+    { accounts: [{ role: "student", email: "teacher@classloop.test" }] },
+    ownedPublishedSession,
+  ),
+  403,
+  /teacher-owned session/i,
+);
+const accessEmailText = desktopEmailContract.textForStudentEmail(
+  { title: "Class recap", recap: "Review loops.", followUps: [], resources: [] },
+  { id: "maya", name: "Maya", email: "maya@classloop.test" },
+  true,
+);
+assert.match(accessEmailText, /Student access:/);
+assert.match(accessEmailText, /maya@classloop\.test/);
+assert.doesNotMatch(
+  desktopEmailContract.textForStudentEmail(
+    { title: "Class recap", recap: "Review loops.", followUps: [], resources: [] },
+    { id: "maya", name: "Maya", email: "maya@classloop.test" },
+    false,
+  ),
+  /Student access:/,
+);
 
 assert.deepEqual(validateCloudWorkspaceStatePayload(validWorkspaceState), validWorkspaceState);
+assert.deepEqual(
+  validateCloudWorkspaceStatePayload({
+    ...validWorkspaceState,
+    accounts: [{
+      id: "teacher",
+      role: "teacher",
+      email: "teacher@classloop.test",
+      name: "Teacher",
+      passwordHash: "must-never-sync",
+      createdAt: "2026-07-27T00:00:00.000Z",
+    }],
+    billingProfile: { tier: "pro", status: "active", customerId: "cus_attacker" },
+  }),
+  validWorkspaceState,
+  "Legacy local identities and billing fields should be discarded before cloud validation.",
+);
+const cloudRead = cloudStateReadResponse({
+  state: validWorkspaceState,
+  updated_at: "2026-07-27T12:00:00.000Z",
+});
+assert.equal(cloudRead.payload, validWorkspaceState, "Cloud GET should preserve the legacy raw workspace response.");
+assert.equal(cloudRead.headers["X-ClassLoop-Updated-At"], "2026-07-27T12:00:00.000Z");
+assert.equal(
+  Object.hasOwn(cloudRead.payload, "state"),
+  false,
+  "Cloud GET must not wrap workspace data in a state property that legacy clients ignore.",
+);
 assertThrowsStatus(
   () => validateCloudWorkspaceStatePayload({ ...validWorkspaceState, entitlementOverride: { tier: "pro" } }),
   400,

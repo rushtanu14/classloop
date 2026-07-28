@@ -299,8 +299,6 @@ async function signInWithVerifiedProEntitlement(page: Page, email: string, passw
   await signInAccount(page, "teacher", email, password);
   await page.getByRole("button", { name: /^plan options$/i }).click();
   await expect(page.getByText(`Connected as ${email}`)).toBeVisible({ timeout: 15_000 });
-  await page.locator(".settings-options-panel").filter({ hasText: /Billing options/i }).locator("summary").click();
-  await page.getByRole("button", { name: /refresh plan/i }).click();
   await expect(page.getByText(/PRO · active/i)).toBeVisible();
   await page.getByLabel(/go to dashboard/i).click();
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
@@ -492,12 +490,37 @@ async function mockLiveCaptureDevices(page: Page) {
   await page.addInitScript({
     content: `
       (() => {
-        const makeStream = () => new MediaStream();
+        const captureTracks = [];
+        class MockMediaStreamTrack {
+          constructor(kind = "audio") {
+            this.kind = kind;
+            this.stopped = false;
+            this.id = "capture-track-" + (captureTracks.length + 1);
+            captureTracks.push(this);
+          }
+          stop() {
+            this.stopped = true;
+          }
+        }
+        class MockMediaStream {
+          constructor(tracks) {
+            this.tracks = tracks ? Array.from(tracks) : [new MockMediaStreamTrack()];
+          }
+          getTracks() {
+            return this.tracks;
+          }
+          getAudioTracks() {
+            return this.tracks.filter((track) => track.kind === "audio");
+          }
+        }
+        const makeStream = (kind = "audio") => new MockMediaStream([new MockMediaStreamTrack(kind)]);
+        window.__CLASSLOOP_CAPTURE_TRACKS__ = captureTracks;
+        Object.defineProperty(window, "MediaStream", { configurable: true, value: MockMediaStream });
         Object.defineProperty(navigator, "mediaDevices", {
           configurable: true,
           value: {
-            getUserMedia: async () => makeStream(),
-            getDisplayMedia: async () => makeStream(),
+            getUserMedia: async () => makeStream("audio"),
+            getDisplayMedia: async () => makeStream("video"),
           },
         });
 
@@ -547,6 +570,89 @@ async function mockLiveCaptureDevices(page: Page) {
         Object.defineProperty(window, "webkitSpeechRecognition", { configurable: true, value: MockSpeechRecognition });
       })();
     `,
+  });
+}
+
+async function mockIntegrationStatus(page: Page) {
+  const coreToolkits = [
+    {
+      id: "google_classroom",
+      toolkit: "google_classroom",
+      label: "Google Classroom",
+      category: "Classroom core",
+      priority: "core",
+      authConfigEnv: "COMPOSIO_GOOGLE_CLASSROOM_AUTH_CONFIG_ID",
+      authConfigured: false,
+      mode: "preview_first",
+      purpose: "Read course rosters, announcements, coursework, and materials for teacher-reviewed imports.",
+      allowedTools: ["GOOGLE_CLASSROOM_LIST_COURSES"],
+    },
+    {
+      id: "zoom",
+      toolkit: "zoom",
+      label: "Zoom",
+      category: "Classroom core",
+      priority: "core",
+      authConfigEnv: "COMPOSIO_ZOOM_AUTH_CONFIG_ID",
+      authConfigured: false,
+      mode: "preview_first",
+      purpose: "Preview meetings, participants, recordings, summaries, and transcript availability before importing.",
+      allowedTools: ["ZOOM_LIST_MEETINGS"],
+    },
+    {
+      id: "gmail",
+      toolkit: "gmail",
+      label: "Gmail",
+      category: "Classroom core",
+      priority: "core",
+      authConfigEnv: "COMPOSIO_GMAIL_AUTH_CONFIG_ID",
+      authConfigured: false,
+      mode: "draft_only",
+      purpose: "Create teacher-reviewed draft recap emails.",
+      allowedTools: ["GMAIL_CREATE_EMAIL_DRAFT"],
+    },
+    {
+      id: "googlecalendar",
+      toolkit: "googlecalendar",
+      label: "Google Calendar",
+      category: "Classroom core",
+      priority: "core",
+      authConfigEnv: "COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID",
+      authConfigured: false,
+      mode: "preview_first",
+      purpose: "Read calendars and events for teacher-reviewed schedule context.",
+      allowedTools: ["GOOGLECALENDAR_LIST_EVENTS"],
+    },
+  ];
+
+  await page.route("**/api/integrations/status", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        email: { configured: false, provider: "Not configured" },
+        localMcp: {
+          available: true,
+          transport: "stdio",
+          command: "node",
+          args: ["dist-mcp/mcp/classloop-server.js"],
+          redactionDefault: "strict",
+          resources: [],
+          tools: [],
+          prompts: [],
+        },
+        composio: {
+          configured: false,
+          serverName: "classloop-preview-connectors",
+          mcpConfigIdConfigured: false,
+          userIdConfigured: false,
+          configuredToolkitCount: 0,
+          coreToolkitCount: coreToolkits.length,
+          configuredCoreToolkitCount: 0,
+          toolkits: coreToolkits,
+        },
+      }),
+    });
   });
 }
 
@@ -682,6 +788,23 @@ async function downloadCurrentReportJson(page: Page) {
   return JSON.parse(await readFile(downloadPath!, "utf8")) as Session;
 }
 
+test("startup clears the legacy plaintext cloud queue while signed out", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The legacy storage migration only needs one browser project.");
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "classloop:cloud-offline-queue:v1",
+      JSON.stringify([{ body: "{\"accounts\":[{\"passwordHash\":\"legacy-sensitive-data\"}]}" }]),
+    );
+  });
+  await page.goto("/#/dashboard");
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("classloop:cloud-offline-queue:v1")))
+    .toBeNull();
+  const entryActions = page.locator(".auth-entry-actions");
+  await expect(entryActions.getByRole("button", { name: /^create account$/i })).toBeVisible();
+  await expect(entryActions.getByRole("button", { name: /^log in$/i })).toBeVisible();
+});
+
 test("public root shows landing page and can enter the app demo", async ({ page }) => {
   await page.goto("/#/features");
   await expect(page.getByRole("heading", { name: /features for follow-through/i })).toBeVisible();
@@ -693,15 +816,14 @@ test("public root shows landing page and can enter the app demo", async ({ page 
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /^ClassLoop$/i })).toBeVisible();
-  const heroCopy = page.locator(".landing-hero-copy");
-  await expect(heroCopy.getByRole("button")).toHaveCount(2);
-  await expect(heroCopy.getByRole("button", { name: /open web demo/i })).toBeVisible();
-  await expect(heroCopy.getByRole("button", { name: /add to phone/i })).toBeVisible();
-  await expect(heroCopy.getByRole("button", { name: /view screenshots/i })).toHaveCount(0);
-  await expect(page.getByText("Class, club, and personal notes")).toBeVisible();
-  await expect(page.getByText("Teacher review built in")).toBeVisible();
-  await expect(page.getByText("Student-specific next steps")).toBeVisible();
-  await expect(heroCopy.getByRole("button", { name: /download|macos|support classloop/i })).toHaveCount(0);
+  const homeHero = page.locator(".landing-home-upgrade");
+  await expect(page.locator(".landing-page-home button")).toHaveCount(1);
+  await expect(homeHero.getByRole("button")).toHaveCount(1);
+  await expect(homeHero.getByRole("button", { name: /^upgrade to pro$/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^open demo$/i })).toHaveCount(0);
+  await expect(page.getByText("Class, club, and personal notes")).toHaveCount(0);
+  await expect(page.getByText("Teacher review built in")).toHaveCount(0);
+  await expect(page.getByText("Student-specific next steps")).toHaveCount(0);
   await expect(page.locator(".landing-hero .landing-platform-list")).toHaveCount(0);
   await page.goto("/#/download");
   await expect(page.getByRole("heading", { name: /download classloop/i })).toBeVisible();
@@ -736,13 +858,51 @@ test("public root shows landing page and can enter the app demo", async ({ page 
   expect(manifestJson.display).toBe("standalone");
   expect(manifestJson.start_url).toContain("source=pwa");
   expect(manifestJson.icons?.map((icon: { src: string }) => icon.src)).toContain("/classloop-app-icon-512.png");
-  await page.getByRole("button", { name: /open web demo/i }).click();
+  await page.getByRole("button", { name: /^open demo$/i }).click();
   await expect(page).toHaveURL(/#\/dashboard\?demoOnly=1/);
   await expect(page.getByRole("heading", { name: /try classloop as a teacher or student/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /demo teacher side/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /demo student side/i })).toBeVisible();
   await expect(page.getByPlaceholder("name@example.com")).toHaveCount(0);
   await expect(page.getByPlaceholder("Enter password")).toHaveCount(0);
+});
+
+test("public Upgrade to Pro requires a real account and resumes at Billing", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The account-gated public upgrade regression only needs one browser project.");
+  const runId = Date.now().toString(36);
+  const email = `public-upgrade-${runId}@classloop.test`;
+  const password = `public-upgrade-pass-${runId}`;
+  let anonymousStripeRequests = 0;
+
+  await page.route("https://buy.stripe.com/**", async (route) => {
+    anonymousStripeRequests += 1;
+    await route.abort();
+  });
+  await page.goto("/");
+  await page.locator(".landing-home-upgrade").getByRole("button", { name: /^upgrade to pro$/i }).click();
+
+  await expect(page).toHaveURL(/#\/billing$/);
+  await expect(page.getByRole("heading", { name: /^ClassLoop$/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^create account$/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^log in$/i })).toBeVisible();
+  expect(anonymousStripeRequests).toBe(0);
+
+  await mockCloudAuthForStripeCheckout(page, email, {
+    role: "teacher",
+    name: "Public Upgrade Teacher",
+  });
+  await openCreateAccountForm(page);
+  await chooseAuthRole(page, "teacher");
+  await page.getByPlaceholder("Your name").fill("Public Upgrade Teacher");
+  await page.getByPlaceholder("name@example.com").fill(email);
+  await page.getByPlaceholder("Enter password", { exact: true }).fill(password);
+  await page.getByPlaceholder("Re-enter password").fill(password);
+  await page.locator("form.login-form button[type='submit']").click();
+
+  await expect(page).toHaveURL(/#\/billing$/);
+  await expect(page.getByRole("heading", { name: /^upgrade to pro/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^upgrade to pro$/i })).toBeVisible();
+  expect(anonymousStripeRequests).toBe(0);
 });
 
 test("hosted demo mode uses sample accounts only and does not persist demo workspace data", async ({ page }) => {
@@ -856,8 +1016,20 @@ test("teacher sees connector-gated imports and can paste transcript manually", a
 [00:01:14] Student (Jalen Thompson): [Chat] TikTok algorithm lol
 [00:10:31] Student (Keisha Brown): Step 1, pick up the bread bag and put two slices on the plate.
 [00:13:35] Ms. Rivera: Homework for Thursday: complete the algorithm design worksheet.`;
+  await mockIntegrationStatus(page);
   await resetBrowser(page);
   await createAccount(page, "teacher", `Integration Teacher ${runId}`, `integrations-${runId}@classloop.test`, `teacher-pass-${runId}`);
+
+  await page.locator(".nav-list").getByRole("button", { name: /^Integrations$/i }).click();
+  await expect(page.getByRole("heading", { name: /connect classloop to the places teachers already work/i })).toBeVisible();
+  await expect(page.getByLabel(/integration setup summary/i)).toContainText(/core connectors configured/i);
+  await expect(page.getByText(/Google Classroom/i).first()).toBeVisible();
+  await expect(page.getByText(/Zoom/i).first()).toBeVisible();
+  await expect(page.getByText(/Gmail/i).first()).toBeVisible();
+  await expect(page.getByText(/Google Calendar/i).first()).toBeVisible();
+  await expect(page.getByText(/read calendar and event context/i)).toBeVisible();
+  await expect(page.getByText(/does not create or change calendar events/i)).toBeVisible();
+  await expect(page.getByText(/COMPOSIO_GOOGLE_CLASSROOM_AUTH_CONFIG_ID/i).first()).toBeVisible();
 
   await page.getByRole("button", { name: /new session/i }).first().click();
   await page.getByLabel(/session title/i).fill(`Connector gated import ${runId}`);
@@ -870,13 +1042,20 @@ test("teacher sees connector-gated imports and can paste transcript manually", a
   await expect(page.getByText(/zoom cloud import/i)).toHaveCount(0);
   await expect(page.getByText(/CS4All Intro to Computational Thinking/i)).toHaveCount(0);
   await expect(page.getByText(/Geometry Review: Similar Triangles/i)).toHaveCount(0);
-  await expect(page.getByLabel(/connect imports and follow-up integrations/i)).toContainText(/Connect Zoom/i);
+  await expect(page.getByLabel(/connect imports and follow-up integrations/i)).toContainText(/Zoom transcripts/i);
+  await expect(page.getByLabel(/connect imports and follow-up integrations/i)).toContainText(/Google Meet transcripts/i);
+  await expect(page.getByLabel(/connect imports and follow-up integrations/i)).toContainText(/Classroom roster\/resources/i);
+  await expect(page.getByLabel(/connect imports and follow-up integrations/i)).toContainText(/Drive, Docs, or Sheets/i);
   await expect(page.getByLabel(/post-transcript integrations/i)).toHaveCount(0);
   await page.getByLabel(/paste transcript text/i).fill(pastedTranscript);
   await expect(page.getByLabel(/post-transcript integrations/i)).toBeVisible();
-  await expect(page.getByRole("button", { name: /calendar reminder/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /calendar context/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /email reminder/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /classroom post/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /classroom context/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /docs context/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /sheets context/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /tasks context/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /forms context/i })).toBeVisible();
   await page
     .locator(".summary-input-card")
     .getByLabel(/^Roster$/i)
@@ -1000,7 +1179,7 @@ test("new accounts are cloud-backed and can sign in on a fresh device", async ({
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
   await page.getByRole("button", { name: /^plan options$/i }).click();
   await expect(page.getByText(`Connected as ${email}`)).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText(/Cloud sync is separate from Pro/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /^upgrade to pro$/i })).toBeVisible();
 });
 
 test("cloud signup confirmation lets teachers continue locally until email is confirmed", async ({ page }, testInfo) => {
@@ -1039,7 +1218,7 @@ test("cloud signup confirmation lets teachers continue locally until email is co
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
   await skipAutoWalkthrough(page);
   await page.getByRole("button", { name: /^plan options$/i }).click();
-  await expect(page.getByText(/Cloud sync is separate from Pro/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /^upgrade to pro$/i })).toBeVisible();
   await expect(page.getByText(`Connected as ${email}`)).toHaveCount(0);
 });
 
@@ -1452,7 +1631,7 @@ test("free local account prepares a cloud account on login when Supabase is conf
 
   await page.getByRole("button", { name: /^plan options$/i }).click();
   await expect(page.getByText(`Connected as ${email}`)).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText(/FREE · not_configured/i)).toBeVisible();
+  await expect(page.locator(".integration-card").filter({ hasText: /Current account/ })).toContainText(/^Current account\s*Free$/i);
 });
 
 test("teacher can log in, import a sample, preview publishing, publish, open student view, and access analytics", async ({ page }) => {
@@ -1636,11 +1815,8 @@ test("privacy, sync billing, appearance, and tutorial controls are usable", asyn
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
 
   await page.getByRole("button", { name: /^plan options$/i }).click();
-  await expect(page.getByRole("heading", { name: /save time on every class follow-up/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /upgrade to pro/i })).toBeVisible();
   await expect(page.getByText(/plan options/i).first()).toBeVisible();
-  await expect(page.getByRole("heading", { name: /cloud sync \+ pro walkthrough/i })).toBeVisible();
-  await expect(page.getByText(/Cloud sync is separate from Pro/i)).toBeVisible();
-  await expect(page.getByText(/Free accounts can upload and download a workspace across devices/i)).toBeVisible();
   await expect(page.getByPlaceholder("you@school.org")).toBeVisible();
   await expect(page.getByText(/school pilot/i)).toHaveCount(0);
   await expect(page.getByRole("button", { name: /keep free/i })).toHaveCount(0);
@@ -1691,9 +1867,8 @@ test("live capture modes stay locked until verified Pro while local billing tamp
 
   await page.getByRole("button", { name: /^plan options$/i }).click();
   await expect(page.locator(".stripe-pricing-table-shell")).toHaveCount(0);
-  await expect(page.getByText(/Stripe Payment Link/i)).toBeVisible();
   await expect(page.getByPlaceholder("you@school.org")).toBeVisible();
-  await expect(page.getByText(/Cloud sync is separate from Pro/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /^upgrade to pro$/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /downgrade to free/i })).toHaveCount(0);
   const currentPlanCard = page.locator(".integration-card").filter({ hasText: /Current account/ });
   await expect(currentPlanCard).toContainText(/Current account/i);
@@ -1734,9 +1909,50 @@ test("verified Pro can use in-person and online live capture with noisy and miss
   await page.getByRole("button", { name: /not now/i }).click();
   await page.getByRole("button", { name: /start capture/i }).click();
   await expect(page.getByText(/no meeting audio track was shared/i)).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const tracks = (
+          window as unknown as {
+            __CLASSLOOP_CAPTURE_TRACKS__?: Array<{ stopped: boolean }>;
+          }
+        ).__CLASSLOOP_CAPTURE_TRACKS__;
+        return tracks?.[tracks.length - 1]?.stopped;
+      }),
+    )
+    .toBe(false);
   await page.waitForTimeout(80);
   await page.getByRole("button", { name: /^stop$/i }).click();
   await expect(page.getByText(/Online meeting capture stopped/i)).toBeVisible();
+
+  await page.evaluate(() => {
+    Object.defineProperty(window, "MediaRecorder", {
+      configurable: true,
+      value: class FailingMediaRecorder {
+        static isTypeSupported() {
+          return true;
+        }
+        constructor() {
+          throw new Error("recorder construction failed");
+        }
+      },
+    });
+  });
+  await page.getByRole("button", { name: /In-person class/i }).click();
+  await page.getByRole("button", { name: /start capture/i }).click();
+  await expect(page.getByText(/permission was not granted/i)).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const tracks = (
+          window as unknown as {
+            __CLASSLOOP_CAPTURE_TRACKS__?: Array<{ stopped: boolean }>;
+          }
+        ).__CLASSLOOP_CAPTURE_TRACKS__;
+        return tracks?.[tracks.length - 1]?.stopped;
+      }),
+    )
+    .toBe(true);
 
   await page.getByRole("button", { name: /generate draft/i }).click();
   await expect(page.locator(".review-page")).toBeVisible({ timeout: 20_000 });
@@ -1751,16 +1967,15 @@ test("Stripe payment link starts checkout without unlocking Pro first", async ({
   const password = `teacher-pass-${runId}`;
   const checkoutApiRequests: Array<{ authorization: string | undefined; body: Record<string, unknown> }> = [];
   const prepareRequests: Array<Record<string, unknown>> = [];
+  let profileRequests = 0;
+  let profileEnsuredBeforeStripe = false;
 
-  const cloudAuth = await mockCloudAuthForStripeCheckout(page, email, { failPasswordSignIn: true });
-  await page.route("https://js.stripe.com/v3/buy-button.js", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/javascript",
-      body: "customElements.define('stripe-buy-button', class extends HTMLElement {});",
-    });
+  await mockCloudAuthForStripeCheckout(page, email, {
+    role: "teacher",
+    name: `Stripe Teacher ${runId}`,
   });
   await page.route("https://buy.stripe.com/**", async (route) => {
+    profileEnsuredBeforeStripe = profileRequests > 0;
     await route.fulfill({
       status: 200,
       contentType: "text/html",
@@ -1777,6 +1992,7 @@ test("Stripe payment link starts checkout without unlocking Pro first", async ({
     });
   });
   await page.route("**/api/profile", async (route) => {
+    profileRequests += 1;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -1809,32 +2025,22 @@ test("Stripe payment link starts checkout without unlocking Pro first", async ({
   await page.getByRole("button", { name: /^plan options$/i }).click();
   await expect(page.getByPlaceholder("you@school.org")).toBeVisible();
   await expect(page.getByRole("heading", { name: /cloud workspace/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /upgrade to pro with stripe/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^upgrade to pro$/i })).toBeVisible();
   await expect(page.getByText(/Current account/i)).toBeVisible();
   await expect(page.locator(".integration-card").filter({ hasText: /Current account/ })).toContainText(/Free/i);
   await expect(page.locator(".stripe-pricing-table-shell")).toHaveCount(0);
   await expect(page.locator("stripe-pricing-table")).toHaveCount(0);
-  await expect(page.getByText(/Stripe Payment Link/i)).toBeVisible();
-  await expect(page.getByText(/ClassLoop turns on Pro only after Stripe confirms payment/i)).toBeVisible();
-  await expect(page.locator(".stripe-buy-button-copy strong").filter({ hasText: /Stripe Buy Button fallback/i })).toBeVisible();
-  await expect(page.getByText(/current theme accent/i)).toBeVisible();
+  profileRequests = 0;
 
-  await page.getByRole("button", { name: /prepare stripe buy button/i }).click();
-  await expect.poll(() => cloudAuth.signupRequests.length).toBeLessThanOrEqual(1);
-  await expect.poll(() => prepareRequests.length).toBe(0);
-  const buyButton = page.locator("stripe-buy-button").first();
-  await expect(buyButton).toHaveAttribute("buy-button-id", /^buy_btn_/);
-  await expect(buyButton).toHaveAttribute("publishable-key", /^pk_(test|live)_/);
-  await expect(buyButton).toHaveAttribute("customer-email", email);
-  await expect(buyButton).toHaveAttribute("client-reference-id", "00000000-0000-4000-8000-000000000123");
-
-  await page.getByRole("button", { name: /upgrade to pro with stripe/i }).click();
+  await page.getByRole("button", { name: /^upgrade to pro$/i }).click();
+  await expect.poll(() => profileRequests).toBeGreaterThan(0);
   await expect.poll(() => prepareRequests.length).toBe(0);
   await expect.poll(() => checkoutApiRequests.length).toBe(0);
   await expect(page).toHaveURL(/buy\.stripe\.com\/7sY28qeT16Mh5wi0ZbeME00/);
   const paymentUrl = new URL(page.url());
   expect(paymentUrl.searchParams.get("prefilled_email")).toBe(email);
   expect(paymentUrl.searchParams.get("client_reference_id")).toBe("00000000-0000-4000-8000-000000000123");
+  expect(profileEnsuredBeforeStripe).toBe(true);
   await expect(page.getByRole("heading", { name: /Stripe Payment Link smoke/i })).toBeVisible();
   await expect(page.getByText(/PRO · active/i)).toHaveCount(0);
 });
@@ -1847,8 +2053,16 @@ test("unconfirmed cloud email shows instructions overlay instead of a red billin
   const prepareRequests: Array<Record<string, unknown>> = [];
   const checkoutRequests: Array<Record<string, unknown>> = [];
   const cloudOptions = { emailNotConfirmed: true };
+  let stripeRequests = 0;
 
+  await page.addInitScript(() => {
+    (window as Window & { __CLASSLOOP_TEST_AUTO_CLOUD__?: boolean }).__CLASSLOOP_TEST_AUTO_CLOUD__ = true;
+  });
   const cloudAuth = await mockCloudAuthForStripeCheckout(page, email, cloudOptions);
+  await page.route("https://buy.stripe.com/**", async (route) => {
+    stripeRequests += 1;
+    await route.abort();
+  });
   await page.route("**/api/billing/prepare-account", async (route) => {
     prepareRequests.push(route.request().postDataJSON() as Record<string, unknown>);
     await route.fulfill({
@@ -1871,29 +2085,34 @@ test("unconfirmed cloud email shows instructions overlay instead of a red billin
   await page.reload();
   await page.goto("/#/dashboard");
   await signInAccount(page, "teacher", email, password);
+
+  await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({
+      hasText: /local workspace is available.*confirm.*cloud sync.*pro checkout/i,
+    }),
+  ).toBeVisible();
   await page.getByRole("button", { name: /^plan options$/i }).click();
-  await page.getByRole("button", { name: /upgrade to pro with stripe/i }).click();
+  await page.getByRole("button", { name: /^upgrade to pro$/i }).click();
 
   const dialog = page.getByRole("dialog", { name: /check your email to link your cloud account/i });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText(`Open the inbox for ${email}`);
-  await expect.poll(() => cloudAuth.resendRequests.length).toBe(1);
+  await expect.poll(() => cloudAuth.resendRequests.length).toBe(0);
   await expect(dialog).not.toContainText(/Expected return link/i);
   await expect(dialog).not.toContainText("https://classloop-followup.vercel.app/#/billing?cloud=confirmed");
   await expect(page.locator(".settings-message.warning").filter({ hasText: /email not confirmed|confirm your email/i })).toHaveCount(0);
   await expect.poll(() => prepareRequests.length).toBe(0);
   await expect.poll(() => checkoutRequests.length).toBe(0);
+  expect(stripeRequests).toBe(0);
+  await expect(dialog.getByRole("button", { name: /try checkout again/i })).toBeVisible();
+  await dialog.getByRole("button", { name: /try checkout again/i }).click();
+  await expect(page.getByRole("dialog", { name: /check your email to link your cloud account/i })).toBeVisible();
+  expect(stripeRequests).toBe(0);
   await dialog.getByRole("button", { name: /resend confirmation email/i }).click();
   await expect(dialog).toContainText(/Confirmation email sent again/i);
-  await expect.poll(() => cloudAuth.resendRequests.length).toBe(2);
+  await expect.poll(() => cloudAuth.resendRequests.length).toBe(1);
   expect(cloudAuth.resendRequests[0].body).toMatchObject({ email, type: "signup" });
-  expect(cloudAuth.resendRequests[1].body).toMatchObject({ email, type: "signup" });
-
-  await dialog.getByRole("button", { name: /close email confirmation instructions/i }).click();
-  await page.getByPlaceholder("you@school.org").fill(email);
-  await page.getByLabel(/cloud password/i).fill(password);
-  await page.getByRole("button", { name: /^sign in$/i }).click();
-  await expect(page.getByRole("dialog", { name: /check your email to link your cloud account/i })).toBeVisible();
 });
 
 test("students cannot access analytics but can save appearance while logged in, with default theme restored on logout", async ({ page }) => {

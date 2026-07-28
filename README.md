@@ -67,6 +67,8 @@ This keeps the first impression accessible to everyone while still making the st
 - Hosted web demo with sample teacher and student accounts.
 - Installable PWA shell with manifest, service worker, app icons, and Add to Home Screen flow.
 - Supabase-backed hosted account, email confirmation, and sync scaffold.
+- Cloud snapshots exclude local account password hashes and server-owned billing entitlements.
+- Hosted recap email is disabled by default and requires a confirmed teacher account plus an administrator grant.
 - Stripe Checkout/Payment Link-based Pro subscription scaffold.
 - Google Classroom and Zoom workflow surfaces for roster/course and transcript-first classroom follow-up.
 ## Demo Accounts
@@ -176,7 +178,7 @@ tests/
 
 ## Pricing
 
-- Free: 1 generated session per day, transcript import, Google/Zoom workflow surfaces, student accounts, recap email delivery, CSV roster tools, local encrypted storage, and multi-device cloud sync when Supabase is configured.
+- Free: 1 generated session per day, transcript import, read/search/draft Google/Zoom workflow surfaces, student accounts, controlled-pilot recap email delivery, CSV roster tools, local encrypted storage, and multi-device cloud sync when Supabase is configured.
 - Pro: `$3.99/month` for unlimited generated sessions, live in-person/online capture, delivery proof, private analytics, and JSON/CSV/print report exports.
 - School/team later: per-teacher seats with SSO, retention controls, audit/export, admin policy, and reviewed student-data agreements.
 

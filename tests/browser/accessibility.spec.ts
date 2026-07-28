@@ -124,18 +124,20 @@ test.describe("WCAG-targeted accessibility checks", () => {
   test("landing PWA install controls expose names, contrast, and screen-reader status announcements", async ({ page }) => {
     await page.goto("/?demoOnly=1");
     await expect(page.getByRole("heading", { name: /^ClassLoop$/i })).toBeVisible();
+    await expect(page.locator(".landing-page-home button")).toHaveCount(1);
+    await expect(page.getByRole("button", { name: /^open demo$/i })).toHaveCount(0);
+
+    await expectNoUnnamedInteractive(page, ".landing-page");
+    await expectContrast(page, landingContrastSelectors);
+
+    await expect(page.locator(".landing-hero").getByRole("button", { name: /^upgrade to pro$/i })).toBeVisible();
+
+    await page.goto("/#/download");
     if ((page.viewportSize()?.width ?? 0) > 920) {
       await expect(page.getByRole("button", { name: /^screenshots$/i })).toBeVisible();
       await expect(page.getByRole("button", { name: /^docs$/i })).toBeVisible();
       await expect(page.getByRole("button", { name: /^support$/i })).toBeVisible();
     }
-
-    await expectNoUnnamedInteractive(page, ".landing-page");
-    await expectContrast(page, landingContrastSelectors);
-
-    await expect(page.locator(".landing-hero").getByRole("button", { name: /^add to phone$/i })).toBeVisible();
-
-    await page.goto("/#/download");
     await expect(page.getByRole("heading", { name: /use the pwa for fast after-class cleanup/i })).toBeVisible();
     await page.locator(".landing-mobile-band").getByRole("button", { name: /^add to phone$/i }).click();
     await expect(

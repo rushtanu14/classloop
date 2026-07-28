@@ -385,7 +385,6 @@ export function validateBillingAccountPayload(payload) {
     { name: "billing account" },
   );
 }
-
 export function validateEmailRecapPayload(payload) {
   return validateSchema(
     payload,

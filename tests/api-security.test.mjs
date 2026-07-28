@@ -155,7 +155,6 @@ const preparedOwnerProfile = billingPreparedProfileRow(
 assert.equal(preparedOwnerProfile.plan_tier, "pro");
 assert.equal(preparedOwnerProfile.subscription_status, "active");
 assert.equal(preparedOwnerProfile.stripe_customer_id, "manual_pro_rushilcpm02_gmail_com");
-
 assert.deepEqual(validateEmailRecapPayload({
   sessionId: "session-1",
   ownerEmail: "teacher@classloop.test",

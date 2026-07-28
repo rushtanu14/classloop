@@ -8,6 +8,7 @@ HOST="${HOST:-127.0.0.1}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 OPEN_BROWSER="${OPEN_BROWSER:-1}"
 CLASSLOOP_SKIP_INSTALL="${CLASSLOOP_SKIP_INSTALL:-0}"
+CLASSLOOP_SKIP_DESKTOP_BUILD="${CLASSLOOP_SKIP_DESKTOP_BUILD:-0}"
 
 usage() {
   cat <<'EOF'
@@ -31,6 +32,8 @@ Environment:
   FRONTEND_PORT=5173          Dev server port
   OPEN_BROWSER=0              Do not open browser for --dev
   CLASSLOOP_SKIP_INSTALL=1    Do not auto-install missing dependencies
+  CLASSLOOP_SKIP_DESKTOP_BUILD=1
+                              Start Electron with the existing dist/ build
 EOF
 }
 
@@ -118,8 +121,24 @@ ensure_dependencies() {
   fi
 }
 
+ensure_desktop_build() {
+  if [ "$CLASSLOOP_SKIP_DESKTOP_BUILD" = "1" ]; then
+    if [ ! -f "dist/index.html" ]; then
+      echo "ClassLoop desktop build is missing. Run npm run build or unset CLASSLOOP_SKIP_DESKTOP_BUILD." >&2
+      exit 1
+    fi
+    echo "Using existing desktop build from dist/."
+    return
+  fi
+
+  echo "Preparing a fresh ClassLoop desktop build..."
+  npm run build
+}
+
 run_dev_server() {
   echo "Starting ClassLoop dev server at http://$HOST:$FRONTEND_PORT"
+  echo "Note: --dev is browser-only and does not serve Electron's /api/state shared-sync endpoint."
+  echo "Use ./run.sh for the desktop app with encrypted local shared sync."
   ./node_modules/.bin/vite --host "$HOST" --port "$FRONTEND_PORT" --strictPort &
   dev_pid=$!
 

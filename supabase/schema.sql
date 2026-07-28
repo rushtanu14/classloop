@@ -58,6 +58,8 @@ alter table public.classloop_pilot_feedback add column if not exists metadata js
 
 create index if not exists classloop_profiles_stripe_customer_id_idx
   on public.classloop_profiles(stripe_customer_id);
+create index if not exists classloop_pilot_feedback_owner_id_idx
+  on public.classloop_pilot_feedback(owner_id);
 
 create table if not exists public.classloop_classes (
   id uuid primary key default gen_random_uuid(),
@@ -123,7 +125,7 @@ as $$
     select 1
     from public.classloop_classes class
     where class.id = target_class_id
-      and class.teacher_id = auth.uid()
+      and class.teacher_id = (select auth.uid())
   );
 $$;
 
@@ -138,7 +140,7 @@ as $$
     select 1
     from public.classloop_class_memberships membership
     where membership.class_id = target_class_id
-      and membership.user_id = auth.uid()
+      and membership.user_id = (select auth.uid())
   );
 $$;
 
@@ -220,20 +222,20 @@ grant update (status, note, submitted_at, reviewed_at)
 drop policy if exists "profiles_select_own" on public.classloop_profiles;
 create policy "profiles_select_own"
   on public.classloop_profiles for select
-  using (auth.uid() = id);
+  using ((select auth.uid()) = id);
 
 drop policy if exists "profiles_insert_own" on public.classloop_profiles;
 
 drop policy if exists "profiles_update_own" on public.classloop_profiles;
 create policy "profiles_update_own"
   on public.classloop_profiles for update
-  using (auth.uid() = id)
-  with check (auth.uid() = id);
+  using ((select auth.uid()) = id)
+  with check ((select auth.uid()) = id);
 
 drop policy if exists "workspace_state_select_own" on public.classloop_workspace_state;
 create policy "workspace_state_select_own"
   on public.classloop_workspace_state for select
-  using (auth.uid() = owner_id);
+  using ((select auth.uid()) = owner_id);
 
 drop policy if exists "workspace_state_insert_own" on public.classloop_workspace_state;
 
@@ -242,18 +244,18 @@ drop policy if exists "workspace_state_update_own" on public.classloop_workspace
 drop policy if exists "feedback_insert_own" on public.classloop_pilot_feedback;
 create policy "feedback_insert_own"
   on public.classloop_pilot_feedback for insert
-  with check (auth.uid() = owner_id);
+  with check ((select auth.uid()) = owner_id);
 
 drop policy if exists "feedback_select_own" on public.classloop_pilot_feedback;
 create policy "feedback_select_own"
   on public.classloop_pilot_feedback for select
-  using (auth.uid() = owner_id);
+  using ((select auth.uid()) = owner_id);
 
 drop policy if exists "classes_teacher_all" on public.classloop_classes;
 create policy "classes_teacher_all"
   on public.classloop_classes for all
-  using (auth.uid() = teacher_id)
-  with check (auth.uid() = teacher_id);
+  using ((select auth.uid()) = teacher_id)
+  with check ((select auth.uid()) = teacher_id);
 
 drop policy if exists "classes_member_select" on public.classloop_classes;
 create policy "classes_member_select"
@@ -269,17 +271,17 @@ create policy "memberships_teacher_manage"
 drop policy if exists "memberships_select_own" on public.classloop_class_memberships;
 create policy "memberships_select_own"
   on public.classloop_class_memberships for select
-  using (user_id = auth.uid());
+  using (user_id = (select auth.uid()));
 
 drop policy if exists "publications_teacher_manage" on public.classloop_publications;
 create policy "publications_teacher_manage"
   on public.classloop_publications for all
   using (
-    teacher_id = auth.uid()
+    teacher_id = (select auth.uid())
     and public.classloop_is_class_teacher(class_id)
   )
   with check (
-    teacher_id = auth.uid()
+    teacher_id = (select auth.uid())
     and public.classloop_is_class_teacher(class_id)
   );
 
@@ -293,14 +295,14 @@ drop policy if exists "submissions_student_select" on public.classloop_submissio
 create policy "submissions_student_select"
   on public.classloop_submissions for select
   using (
-    student_id = auth.uid()
+    student_id = (select auth.uid())
     and exists (
       select 1
       from public.classloop_publications publication
       join public.classloop_class_memberships membership
         on membership.class_id = publication.class_id
       where publication.id = publication_id
-        and membership.user_id = auth.uid()
+        and membership.user_id = (select auth.uid())
         and membership.role = 'student'
     )
   );
@@ -309,7 +311,7 @@ drop policy if exists "submissions_student_insert" on public.classloop_submissio
 create policy "submissions_student_insert"
   on public.classloop_submissions for insert
   with check (
-    student_id = auth.uid()
+    student_id = (select auth.uid())
     and status in ('todo', 'working', 'submitted')
     and reviewed_at is null
     and exists (
@@ -318,7 +320,7 @@ create policy "submissions_student_insert"
       join public.classloop_class_memberships membership
         on membership.class_id = publication.class_id
       where publication.id = publication_id
-        and membership.user_id = auth.uid()
+        and membership.user_id = (select auth.uid())
         and membership.role = 'student'
     )
   );
@@ -327,7 +329,7 @@ drop policy if exists "submissions_student_update" on public.classloop_submissio
 create policy "submissions_student_update"
   on public.classloop_submissions for update
   using (
-    student_id = auth.uid()
+    student_id = (select auth.uid())
     and status in ('todo', 'working', 'submitted')
     and reviewed_at is null
     and exists (
@@ -336,12 +338,12 @@ create policy "submissions_student_update"
       join public.classloop_class_memberships membership
         on membership.class_id = publication.class_id
       where publication.id = publication_id
-        and membership.user_id = auth.uid()
+        and membership.user_id = (select auth.uid())
         and membership.role = 'student'
     )
   )
   with check (
-    student_id = auth.uid()
+    student_id = (select auth.uid())
     and status in ('todo', 'working', 'submitted')
     and reviewed_at is null
     and exists (
@@ -350,7 +352,7 @@ create policy "submissions_student_update"
       join public.classloop_class_memberships membership
         on membership.class_id = publication.class_id
       where publication.id = publication_id
-        and membership.user_id = auth.uid()
+        and membership.user_id = (select auth.uid())
         and membership.role = 'student'
     )
   );
@@ -363,7 +365,7 @@ create policy "submissions_teacher_select"
       select 1
       from public.classloop_publications publication
       where publication.id = publication_id
-        and publication.teacher_id = auth.uid()
+        and publication.teacher_id = (select auth.uid())
         and public.classloop_is_class_teacher(publication.class_id)
     )
   );
@@ -376,7 +378,7 @@ create policy "submissions_teacher_update"
       select 1
       from public.classloop_publications publication
       where publication.id = publication_id
-        and publication.teacher_id = auth.uid()
+        and publication.teacher_id = (select auth.uid())
         and public.classloop_is_class_teacher(publication.class_id)
     )
   )
@@ -387,7 +389,7 @@ create policy "submissions_teacher_update"
       join public.classloop_class_memberships membership
         on membership.class_id = publication.class_id
       where publication.id = publication_id
-        and publication.teacher_id = auth.uid()
+        and publication.teacher_id = (select auth.uid())
         and public.classloop_is_class_teacher(publication.class_id)
         and membership.user_id = student_id
         and membership.role = 'student'
@@ -402,7 +404,7 @@ create policy "publication_versions_teacher_manage"
       select 1
       from public.classloop_publications publication
       where publication.id = publication_id
-        and publication.teacher_id = auth.uid()
+        and publication.teacher_id = (select auth.uid())
         and public.classloop_is_class_teacher(publication.class_id)
     )
   )
@@ -411,7 +413,7 @@ create policy "publication_versions_teacher_manage"
       select 1
       from public.classloop_publications publication
       where publication.id = publication_id
-        and publication.teacher_id = auth.uid()
+        and publication.teacher_id = (select auth.uid())
         and public.classloop_is_class_teacher(publication.class_id)
     )
   );

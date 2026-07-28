@@ -12,12 +12,18 @@ function policy(name) {
   const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = sql.match(new RegExp(`create policy "${escapedName}" (.*?);`, "i"));
   assert.ok(match, `Expected ${name} policy to exist`);
-  return match[1];
+  return match[1].replace(/\(select auth\.uid\(\)\)/gi, "auth.uid()");
 }
 
 function occurrences(value, pattern) {
   return [...value.matchAll(pattern)].length;
 }
+
+assert.doesNotMatch(
+  sql,
+  /(?<!select )auth\.uid\(\)/i,
+  "RLS auth lookups must use select wrappers so Postgres evaluates them once per statement",
+);
 
 assert.match(
   sql,

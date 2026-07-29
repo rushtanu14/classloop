@@ -1,6 +1,13 @@
 # ClassLoop Supabase Auth Setup
 
-Use these settings when Supabase Auth email confirmation is enabled for ClassLoop cloud accounts.
+Use these settings for ClassLoop cloud accounts.
+
+## Require signup confirmation
+
+In Supabase Dashboard -> Authentication -> Providers -> Email, **Confirm email must remain enabled**.
+ClassLoop creates the Supabase account first, then lets the person keep working in the local workspace while the
+confirmation link is pending. Turning this setting off makes Supabase return an immediate session and skips the
+confirmation email, which breaks ClassLoop's account-verification contract.
 
 ## Redirect URLs
 

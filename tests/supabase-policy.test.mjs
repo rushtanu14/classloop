@@ -150,6 +150,11 @@ assert.match(teacherUpdatePolicy, /public\.classloop_is_class_teacher\(publicati
 assert.match(teacherUpdatePolicy, /membership\.user_id = student_id/i);
 assert.match(teacherUpdatePolicy, /membership\.role = 'student'/i);
 
+assert.match(
+  setupGuide,
+  /Confirm email must remain enabled/i,
+  "Supabase setup must require signup confirmation so new accounts receive the email link",
+);
 for (const origin of [
   "https://classloop-followup.vercel.app",
   "http://127.0.0.1:5177",

@@ -51,7 +51,7 @@ These features were removed from the current app because they require paid API k
 - Canvas/LMS posting.
 - Background online-call capture that depends on paid/external transcription.
 
-ClassLoop still works through transcript paste/upload, browser live audio notes when available, teacher review, publish preview, student dashboards, local analytics, roster templates, and Gmail recap delivery.
+ClassLoop still works through transcript paste/upload, best-effort browser tab/window audio capture for online meetings, teacher review, publish preview, student dashboards, local analytics, roster templates, and Gmail recap delivery. In-person class capture is not part of the app.
 
 ## Privacy and Security Controls
 
@@ -62,4 +62,4 @@ ClassLoop still works through transcript paste/upload, browser live audio notes 
 - Static and API responses include restrictive security headers.
 - The browser window uses context isolation and does not expose Node integration to the UI.
 - External links are restricted to `http`, `https`, and `mailto`.
-- Camera/geolocation/display-capture permissions are denied; microphone permission is only used for local live audio notes.
+- Camera and geolocation permissions are denied. Display/audio capture is requested only when a teacher explicitly starts online meeting capture; transcript paste/upload remains the reliable path.

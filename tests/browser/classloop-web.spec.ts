@@ -175,7 +175,7 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   await page.getByRole("button", { name: /^plan options$/i }).click();
   await expect(page.locator(".stripe-pricing-table-shell")).toHaveCount(0);
   await expect(page.getByRole("status").filter({ hasText: /Demo account upgrades are disabled/i })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /upgrade to pro/i })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: /^plan options\.$/i })).toBeVisible();
 });
 
 test("hosted public screenshots and privacy routes expose compliance boundaries", async ({ page }) => {

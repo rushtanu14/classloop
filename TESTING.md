@@ -56,7 +56,7 @@
 - **Stripe Payment Link Smoke**: `npm run test:stripe` clicks the real Pro upgrade button with mocked cloud auth, verifies ClassLoop prepares the cloud account behind the scenes, verifies the browser opens the configured `buy.stripe.com` Payment Link with email and client reference id attached, verifies the old embedded checkout API path is not called, and verifies Pro stays locked until webhook/profile confirmation is pending.
 - **Webhook-Owned Updates**: Entitlement tests verify Stripe checkout/subscription/invoice webhook payload mapping updates `classloop_profiles` with `plan_tier`, `subscription_status`, customer id, subscription id, and current period end.
 - **Client Tampering Guard**: Entitlement tests verify `/api/profile` PATCH helpers ignore client-submitted paid fields like `plan_tier`, camelCase paid entitlement fields, `subscription_status`, Stripe customer ids, nested billing profiles, invalid roles, and snake-case privacy tampering.
-- **Locked UI Behavior**: Browser tests verify in-person and online live capture stay locked for Free/unpaid users, Free one-session-per-day copy appears, second draft generation is disabled for Free accounts, verified Stripe-owned Pro unlocks live capture and paid controls, and unpaid/local entitlement attempts keep paid analytics/export locks.
+- **Locked UI Behavior**: Browser tests verify online meeting capture stays locked for Free/unpaid users, Free one-session-per-day copy appears, second draft generation is disabled for Free accounts, verified Stripe-owned Pro unlocks online capture and paid controls, and unpaid/local entitlement attempts keep paid analytics/export locks.
 
 ### Package Init / Startup Failure Tests
 - **Missing Packaged Executable**: `npm run test:package:init` runs the packaged first-run smoke against a missing executable and verifies the failure explains what artifact is absent without logging classroom/account data.
@@ -88,7 +88,7 @@
 - **Multi-Session E2E**: Fresh teacher/student accounts run Math review, CS workshop, and Club meeting imports through review, publish, student dashboard, completion, and teacher report export.
 - **Workspace Isolation**: Browser tests verify another teacher cannot see the first teacher's sessions, saved roster, or class group, and each student account sees only sessions rostered to that student's email.
 - **Teacher Review Loop**: Teacher preview can mark submitted student check-ins as reviewed.
-- **Capture Modes**: New session flow exposes transcript and Zoom cloud transcript import in Free, shows Pro locks for in-person class and online meeting capture, and verifies paid live capture uses unknown speaker segments without biometric voice identification claims.
+- **Capture Modes**: New session flow exposes transcript and Zoom cloud transcript import in Free, omits the removed in-person class mode, shows the Pro lock for online meeting capture, and verifies paid online capture uses unknown speaker segments without biometric voice identification claims.
 - **Analytics Hiding And Direct Route Blocking**: Student navigation does not expose teacher analytics, and direct hashes for analytics, classes, rosters, report, billing, privacy, new-session, and review routes return to the student dashboard.
 - **Publish Audit**: Preview/report pages show publish audit evidence for class-wide and per-student follow-ups.
 - **Report Exports**: Session report exposes JSON, CSV, and print actions.
@@ -208,7 +208,8 @@ When the user says "use the testing script," run the saved ClassLoop QA sequence
 - whether every supported noisy Zoom/CSV import variation still parses, including malformed rows, duplicate emails/names, mixed aliases, and transcript-only roster estimation
 - whether Supabase auth transitions, token expiry handling, conflict resolution, network-loss queueing, and missing-credential desktop fallback pass
 - whether Free/Pro entitlement boundaries, webhook-driven entitlement updates, upgrade/downgrade flows, Pro-only live capture access, and unpaid paid-feature locks pass
-- whether clicking Upgrade to Pro opens the hidden embedded Stripe Checkout page, keeps the hosted Checkout fallback working, and still keeps Pro locked until the paid webhook/profile state is verified
+- whether cloud credentials appear only on the main ClassLoop sign-in/create-account page, while Plan options exposes only connected-state upload/download/disconnect controls
+- whether clicking Upgrade to Pro opens the Stripe Payment Link without unlocking Pro early, a verified Stripe-backed Pro account changes that action to Unsubscribe and opens Stripe's authenticated cancellation flow, and included/manual Pro access never pretends a cancellable Stripe subscription exists
 - whether local data files and `.env.local` are ignored/untracked, no high-confidence tracked secrets are present, runtime debug/info logs are absent, startup/error logging is actionable without sensitive payloads, and the legal baseline is present
 - whether public account creation remains cloud-backed when Supabase is configured, demo-only routes stay sample-only, and school-scale hosted use still has Terms of Use, Privacy Policy, desktop EULA, hosted retention/deletion SLAs, support contact, and child-safety expectations reviewed
 - whether bad transcript format, malformed URLs, sync API outage, package init failures, and desktop storage corruption show recoverable user-visible states

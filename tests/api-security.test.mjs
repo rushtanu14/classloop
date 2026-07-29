@@ -13,7 +13,13 @@ import {
   validateProfilePatchPayload,
 } from "../server/backend/api/validators.js";
 import { billingPreparedProfileRow } from "../server/backend/api/billing/prepare-account.js";
-import { assertRecapEmailAuthorization } from "../server/backend/api/email/send-recaps.js";
+import { billingPortalSessionOptions } from "../server/backend/api/billing/portal.js";
+import { applyManualProGrantToRow } from "../server/backend/api/billing/manual-pro.js";
+import {
+  assertRecapEmailAuthorization,
+  saveWorkspaceState,
+  studentEmail,
+} from "../server/backend/api/email/send-recaps.js";
 
 function assertThrowsStatus(fn, statusCode, messagePattern) {
   assert.throws(
@@ -108,6 +114,84 @@ const validWorkspaceState = {
   auditLog: [],
 };
 
+const authenticatedOwnerEmail = "teacher@classloop.test";
+const validCloudSession = (overrides = {}) => ({
+  id: "session-owned",
+  ownerEmail: authenticatedOwnerEmail,
+  isDemo: false,
+  title: "Owned cloud session",
+  type: "Math review",
+  date: "2026-07-27",
+  status: "published",
+  students: [],
+  transcript: "Class recap transcript.",
+  notes: "",
+  recap: "Students reviewed the lesson.",
+  essentialQuestions: [],
+  attendance: {},
+  resources: [],
+  actionItems: [],
+  participationEvents: [],
+  followUps: [],
+  unmatchedParticipants: [],
+  importWarnings: [],
+  transcriptAliases: {},
+  deliveryLogs: [],
+  publishAudit: [],
+  submissions: [],
+  ...overrides,
+});
+const validPersonalMeeting = {
+  id: "meeting-owned",
+  ownerEmail: authenticatedOwnerEmail,
+  title: "Owned personal meeting",
+  date: "2026-07-27",
+  minutes: "Meeting notes.",
+  context: "",
+  recap: "",
+  resources: [],
+  questions: [],
+  tasks: [],
+  createdAt: "2026-07-27T00:00:00.000Z",
+  updatedAt: "2026-07-27T00:00:00.000Z",
+};
+const validClassGroup = {
+  id: "class-owned",
+  ownerEmail: authenticatedOwnerEmail,
+  name: "Period 4",
+  description: "",
+  defaultSessionType: "Math review",
+  students: [],
+  createdAt: "2026-07-27T00:00:00.000Z",
+  updatedAt: "2026-07-27T00:00:00.000Z",
+};
+const validRosterTemplate = {
+  id: "roster-owned",
+  ownerEmail: authenticatedOwnerEmail,
+  name: "Period 4 roster",
+  sessionType: "Math review",
+  students: [],
+  createdAt: "2026-07-27T00:00:00.000Z",
+  updatedAt: "2026-07-27T00:00:00.000Z",
+};
+const validAuditLogEntry = {
+  id: "audit-owned",
+  actorEmail: authenticatedOwnerEmail,
+  actorRole: "teacher",
+  action: "cloud_upload",
+  detail: "Uploaded the owned workspace.",
+  createdAt: "2026-07-27T00:00:00.000Z",
+};
+const ownedWorkspaceState = {
+  ...validWorkspaceState,
+  sessions: [validCloudSession()],
+  personalMeetings: [validPersonalMeeting],
+  draft: validCloudSession({ id: "draft-owned", status: "draft" }),
+  classGroups: [validClassGroup],
+  rosterTemplates: [validRosterTemplate],
+  auditLog: [validAuditLogEntry],
+};
+
 const validFeedback = validateFeedbackPayload({
   rating: 5,
   note: "Useful follow-up",
@@ -129,6 +213,72 @@ const confirmedTeacher = {
   email: "teacher@classloop.test",
   email_confirmed_at: "2026-07-27T00:00:00.000Z",
 };
+assert.deepEqual(
+  billingPortalSessionOptions(
+    {
+      stripe_customer_id: "cus_verified",
+      subscription_id: "sub_verified",
+    },
+    "https://classloop.test/",
+  ),
+  {
+    customer: "cus_verified",
+    return_url: "https://classloop.test/#/billing",
+    flow_data: {
+      type: "subscription_cancel",
+      subscription_cancel: {
+        subscription: "sub_verified",
+      },
+      after_completion: {
+        type: "redirect",
+        redirect: {
+          return_url: "https://classloop.test/#/billing?billing=subscription-updated",
+        },
+      },
+    },
+  },
+  "Billing portal sessions should open Stripe's direct cancellation flow for the authenticated subscription.",
+);
+assertThrowsStatus(
+  () => billingPortalSessionOptions({ stripe_customer_id: "", subscription_id: "" }, "https://classloop.test"),
+  400,
+  /Complete Stripe Checkout/i,
+);
+assertThrowsStatus(
+  () => billingPortalSessionOptions(null, "https://classloop.test"),
+  400,
+  /Complete Stripe Checkout/i,
+);
+assertThrowsStatus(
+  () => billingPortalSessionOptions({ stripe_customer_id: "cus_verified", subscription_id: "" }, "https://classloop.test"),
+  400,
+  /active Stripe subscription/i,
+);
+assertThrowsStatus(
+  () =>
+    billingPortalSessionOptions(
+      {
+        stripe_customer_id: "manual_pro_owner",
+        subscription_id: "manual_pro_owner_grant",
+      },
+      "https://classloop.test",
+    ),
+  400,
+  /no Stripe subscription/i,
+);
+const stripeBackedOwnerProfile = {
+  email: "rushilcpm02@gmail.com",
+  plan_tier: "pro",
+  subscription_status: "active",
+  stripe_customer_id: "cus_real_subscription",
+  subscription_id: "sub_real_subscription",
+  current_period_end: "2026-08-31T00:00:00.000Z",
+};
+assert.deepEqual(
+  applyManualProGrantToRow(stripeBackedOwnerProfile),
+  stripeBackedOwnerProfile,
+  "A real Stripe subscription must take precedence over the included owner grant.",
+);
 const ownedPublishedSession = {
   id: "session-1",
   ownerEmail: "teacher@classloop.test",
@@ -157,6 +307,16 @@ assertThrowsStatus(
   403,
   /authenticated teacher/i,
 );
+assert.equal(
+  studentEmail({
+    id: "revoked-student",
+    name: "Revoked Student",
+    email: "revoked@classloop.test",
+    linkedAccountEmail: "",
+  }),
+  "",
+  "An explicitly unlinked student must not fall back to the roster email for delivery.",
+);
 assertThrowsStatus(
   () => validateFeedbackPayload({ rating: "5", role: "student", source: "student_followup_popup" }),
   400,
@@ -168,9 +328,14 @@ assertThrowsStatus(
   /string, number, or boolean/i,
 );
 
-assert.deepEqual(validateProfilePatchPayload({ noTrainingOnStudentData: false }), {
-  noTrainingOnStudentData: false,
+assert.deepEqual(validateProfilePatchPayload({ noTrainingOnStudentData: true }), {
+  noTrainingOnStudentData: true,
 });
+assertThrowsStatus(
+  () => validateProfilePatchPayload({ noTrainingOnStudentData: false }),
+  400,
+  /cannot be disabled/i,
+);
 assertThrowsStatus(() => validateProfilePatchPayload({ role: "teacher" }), 400, /unsupported field/i);
 assertThrowsStatus(() => validateProfilePatchPayload({ plan_tier: "pro" }), 400, /unsupported field/i);
 
@@ -287,22 +452,174 @@ assert.doesNotMatch(
   /Student access:/,
 );
 
-assert.deepEqual(validateCloudWorkspaceStatePayload(validWorkspaceState), validWorkspaceState);
+assertThrowsStatus(
+  () => validateCloudWorkspaceStatePayload(validWorkspaceState),
+  403,
+  /authenticated account email/i,
+);
 assert.deepEqual(
-  validateCloudWorkspaceStatePayload({
-    ...validWorkspaceState,
-    accounts: [{
-      id: "teacher",
-      role: "teacher",
-      email: "teacher@classloop.test",
-      name: "Teacher",
-      passwordHash: "must-never-sync",
-      createdAt: "2026-07-27T00:00:00.000Z",
-    }],
-    billingProfile: { tier: "pro", status: "active", customerId: "cus_attacker" },
-  }),
+  validateCloudWorkspaceStatePayload(validWorkspaceState, { ownerEmail: authenticatedOwnerEmail }),
   validWorkspaceState,
-  "Legacy local identities and billing fields should be discarded before cloud validation.",
+);
+assertThrowsStatus(
+  () =>
+    validateCloudWorkspaceStatePayload(
+      {
+        ...validWorkspaceState,
+        privacySettings: {
+          ...validWorkspaceState.privacySettings,
+          noTrainingOnStudentData: false,
+        },
+      },
+      { ownerEmail: authenticatedOwnerEmail },
+    ),
+  400,
+  /no-training protection/i,
+);
+for (const retentionDays of [29, 2_556]) {
+  assertThrowsStatus(
+    () =>
+      validateCloudWorkspaceStatePayload(
+        {
+          ...validWorkspaceState,
+          privacySettings: {
+            ...validWorkspaceState.privacySettings,
+            retentionDays,
+          },
+        },
+        { ownerEmail: authenticatedOwnerEmail },
+    ),
+    400,
+    /below the minimum|above the maximum/i,
+  );
+}
+assert.doesNotThrow(() =>
+  validateCloudWorkspaceStatePayload(ownedWorkspaceState, { ownerEmail: " Teacher@ClassLoop.test " }),
+);
+const legacyCaptureWorkspace = {
+  ...validWorkspaceState,
+  sessions: [
+    validCloudSession({
+      capture: {
+        mode: "in_person",
+        sourceLabel: "Legacy in-person class capture",
+        capturedAt: "2026-07-27T00:00:00.000Z",
+        durationSeconds: 60,
+        transcriptSource: "live_transcription",
+      },
+    }),
+  ],
+};
+assert.equal(
+  validateCloudWorkspaceStatePayload(legacyCaptureWorkspace, {
+    ownerEmail: authenticatedOwnerEmail,
+  }).sessions[0].capture.mode,
+  "in_person",
+  "Legacy cloud sessions should stay readable without restoring the removed in-person control.",
+);
+assert.doesNotThrow(() =>
+  validateCloudWorkspaceStatePayload(
+    {
+      ...validWorkspaceState,
+      sessions: [
+        validCloudSession({
+          students: [{
+            id: "revoked-student",
+            name: "Revoked Student",
+            email: "revoked@classloop.test",
+            linkedAccountEmail: "",
+            avatarColor: "#10b981",
+            aliases: [],
+          }],
+        }),
+      ],
+    },
+    { ownerEmail: authenticatedOwnerEmail },
+  ),
+);
+assert.doesNotThrow(() =>
+  validateCloudWorkspaceStatePayload(
+    {
+      ...validWorkspaceState,
+      auditLog: [validAuditLogEntry],
+    },
+    { ownerEmail: authenticatedOwnerEmail },
+  ),
+);
+assertThrowsStatus(
+  () =>
+    validateCloudWorkspaceStatePayload(
+      {
+        ...validWorkspaceState,
+        auditLog: [{
+          ...validAuditLogEntry,
+          id: "audit-foreign",
+          actorEmail: "attacker@classloop.test",
+        }],
+      },
+      { ownerEmail: authenticatedOwnerEmail },
+    ),
+  400,
+  /workspace owner/i,
+);
+[
+  { sessions: [validCloudSession({ ownerEmail: "attacker@classloop.test" })] },
+  { sessions: [validCloudSession({ ownerEmail: undefined })] },
+  { draft: validCloudSession({ id: "draft-foreign", ownerEmail: "attacker@classloop.test" }) },
+  { personalMeetings: [{ ...validPersonalMeeting, ownerEmail: "attacker@classloop.test" }] },
+  { classGroups: [{ ...validClassGroup, ownerEmail: "attacker@classloop.test" }] },
+  { rosterTemplates: [{ ...validRosterTemplate, ownerEmail: "attacker@classloop.test" }] },
+  { auditLog: [{ ...validAuditLogEntry, actorEmail: "attacker@classloop.test" }] },
+].forEach((override) => {
+  assertThrowsStatus(
+    () =>
+      validateCloudWorkspaceStatePayload(
+        { ...ownedWorkspaceState, ...override },
+        { ownerEmail: authenticatedOwnerEmail },
+      ),
+    400,
+    /workspace owner/i,
+  );
+});
+assertThrowsStatus(
+  () =>
+    validateCloudWorkspaceStatePayload({
+      ...validWorkspaceState,
+      accounts: [{
+        id: "teacher",
+        role: "teacher",
+        email: "teacher@classloop.test",
+        name: "Teacher",
+        passwordHash: "must-never-sync",
+        createdAt: "2026-07-27T00:00:00.000Z",
+      }],
+      billingProfile: { tier: "pro", status: "active", customerId: "cus_attacker" },
+    }, { ownerEmail: authenticatedOwnerEmail }),
+  400,
+  /must not include local identity or billing fields/i,
+);
+let savedWorkspaceRow = null;
+await saveWorkspaceState(
+  {
+    from: (table) => {
+      assert.equal(table, "classloop_workspace_state");
+      return {
+        upsert: async (row) => {
+          savedWorkspaceRow = row;
+          return { error: null };
+        },
+      };
+    },
+  },
+  "teacher-user-id",
+  authenticatedOwnerEmail,
+  validWorkspaceState,
+);
+assert.equal(savedWorkspaceRow.owner_id, "teacher-user-id");
+assert.deepEqual(
+  savedWorkspaceRow.state,
+  validWorkspaceState,
+  "Post-send delivery state must pass authenticated-owner validation before persistence.",
 );
 const cloudRead = cloudStateReadResponse({
   state: validWorkspaceState,
@@ -316,7 +633,11 @@ assert.equal(
   "Cloud GET must not wrap workspace data in a state property that legacy clients ignore.",
 );
 assertThrowsStatus(
-  () => validateCloudWorkspaceStatePayload({ ...validWorkspaceState, entitlementOverride: { tier: "pro" } }),
+  () =>
+    validateCloudWorkspaceStatePayload(
+      { ...validWorkspaceState, entitlementOverride: { tier: "pro" } },
+      { ownerEmail: authenticatedOwnerEmail },
+    ),
   400,
   /unsupported field/i,
 );

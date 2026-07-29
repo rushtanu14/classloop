@@ -135,6 +135,7 @@ function verifyVercelFunctionBudget(files) {
 
 function verifyDesktopAndHostedSecurity() {
   const appSource = readText("src/App.tsx");
+  const cloudSource = readText("src/cloud.ts");
   const desktop = readText("desktop/main.cjs");
   const shared = readText("server/backend/api/_shared.js");
   const validators = readText("server/backend/api/validators.js");
@@ -212,6 +213,11 @@ function verifyDesktopAndHostedSecurity() {
     ["billing prepare account validates schema", prepareAccount, /validateBillingAccountPayload/],
     ["billing prepare account is guarded legacy flow", prepareAccount, /Create and confirm your ClassLoop account before checkout/],
     ["billing prepare account returns conflict instead of creating accounts", prepareAccount, /json\(response,\s*409/],
+    [
+      "pending Supabase email confirmation is not a successful cloud session",
+      cloudSource,
+      /if \(!data\.session\)[\s\S]*?ok:\s*false[\s\S]*?code:\s*"email_confirmation_required"[\s\S]*?session:\s*null/,
+    ],
     ["billing portal has IP rate limiting", portal, /assertIpRateLimit\(request, response/],
     ["billing portal has user rate limiting", portal, /PORTAL_USER_RATE_LIMIT/],
     ["feedback metadata is sanitized", validators, /metadataValue/],
@@ -247,6 +253,37 @@ function verifyDesktopAndHostedSecurity() {
   });
   if (/supabase\.auth\.admin\.createUser|email_confirm:\s*true/.test(prepareAccount)) {
     fail("Billing prepare account must not silently create or confirm cloud accounts.");
+  }
+  const pendingConfirmationResults = Array.from(
+    cloudSource.matchAll(/\{[^{}]*code:\s*"email_confirmation_required"[^{}]*\}/g),
+    (match) => match[0],
+  );
+  if (pendingConfirmationResults.some((result) => /ok:\s*true/.test(result))) {
+    fail("Pending email confirmation must never be reported as a successful cloud auth result.");
+  }
+  const createAccountHandler = appSource.match(
+    /const handleCreateAccount = async[\s\S]*?\n\s*const handleCreateLocalAccount = async/,
+  )?.[0];
+  if (!createAccountHandler) {
+    fail("ClassLoop account-creation handler was not found.");
+  }
+  if (/signIntoCloud\(/.test(createAccountHandler)) {
+    fail("Account creation must never sign in an existing cloud account.");
+  }
+  if (!/const handleCreateLocalAccount = async[\s\S]*?multiDevicePending:\s*true/.test(appSource)) {
+    fail("Email-confirmation-pending account creation must remain visibly pending on this device.");
+  }
+  if (!/cloudVerificationPending:\s*Boolean\(options\?\.multiDevicePending\)/.test(appSource)) {
+    fail("Cloud verification-pending state must survive local logout and sign-in.");
+  }
+  if (/reset-code-card|6-digit code|onCompletePasswordReset|Math\.random\(\)[\s\S]{0,80}100000/i.test(appSource)) {
+    fail("Password recovery must use the Supabase email link and must not expose a local reset secret.");
+  }
+  if (!/const logout = async[\s\S]*?await signOutCloud\(\)/.test(appSource)) {
+    fail("Local sign-out must also clear the Supabase session.");
+  }
+  if (!/const localWriteQueueRef[\s\S]*?\.then\(\(\) => writeLocalState/.test(appSource)) {
+    fail("Whole-workspace local writes must be serialized to prevent stale data resurrection.");
   }
 }
 

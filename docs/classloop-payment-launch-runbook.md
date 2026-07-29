@@ -7,7 +7,7 @@ This runbook is for turning the existing ClassLoop Pro billing scaffold into a r
 ## Current Status
 
 - Free and Pro plan surfaces exist in the app.
-- Pro is targeted at `$3.99/month` for unlimited sessions, live capture, delivery proof, analytics, and exports.
+- Pro is targeted at `$3.99/month` for unlimited sessions, online meeting capture, delivery proof, analytics, and exports.
 - Pro unlock is server-owned. The UI should stay Free until `/api/profile` returns a Stripe-verified active Pro profile.
 - Hosted demo accounts should not be upgraded.
 - A temporary owner-only manual Pro grant exists for development and founder testing. It is not a scalable payment plan and should not be advertised.
@@ -127,9 +127,9 @@ Manual Stripe test-mode walkthrough:
 6. Return to `#/billing?billing=success`.
 7. Refresh plan.
 8. Verify the app shows `PRO / active`.
-9. Verify live capture and other Pro-only surfaces unlock.
-10. Open Manage billing and confirm Stripe portal opens.
-11. Cancel or mark the subscription past due in Stripe test mode.
+9. Verify online meeting capture and other Pro-only surfaces unlock.
+10. Confirm Plan options changes `Upgrade to Pro` to `Unsubscribe`, then click it and verify Stripe opens directly on the subscription cancellation flow for that authenticated subscription.
+11. Confirm included/manual Pro accounts show `Pro access included` instead of a broken Stripe cancellation action, then cancel or mark a real test subscription past due in Stripe test mode.
 12. Confirm the webhook updates `/api/profile` and the app removes or changes Pro access appropriately.
 13. Confirm demo teacher/student accounts cannot enter a paid upgrade.
 

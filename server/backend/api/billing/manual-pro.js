@@ -32,6 +32,15 @@ export function manualProProfileColumns(email = "") {
 
 export function applyManualProGrantToRow(row) {
   if (!row || !isManualProEmail(row.email)) return row;
+  const customerId = String(row.stripe_customer_id ?? "");
+  const subscriptionId = String(row.subscription_id ?? "");
+  const hasActiveStripeSubscription =
+    customerId &&
+    subscriptionId &&
+    !isManualProCustomerId(customerId) &&
+    !isManualProCustomerId(subscriptionId) &&
+    row.subscription_status === "active";
+  if (hasActiveStripeSubscription) return row;
   return {
     ...row,
     ...manualProProfileColumns(row.email),

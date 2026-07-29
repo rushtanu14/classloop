@@ -2,7 +2,7 @@ export type AttendanceStatus = "present" | "absent" | "late";
 
 export type SessionStatus = "draft" | "published";
 
-export type SessionCaptureMode = "transcript" | "audio" | "in_person" | "online_meeting";
+export type SessionCaptureMode = "transcript" | "online_meeting";
 
 export type SessionType =
   | "Math review"

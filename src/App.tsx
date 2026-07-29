@@ -67,6 +67,7 @@ import { partitionSessionsAndDraftByRetention, partitionSessionsByRetention } fr
 import {
   mergeOwnerCloudWorkspaceState,
   parseCloudWorkspaceResponse,
+  reassignOwnerEmailInWorkspace,
   toOwnerCloudWorkspaceState,
 } from "./cloudWorkspace";
 import {
@@ -76,15 +77,20 @@ import {
   ensureCloudAccount,
   getBackendStatus,
   getCloudEmailRedirectUrl,
+  getCloudPasswordRecoverySession,
   getCloudProfile,
   getCloudSession,
+  isValidAccountEmail,
   isManualProBillingProfile,
   isPaidPlan,
+  isStripeBillingPortalUrl,
   planCatalog,
   resendCloudConfirmation,
   requestCloudEmailChange,
+  requestCloudPasswordReset,
   signIntoCloud,
   signOutCloud,
+  updateCloudPassword,
   type BillingProfile,
   type CloudAuthResult,
   type PlanTier,
@@ -154,6 +160,7 @@ type AuthSession = {
   studentId?: string;
   demo?: boolean;
   multiDevicePending?: boolean;
+  pendingCloudEmail?: string;
 };
 
 type AuthResult = {
@@ -261,6 +268,7 @@ type Account = {
   createdAt: string;
   theme?: ThemeSettings;
   submittedProductFeedbackKeys?: string[];
+  cloudVerificationPending?: boolean;
   demo?: boolean;
 };
 
@@ -269,11 +277,6 @@ type AccountSettingsInput = {
   email: string;
   currentPassword: string;
   newPassword: string;
-};
-
-type PasswordResetRecord = {
-  code: string;
-  expiresAt: number;
 };
 
 type SharedState = {
@@ -760,7 +763,7 @@ function classLoopBuildDetails() {
 }
 
 async function ensureStripeCheckoutProfile(identity: StripeCheckoutIdentity) {
-  const profile = await getCloudProfile();
+  const profile = await getCloudProfile(identity.email);
   if (normalizeEmail(profile.email) !== normalizeEmail(identity.email)) {
     throw new Error("The billing profile does not match this ClassLoop login. Sign in again before upgrading.");
   }
@@ -1248,6 +1251,8 @@ function isLocalWorkspaceHost() {
 }
 
 function getParam(name: string): string | null {
+  const pageQueryValue = new URLSearchParams(window.location.search).get(name);
+  if (pageQueryValue !== null) return pageQueryValue;
   const hash = window.location.hash.replace(/^#\/?/, "");
   const query = hash.split("?")[1] ?? "";
   return new URLSearchParams(query).get(name);
@@ -1276,9 +1281,12 @@ function isDemoEmail(email: string) {
 }
 
 function studentAccessEmails(student: Student) {
-  return uniqueText(
-    [student.linkedAccountEmail, student.email].map((email) => normalizeEmail(email ?? "")).filter(Boolean),
-  );
+  if (Object.prototype.hasOwnProperty.call(student, "linkedAccountEmail")) {
+    const linkedEmail = normalizeEmail(student.linkedAccountEmail ?? "");
+    return linkedEmail ? [linkedEmail] : [];
+  }
+  const rosterEmail = normalizeEmail(student.email);
+  return rosterEmail ? [rosterEmail] : [];
 }
 
 function studentMatchesEmail(student: Student, email: string) {
@@ -1293,8 +1301,6 @@ function getSpeechRecognitionConstructor() {
 
 const captureModeLabels: Record<SessionCaptureMode, string> = {
   transcript: "Transcript import",
-  audio: "Live audio notes",
-  in_person: "In-person class capture",
   online_meeting: "Online meeting capture",
 };
 
@@ -1323,9 +1329,8 @@ function isTextTranscriptFile(file: File) {
   return /\.(txt|vtt|srt)$/i.test(file.name) || /^text\//i.test(file.type);
 }
 
-function liveCaptureSpeakerLabel(mode: SessionCaptureMode, segmentNumber: number) {
-  if (mode === "online_meeting") return `Unknown meeting voice ${segmentNumber}`;
-  return `Unknown in-person voice ${segmentNumber}`;
+function liveCaptureSpeakerLabel(segmentNumber: number) {
+  return `Unknown meeting voice ${segmentNumber}`;
 }
 
 function localDayKey(dateInput?: string | Date) {
@@ -1380,7 +1385,7 @@ function defaultClassroomPostBody(session: Session) {
 function studentsWithoutDeliverableEmail(session: Session) {
   return session.students
     .filter((student) => {
-      const email = normalizeEmail(student.linkedAccountEmail || student.email);
+      const email = studentAccessEmails(student)[0] ?? "";
       return !email || email.endsWith("@classloop.local");
     })
     .map((student) => student.name);
@@ -1404,7 +1409,7 @@ function markSessionEmailsSent(session: Session, result: EmailDeliveryResult): S
         status: result.failed.length ? "failed" : "sent",
         message: result.failed.length
           ? `Sent ${result.recipients.length}; failed ${result.failed.length}.`
-          : `Sent recap emails to ${result.recipients.length} students.`,
+          : `Sent recap emails to ${result.recipients.length} student${result.recipients.length === 1 ? "" : "s"}.`,
         recipientCount: result.recipients.length,
         createdAt: result.sentAt,
       }),
@@ -1487,7 +1492,7 @@ function mergeAccounts(accounts: Account[] = []) {
     const submittedProductFeedbackKeys = Array.isArray(account.submittedProductFeedbackKeys)
       ? uniqueText(account.submittedProductFeedbackKeys).slice(-500)
       : [];
-    merged.set(`${account.role}:${normalizeEmail(account.email)}`, {
+    merged.set(normalizeEmail(account.email), {
       ...account,
       email: normalizeEmail(account.email),
       submittedProductFeedbackKeys,
@@ -2077,7 +2082,18 @@ function normalizeSharedState(data: Partial<SharedState>): SharedState {
     demoLoaded: Boolean(data.demoLoaded),
     classGroups: Array.isArray(data.classGroups) ? data.classGroups : [],
     rosterTemplates: Array.isArray(data.rosterTemplates) ? data.rosterTemplates : [],
-    privacySettings: { ...defaultPrivacySettings, ...(data.privacySettings ?? {}) },
+    privacySettings: {
+      ...defaultPrivacySettings,
+      ...(data.privacySettings ?? {}),
+      retentionDays: Math.min(
+        2555,
+        Math.max(
+          30,
+          Math.round(Number(data.privacySettings?.retentionDays) || defaultPrivacySettings.retentionDays),
+        ),
+      ),
+      noTrainingOnStudentData: true,
+    },
     auditLog: Array.isArray(data.auditLog) ? data.auditLog : [],
     billingProfile: normalizeBillingProfile(data.billingProfile),
   });
@@ -2351,7 +2367,6 @@ function App() {
   const [workspaceNotice, setWorkspaceNotice] = useState<WorkspaceNotice | null>(null);
   const [localStorageTarget, setLocalStorageTarget] = useState<LocalStateReadResult["storage"]>("browser");
   const [templateLinks, setTemplateLinks] = useState<TemplateLinkManifest>({});
-  const [passwordResetCodes, setPasswordResetCodes] = useState<Record<string, PasswordResetRecord>>({});
   const [celebrationMoment, setCelebrationMoment] = useState<CelebrationMoment | null>(null);
   const demoSessionRef = useRef(false);
   const localAuthSecretRef = useRef<LocalAuthSecret | null>(null);
@@ -2368,6 +2383,47 @@ function App() {
       auditLog: [],
       billingProfile: defaultBillingProfile,
     })),
+  );
+  const pendingSharedJsonRef = useRef(lastSharedJsonRef.current);
+  const localWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const setPersistenceBaseline = useCallback((state: Parameters<typeof persistableSharedState>[0]) => {
+    const baselineJson = sharedStateJson(persistableSharedState(state));
+    lastSharedJsonRef.current = baselineJson;
+    pendingSharedJsonRef.current = baselineJson;
+  }, []);
+
+  const enqueueLocalStateWrite = useCallback(
+    (
+      state: Parameters<typeof persistableSharedState>[0],
+      storageTarget: LocalStateReadResult["storage"] = localStorageTarget,
+    ) => {
+      const persistableState = persistableSharedState(state);
+      const nextJson = sharedStateJson(persistableState);
+      if (nextJson === pendingSharedJsonRef.current) return localWriteQueueRef.current;
+
+      pendingSharedJsonRef.current = nextJson;
+      const writeAttempt = localWriteQueueRef.current
+        .catch(() => undefined)
+        .then(() => writeLocalState(persistableState, storageTarget))
+        .then(() => {
+          lastSharedJsonRef.current = nextJson;
+          setSyncStatus("local");
+          setWorkspaceNotice((notice) =>
+            notice === localWriteFailureNotice || notice === desktopWriteFailureNotice ? null : notice,
+          );
+        })
+        .catch((error) => {
+          if (pendingSharedJsonRef.current === nextJson) {
+            pendingSharedJsonRef.current = lastSharedJsonRef.current;
+          }
+          setWorkspaceNotice(storageTarget === "desktop" ? desktopWriteFailureNotice : localWriteFailureNotice);
+          throw error;
+        });
+      localWriteQueueRef.current = writeAttempt.catch(() => undefined);
+      return writeAttempt;
+    },
+    [localStorageTarget],
   );
 
   useEffect(() => {
@@ -2398,7 +2454,6 @@ function App() {
     setBootPhase("local");
     setWorkspaceNotice(null);
     if (publicDemoOnly) {
-      clearClassLoopLocalPersistence();
       setAccounts(demoAccounts);
       setSessions([]);
       setPersonalMeetings([]);
@@ -2411,7 +2466,7 @@ function App() {
       setAuditLog([]);
       setBillingProfile(defaultBillingProfile);
       setLocalStorageTarget("browser");
-      lastSharedJsonRef.current = sharedStateJson(persistableSharedState({
+      setPersistenceBaseline({
         accounts: demoAccounts,
         sessions: [],
         personalMeetings: [],
@@ -2422,7 +2477,7 @@ function App() {
         privacySettings: defaultPrivacySettings,
         auditLog: [],
         billingProfile: defaultBillingProfile,
-      }));
+      });
       setSyncStatus("local");
       setBootPhase("ready");
       setSharedReady(true);
@@ -2446,7 +2501,7 @@ function App() {
         setPrivacySettings(localState.privacySettings);
         setAuditLog(localState.auditLog);
         setBillingProfile(defaultBillingProfile);
-        lastSharedJsonRef.current = sharedStateJson(persistableSharedState(localState));
+        setPersistenceBaseline(localState);
         setSyncStatus("local");
         setWorkspaceNotice(
           localResult.failedKeys.length
@@ -2470,7 +2525,7 @@ function App() {
         setAuditLog([]);
         setBillingProfile(defaultBillingProfile);
         setLocalStorageTarget("browser");
-        lastSharedJsonRef.current = sharedStateJson(persistableSharedState({
+        setPersistenceBaseline({
           accounts: demoAccounts,
           sessions: [],
           personalMeetings: [],
@@ -2481,7 +2536,7 @@ function App() {
           privacySettings: defaultPrivacySettings,
           auditLog: [],
           billingProfile: defaultBillingProfile,
-        }));
+        });
         setSyncStatus("local");
         setWorkspaceNotice(localReadFailureNotice);
         setBootPhase("ready");
@@ -2493,7 +2548,7 @@ function App() {
     return () => {
       active = false;
     };
-  }, [publicDemoOnly]);
+  }, [publicDemoOnly, setPersistenceBaseline]);
 
   useEffect(() => {
     if (publicDemoOnly || auth?.demo) return;
@@ -2503,7 +2558,7 @@ function App() {
   useEffect(() => {
     if (!sharedReady) return;
     if (publicDemoOnly || auth?.demo || demoSessionRef.current) return;
-    const persistableState = persistableSharedState({
+    void enqueueLocalStateWrite({
       accounts,
       sessions,
       personalMeetings,
@@ -2514,20 +2569,8 @@ function App() {
       privacySettings,
       auditLog,
       billingProfile,
-    });
-    const nextJson = sharedStateJson(persistableState);
-    if (nextJson === lastSharedJsonRef.current) return;
-
-    void writeLocalState(persistableState, localStorageTarget)
-      .then(() => {
-        lastSharedJsonRef.current = nextJson;
-        setSyncStatus("local");
-        setWorkspaceNotice((notice) => (notice === localWriteFailureNotice || notice === desktopWriteFailureNotice ? null : notice));
-      })
-      .catch(() => {
-        setWorkspaceNotice(localStorageTarget === "desktop" ? desktopWriteFailureNotice : localWriteFailureNotice);
-      });
-  }, [accounts, auditLog, auth?.demo, billingProfile, classGroups, demoLoaded, draft, localStorageTarget, personalMeetings, privacySettings, publicDemoOnly, rosterTemplates, sessions, sharedReady]);
+    }).catch(() => undefined);
+  }, [accounts, auditLog, auth?.demo, billingProfile, classGroups, demoLoaded, draft, enqueueLocalStateWrite, personalMeetings, privacySettings, publicDemoOnly, rosterTemplates, sessions, sharedReady]);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -2561,11 +2604,11 @@ function App() {
     let active = true;
     getCloudSession()
       .then((session) => {
-        if (!session) {
+        if (!session || normalizeEmail(session.user.email ?? "") !== normalizeEmail(auth.email)) {
           if (active) setBillingProfile(defaultBillingProfile);
           return null;
         }
-        return getCloudProfile();
+        return getCloudProfile(auth.email);
       })
       .then((profile) => {
         if (active && profile) {
@@ -2654,11 +2697,38 @@ function App() {
     billingProfile: defaultBillingProfile,
   });
 
-  const applyCloudState = (state: Partial<CloudWorkspaceState>) => {
+  const syncOwnerStateToCloud = async (
+    nextState: SharedState,
+    ownerEmail: string,
+    failureTitle: string,
+  ) => {
+    const cloudSession = await getCloudSession().catch(() => null);
+    if (normalizeEmail(cloudSession?.user.email ?? "") !== normalizeEmail(ownerEmail)) return;
+    try {
+      await cloudRequest(
+        "/api/cloud-state",
+        {
+          method: "PUT",
+          body: JSON.stringify(toOwnerCloudWorkspaceState(nextState, ownerEmail)),
+        },
+        ownerEmail,
+      );
+    } catch {
+      setWorkspaceNotice({
+        severity: "warning",
+        title: failureTitle,
+        message:
+          "ClassLoop could not update the cloud copy. Reconnect cloud sync and upload this device before using another device.",
+      });
+    }
+  };
+
+  const applyCloudState = async (state: Partial<CloudWorkspaceState>) => {
     if (!auth) return;
     const normalized = normalizeSharedState(
       mergeOwnerCloudWorkspaceState(currentState(), state, auth.email),
     );
+    await enqueueLocalStateWrite(normalized);
     setSessions(normalized.sessions);
     setPersonalMeetings(normalized.personalMeetings);
     setDraft(normalized.draft);
@@ -2667,7 +2737,7 @@ function App() {
     setRosterTemplates(normalized.rosterTemplates);
     setPrivacySettings(normalized.privacySettings);
     setAuditLog(normalized.auditLog);
-    lastSharedJsonRef.current = sharedStateJson(normalized);
+    setPersistenceBaseline(normalized);
   };
 
   const handleThemeChange: React.Dispatch<React.SetStateAction<ThemeSettings>> = (value) => {
@@ -2690,7 +2760,12 @@ function App() {
   };
 
   const studentPortalSessions = useMemo(
-    () => (auth?.role === "student" ? studentSessionsFor(sortedSessions, auth.email) : teacherSessions),
+    () =>
+      auth?.role === "student"
+        ? auth.multiDevicePending
+          ? []
+          : studentSessionsFor(sortedSessions, auth.email)
+        : teacherSessions,
     [auth, sortedSessions, teacherSessions],
   );
   const individualMeetings = useMemo(
@@ -2717,15 +2792,20 @@ function App() {
     (visibleDraft && localDayKey(visibleDraft.date) === todayKey ? 1 : 0);
   const freeLimitReached = !hasPaidAccess && freeSessionsToday >= 1;
   const activeAccount = auth ? accounts.find((account) => account.id === auth.accountId) : undefined;
+  const activeAuditLog = auth
+    ? auditLog.filter((entry) => normalizeEmail(entry.actorEmail) === normalizeEmail(auth.email))
+    : [];
   const triggerCelebration = (title: string, detail: string) => {
     setCelebrationMoment({ id: Date.now(), title, detail });
   };
 
   const updatePersonalMeetingById = (meetingId: string, updater: (meeting: PersonalMeeting) => PersonalMeeting) => {
+    if (!auth || auth.role !== "individual") return;
+    const ownerEmail = normalizeEmail(auth.email);
     setPersonalMeetings((current) =>
       current
         .map((meeting) =>
-          meeting.id === meetingId
+          meeting.id === meetingId && normalizeEmail(meeting.ownerEmail) === ownerEmail
             ? {
                 ...updater(meeting),
                 updatedAt: new Date().toISOString(),
@@ -2758,28 +2838,106 @@ function App() {
   };
 
   const deletePersonalMeeting = (meetingId: string) => {
-    const meeting = personalMeetings.find((item) => item.id === meetingId);
+    if (!auth || auth.role !== "individual") return;
+    const ownerEmail = normalizeEmail(auth.email);
+    const meeting = personalMeetings.find(
+      (item) => item.id === meetingId && normalizeEmail(item.ownerEmail) === ownerEmail,
+    );
     if (!meeting) return;
     if (!window.confirm(`Delete "${meeting.title}"? This removes the personal recap and tasks from this workspace.`)) return;
-    setPersonalMeetings((current) => current.filter((item) => item.id !== meetingId));
+    setPersonalMeetings((current) =>
+      current.filter(
+        (item) => !(item.id === meetingId && normalizeEmail(item.ownerEmail) === ownerEmail),
+      ),
+    );
     appendAudit("delete_personal_meeting", `Deleted personal meeting ${meeting.title}.`);
   };
 
   const updateSession = (session: Session) => {
+    if (!auth || auth.role !== "teacher" || sessionOwnerEmail(session) !== normalizeEmail(auth.email)) return;
+    const ownerEmail = normalizeEmail(auth.email);
     setSessions((current) => {
-      const existing = current.some((item) => item.id === session.id);
-      const next = existing ? current.map((item) => (item.id === session.id ? session : item)) : [session, ...current];
+      const existing = current.some(
+        (item) => item.id === session.id && sessionOwnerEmail(item) === ownerEmail,
+      );
+      const next = existing
+        ? current.map((item) =>
+            item.id === session.id && sessionOwnerEmail(item) === ownerEmail ? session : item,
+          )
+        : [session, ...current];
       return [...next].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     });
   };
 
   const updateSessionById = (sessionId: string, updater: (session: Session) => Session) => {
+    if (!auth || auth.role !== "teacher") return;
+    const ownerEmail = normalizeEmail(auth.email);
     setSessions((current) =>
       current
-        .map((session) => (session.id === sessionId ? updater(session) : session))
+        .map((session) =>
+          session.id === sessionId && sessionOwnerEmail(session) === ownerEmail
+            ? updater(session)
+            : session,
+        )
         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
     );
-    setDraft((current) => (current?.id === sessionId ? updater(current) : current));
+    setDraft((current) =>
+      current?.id === sessionId && sessionOwnerEmail(current) === ownerEmail
+        ? updater(current)
+        : current,
+    );
+  };
+
+  const deleteTeacherSession = async (session: Session) => {
+    if (!auth || auth.role !== "teacher") return;
+    const ownerEmail = normalizeEmail(auth.email);
+    if (sessionOwnerEmail(session) !== ownerEmail) return;
+    if (
+      !window.confirm(
+        `Delete "${session.title}"? This removes the session report and student follow-ups from this workspace.`,
+      )
+    ) {
+      return;
+    }
+
+    const nextSessions = sessions.filter(
+      (item) => !(item.id === session.id && sessionOwnerEmail(item) === ownerEmail),
+    );
+    const nextDraft =
+      draft?.id === session.id && sessionOwnerEmail(draft) === ownerEmail ? null : draft;
+    const nextAuditLog =
+      privacySettings.auditLogEnabled && !auth.demo
+        ? [
+            {
+              id: `audit-${Date.now().toString(36)}-${auditLog.length}`,
+              actorEmail: auth.email,
+              actorRole: auth.role,
+              action: "delete_session",
+              detail: `Deleted session ${session.title}.`,
+              createdAt: new Date().toISOString(),
+            },
+            ...auditLog,
+          ].slice(0, 250)
+        : auditLog;
+    const nextState: SharedState = {
+      ...currentState(),
+      sessions: nextSessions,
+      draft: nextDraft,
+      auditLog: nextAuditLog,
+    };
+
+    setSessions(nextSessions);
+    setDraft(nextDraft);
+    setAuditLog(nextAuditLog);
+    try {
+      await enqueueLocalStateWrite(nextState);
+    } catch {
+      setWorkspaceNotice(
+        localStorageTarget === "desktop" ? desktopWriteFailureNotice : localWriteFailureNotice,
+      );
+    }
+    navigate("dashboard");
+    void syncOwnerStateToCloud(nextState, ownerEmail, "Session deleted on this device");
   };
 
   const saveRosterTemplateFromSession = (session: Session, name: string) => {
@@ -2830,12 +2988,15 @@ function App() {
   };
 
   const updateRosterTemplate = (templateId: string, changes: Partial<RosterTemplate>) => {
+    if (!auth || auth.role !== "teacher") return;
+    const ownerEmail = normalizeEmail(auth.email);
     setRosterTemplates((current) =>
       current.map((template) =>
-        template.id === templateId
+        template.id === templateId && normalizeEmail(template.ownerEmail) === ownerEmail
           ? {
               ...template,
               ...changes,
+              ownerEmail: template.ownerEmail,
               updatedAt: new Date().toISOString(),
             }
           : template,
@@ -2844,7 +3005,19 @@ function App() {
   };
 
   const deleteRosterTemplate = (templateId: string) => {
-    setRosterTemplates((current) => current.filter((template) => template.id !== templateId));
+    if (!auth || auth.role !== "teacher") return;
+    const ownerEmail = normalizeEmail(auth.email);
+    const template = rosterTemplates.find(
+      (item) =>
+        item.id === templateId && normalizeEmail(item.ownerEmail) === ownerEmail,
+    );
+    if (!template || !window.confirm(`Delete saved roster "${template.name}"?`)) return;
+    setRosterTemplates((current) =>
+      current.filter(
+        (template) =>
+          !(template.id === templateId && normalizeEmail(template.ownerEmail) === ownerEmail),
+      ),
+    );
   };
 
   const createClassGroupFromTemplate = (template: RosterTemplate) => {
@@ -2865,12 +3038,15 @@ function App() {
   };
 
   const updateClassGroup = (groupId: string, changes: Partial<ClassGroup>) => {
+    if (!auth || auth.role !== "teacher") return;
+    const ownerEmail = normalizeEmail(auth.email);
     setClassGroups((current) =>
       current.map((group) =>
-        group.id === groupId
+        group.id === groupId && normalizeEmail(group.ownerEmail) === ownerEmail
           ? {
               ...group,
               ...changes,
+              ownerEmail: group.ownerEmail,
               updatedAt: new Date().toISOString(),
             }
           : group,
@@ -2879,7 +3055,19 @@ function App() {
   };
 
   const deleteClassGroup = (groupId: string) => {
-    setClassGroups((current) => current.filter((group) => group.id !== groupId));
+    if (!auth || auth.role !== "teacher") return;
+    const ownerEmail = normalizeEmail(auth.email);
+    const group = classGroups.find(
+      (item) => item.id === groupId && normalizeEmail(item.ownerEmail) === ownerEmail,
+    );
+    if (!group || !window.confirm(`Delete class "${group.name}"? Sessions already published from it will remain.`)) {
+      return;
+    }
+    setClassGroups((current) =>
+      current.filter(
+        (group) => !(group.id === groupId && normalizeEmail(group.ownerEmail) === ownerEmail),
+      ),
+    );
   };
 
   const resetDemoWorkspaceAfterUse = () => {
@@ -2950,9 +3138,18 @@ function App() {
   };
 
   const markFollowUpComplete = (sessionId: string, studentId: string, note = "", attachmentUrl = "") => {
+    if (!auth || auth.role === "individual") return;
+    const ownerEmail = normalizeEmail(auth.email);
     setSessions((current) =>
       current.map((session) =>
-        session.id === sessionId
+        session.id === sessionId &&
+        (auth.role === "teacher"
+          ? sessionOwnerEmail(session) === ownerEmail
+          : session.students.some(
+              (student) =>
+                student.id === studentId &&
+                studentMatchesEmail(student, ownerEmail),
+            ))
           ? {
               ...setStudentSubmission(session, studentId, "submitted", note || "Marked complete from the student portal.", attachmentUrl),
               actionItems: session.actionItems.map((item) =>
@@ -3011,7 +3208,9 @@ function App() {
     password: string,
     source: string,
   ): Promise<boolean> => {
-    if (!shouldAutoProvisionCloudAccount(account)) return false;
+    if (!shouldAutoProvisionCloudAccount(account)) {
+      return Boolean(account.cloudVerificationPending);
+    }
     const actor: AuthSession = {
       accountId: account.id,
       role: account.role,
@@ -3029,13 +3228,21 @@ function App() {
       return true;
     }
     if (result.ok) {
+      setAccounts((current) =>
+        current.map((item) =>
+          item.id === account.id
+            ? { ...item, cloudVerificationPending: false }
+            : item,
+        ),
+      );
       appendAudit("cloud_account_ready", "Cloud account prepared for this local login.", actor);
       return false;
     }
     if (result.code !== "not_configured") {
       appendAudit("cloud_account_pending", result.message, actor);
+      return true;
     }
-    return false;
+    return Boolean(account.cloudVerificationPending);
   };
 
   const signInAccount = async (account: Account, password?: string): Promise<AuthResult> => {
@@ -3050,7 +3257,7 @@ function App() {
       const demoSession = account.demo ? ensureDemoSession() : undefined;
       const cloudConfirmationPending = password
         ? await prepareCloudAccountForLocalLogin(account, password, "classloop_local_signin")
-        : false;
+        : Boolean(account.cloudVerificationPending);
 
       setAuthLoading(true);
       if (account.role === "teacher") {
@@ -3159,6 +3366,7 @@ function App() {
       passwordHash: await hashSecret(password),
       createdAt: new Date().toISOString(),
       theme: defaultTheme,
+      cloudVerificationPending: Boolean(options?.multiDevicePending),
     };
     setAccounts((current) => mergeAccounts([...current, account]));
     localAuthSecretRef.current = {
@@ -3193,7 +3401,7 @@ function App() {
     const name = existingAccount?.name ?? nameFromCloudSession(session, email);
     const passwordHash = await hashSecret(password);
     const account: Account = existingAccount
-      ? { ...existingAccount, role, name, passwordHash }
+      ? { ...existingAccount, role, name, passwordHash, cloudVerificationPending: false }
       : {
           id: makeAccountId(role),
           role,
@@ -3202,6 +3410,7 @@ function App() {
           passwordHash,
           createdAt: new Date().toISOString(),
           theme: defaultTheme,
+          cloudVerificationPending: false,
         };
     setAccounts((current) =>
       mergeAccounts([
@@ -3227,9 +3436,17 @@ function App() {
   const handleLogin = async (role: AuthRole, email: string, password: string): Promise<AuthResult> => {
     const normalizedEmail = normalizeEmail(email);
     const passwordHash = await hashSecret(password);
-    const account = accounts.find(
-      (item) => item.role === role && normalizeEmail(item.email) === normalizedEmail,
-    );
+    const account = accounts.find((item) => normalizeEmail(item.email) === normalizedEmail);
+
+    if (account && account.role !== role) {
+      return {
+        ok: false,
+        message: `That email belongs to a ClassLoop ${account.role} account. Choose ${account.role} and sign in.`,
+        nextMode: "signin",
+        role: account.role,
+        email: normalizedEmail,
+      };
+    }
 
     if (!account) {
       if (getBackendStatus().supabaseConfigured) {
@@ -3292,22 +3509,11 @@ function App() {
     const normalizedEmail = normalizeEmail(email);
     const trimmedName = name.trim();
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    if (!isValidAccountEmail(normalizedEmail)) {
       return { ok: false, message: "Enter a valid email address." };
     }
     const existingAccount = accounts.find((account) => normalizeEmail(account.email) === normalizedEmail);
     if (existingAccount) {
-      if (existingAccount.passwordHash === (await hashSecret(password))) {
-        if (!existingAccount.demo) {
-          localAuthSecretRef.current = {
-            accountId: existingAccount.id,
-            role: existingAccount.role,
-            email: normalizedEmail,
-            password,
-          };
-        }
-        return signInAccount(existingAccount, password);
-      }
       return {
         ok: false,
         message: "That email already has a ClassLoop account. Sign in instead or reset the password.",
@@ -3338,39 +3544,17 @@ function App() {
           };
         }
         if (!cloudResult.ok) {
-          if (cloudResult.code === "account_exists" || /already|registered|exists/i.test(cloudResult.message)) {
-            const signInResult = await signIntoCloud(normalizedEmail, password);
-            if (signInResult.code === "email_confirmation_required") {
-              return {
-                ok: false,
-                code: "email_confirmation_required",
-                message: signInResult.message,
-                nextMode: "signin",
-                role,
-                email: normalizedEmail,
-                redirectUrl: signInResult.redirectUrl,
-              };
-            }
-            if (signInResult.ok && signInResult.session) {
-              return signInCloudBackedAccount(role, normalizedEmail, password, signInResult.session);
-            }
-            return {
-              ok: false,
-              message: "That email already has a ClassLoop cloud account. Sign in instead or reset the password.",
-              nextMode: "signin",
-              role,
-              email: normalizedEmail,
-            };
-          }
           if (isLocalWorkspaceHost()) {
-            return finishLocalAccountCreation(role, trimmedName, normalizedEmail, password);
+            return finishLocalAccountCreation(role, trimmedName, normalizedEmail, password, {
+              startWalkthrough: false,
+              multiDevicePending: true,
+            });
           }
           return { ok: false, message: cloudResult.message };
         }
     }
     return finishLocalAccountCreation(role, trimmedName, normalizedEmail, password, {
       startWalkthrough: false,
-      multiDevicePending: true,
     });
   };
 
@@ -3382,7 +3566,7 @@ function App() {
     const normalizedEmail = normalizeEmail(email);
     const trimmedName = name.trim();
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    if (!isValidAccountEmail(normalizedEmail)) {
       return { ok: false, message: "Enter a valid email address." };
     }
     if (!trimmedName) return { ok: false, message: "Enter a name for the account." };
@@ -3390,17 +3574,6 @@ function App() {
 
     const existingAccount = accounts.find((account) => normalizeEmail(account.email) === normalizedEmail);
     if (existingAccount) {
-      if (existingAccount.passwordHash === (await hashSecret(password))) {
-        if (!existingAccount.demo) {
-          localAuthSecretRef.current = {
-            accountId: existingAccount.id,
-            role: existingAccount.role,
-            email: normalizedEmail,
-            password,
-          };
-        }
-        return signInAccount(existingAccount, password);
-      }
       return {
         ok: false,
         message: "That email already has a ClassLoop account. Sign in instead or reset the password.",
@@ -3430,7 +3603,7 @@ function App() {
     const nextName = settings.name.trim();
     const nextEmail = normalizeEmail(settings.email);
     if (!nextName) return { ok: false, message: "Enter a name for the account." };
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+    if (!isValidAccountEmail(nextEmail)) {
       return { ok: false, message: "Enter a valid email address." };
     }
     if (
@@ -3463,6 +3636,7 @@ function App() {
     }
 
     let emailChangeMessage = "";
+    let pendingCloudEmail = "";
     if (emailChanged && !account.demo) {
       if (getBackendStatus().supabaseConfigured) {
         const result = await requestCloudEmailChange(normalizeEmail(account.email), settings.currentPassword, nextEmail);
@@ -3470,12 +3644,27 @@ function App() {
           return { ok: false, message: result.message };
         }
         emailChangeMessage = result.message || `Confirmation sent to ${nextEmail}. Confirm it before signing in with that address.`;
+        pendingCloudEmail = nextEmail;
       } else {
         emailChangeMessage = "Cloud email confirmation is unavailable in this build, so only this device was updated.";
       }
     }
 
     const nextAccount = { ...account, name: nextName, email: emailChanged && getBackendStatus().supabaseConfigured ? account.email : nextEmail, passwordHash };
+    const appliedEmailChanged = normalizeEmail(nextAccount.email) !== normalizeEmail(account.email);
+    if (appliedEmailChanged) {
+      const migratedWorkspace = reassignOwnerEmailInWorkspace(
+        currentState(),
+        normalizeEmail(account.email),
+        normalizeEmail(nextAccount.email),
+      );
+      setSessions(migratedWorkspace.sessions);
+      setPersonalMeetings(migratedWorkspace.personalMeetings);
+      setDraft(migratedWorkspace.draft);
+      setClassGroups(migratedWorkspace.classGroups);
+      setRosterTemplates(migratedWorkspace.rosterTemplates);
+      setAuditLog(migratedWorkspace.auditLog);
+    }
     setAccounts((current) => current.map((item) => (item.id === account.id ? nextAccount : item)));
     if (localAuthSecretRef.current?.accountId === account.id) {
       localAuthSecretRef.current = {
@@ -3491,90 +3680,42 @@ function App() {
             ...current,
             name: nextName,
             email: normalizeEmail(nextAccount.email),
-            multiDevicePending: current.multiDevicePending || Boolean(emailChangeMessage),
+            multiDevicePending: current.multiDevicePending || Boolean(pendingCloudEmail),
+            pendingCloudEmail: pendingCloudEmail || current.pendingCloudEmail,
           }
         : current,
     );
     return { ok: true, message: emailChangeMessage || "Settings saved." };
   };
 
-  const handleRequestPasswordReset = async (role: AuthRole, email: string) => {
+  const handleRequestPasswordReset = async (_role: AuthRole, email: string) => {
     const normalizedEmail = normalizeEmail(email);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      return { ok: false, message: "Enter the email for the account you want to reset." };
+    if (!isValidAccountEmail(normalizedEmail)) {
+      return { ok: false, message: "Enter a valid email for the account you want to recover." };
     }
-
-    const account = accounts.find((item) => item.role === role && normalizeEmail(item.email) === normalizedEmail);
-    if (!account) {
-      return { ok: true, message: "If an account exists for that email, a reset code can be sent." };
-    }
-
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const key = `${role}:${normalizedEmail}`;
-    setPasswordResetCodes((current) => ({
-      ...current,
-      [key]: {
-        code,
-        expiresAt: Date.now() + 15 * 60 * 1000,
-      },
-    }));
-    return {
-      ok: true,
-      message: "Reset code ready.",
-      code,
-      email: normalizedEmail,
-      name: account.name,
-    };
+    return requestCloudPasswordReset(normalizedEmail);
   };
 
-  const handleCompletePasswordReset = async (
-    role: AuthRole,
-    email: string,
-    code: string,
-    newPassword: string,
-  ) => {
-    const normalizedEmail = normalizeEmail(email);
-    const key = `${role}:${normalizedEmail}`;
-    const resetRecord = passwordResetCodes[key];
-    const account = accounts.find((item) => item.role === role && normalizeEmail(item.email) === normalizedEmail);
-
-    if (!account || !resetRecord || resetRecord.expiresAt < Date.now() || resetRecord.code !== code.trim()) {
-      return { ok: false, message: "Reset code is incorrect or expired." };
-    }
-    if (newPassword.length < 8) return { ok: false, message: "Use at least 8 characters for the new password." };
-    if (account.demo) return { ok: false, message: "Sample account passwords stay fixed. Create your own account to change it." };
-
-    const passwordHash = await hashSecret(newPassword);
-    setAccounts((current) =>
-      current.map((item) =>
-        item.id === account.id
-          ? {
-              ...item,
-              passwordHash,
-            }
-          : item,
-      ),
-    );
-    setPasswordResetCodes((current) => {
-      const next = { ...current };
-      delete next[key];
-      return next;
-    });
-    return { ok: true, message: "Password reset. You can sign in now." };
-  };
-
-  const logout = () => {
+  const logout = async () => {
     const wasDemo = Boolean(auth?.demo);
     appendAudit("logout", "Signed out.");
-    if (wasDemo) resetDemoWorkspaceAfterUse();
-    demoSessionRef.current = false;
-    localAuthSecretRef.current = null;
-    setAuth(null);
-    setTheme(defaultTheme);
-    navigate("dashboard");
+    setAuthLoading(true);
+    try {
+      await signOutCloud();
+    } catch {
+      // Supabase may be unreachable, but its local session is still cleared by the client.
+    } finally {
+      if (wasDemo) resetDemoWorkspaceAfterUse();
+      demoSessionRef.current = false;
+      localAuthSecretRef.current = null;
+      setAuth(null);
+      setTheme(defaultTheme);
+      navigate("dashboard");
+      setAuthLoading(false);
+    }
   };
 
-  if (landingMode && !auth) {
+  if (landingMode && !auth && getParam("cloud") !== "recovery") {
     return (
       <LandingPage
         page={landingPage}
@@ -3607,6 +3748,10 @@ function App() {
     );
   }
 
+  if (!auth && getParam("cloud") === "recovery" && !publicDemoOnly) {
+    return <CloudPasswordRecoveryPage />;
+  }
+
   if (!auth) {
     return (
       <LoginPage
@@ -3614,7 +3759,6 @@ function App() {
         onCreateAccount={handleCreateAccount}
         onCreateLocalAccount={handleCreateLocalAccount}
         onRequestPasswordReset={handleRequestPasswordReset}
-        onCompletePasswordReset={handleCompletePasswordReset}
         demoOnly={publicDemoOnly}
         workspaceNotice={workspaceNotice}
       />
@@ -3642,7 +3786,8 @@ function App() {
         {workspaceNotice && <WorkspaceRecoveryNotice notice={workspaceNotice} />}
         {auth.multiDevicePending && (
           <p className="settings-message warning" role="status">
-            Local workspace is available. Confirm {auth.email} before cloud sync or Pro checkout can use this account.
+            Check your email inbox for the ClassLoop confirmation link sent to {auth.pendingCloudEmail ?? auth.email}. Click it to connect cloud
+            sync; you can keep using this local workspace now.
           </p>
         )}
         {effectiveRoute === "dashboard" && <TeacherDashboard sessions={teacherSessions} draft={visibleDraft} billingProfile={billingProfile} />}
@@ -3739,6 +3884,7 @@ function App() {
         {effectiveRoute === "publish-preview" && (
           <PublishPreview
             draft={visibleDraft}
+            ownerEmail={auth.email}
             selectedStudentId={selectedStudentId}
             setSelectedStudentId={setSelectedStudentId}
             setDraft={setDraft}
@@ -3753,15 +3899,7 @@ function App() {
               setDraft({ ...session, ownerEmail: auth.email, status: "draft" });
               navigate("review");
             }}
-            deleteSession={(session) => {
-              if (!window.confirm(`Delete "${session.title}"? This removes the session report and student follow-ups from this workspace.`)) {
-                return;
-              }
-              setSessions((current) => current.filter((item) => item.id !== session.id));
-              setDraft((current) => (current?.id === session.id ? null : current));
-              appendAudit("delete_session", `Deleted session ${session.title}.`);
-              navigate("dashboard");
-            }}
+            deleteSession={deleteTeacherSession}
           />
         )}
         {effectiveRoute === "student" && (
@@ -3815,12 +3953,12 @@ function App() {
           <PrivacyControlsPage
             auth={auth}
             sessions={teacherSessions}
-            accounts={accounts}
+            account={activeAccount}
             privacySettings={privacySettings}
             setPrivacySettings={setPrivacySettings}
-            auditLog={auditLog}
+            auditLog={activeAuditLog}
             appendAudit={appendAudit}
-            purgeExpiredSessions={() => {
+            purgeExpiredSessions={async () => {
               const result = partitionSessionsAndDraftByRetention(
                 teacherSessions,
                 visibleDraft,
@@ -3828,15 +3966,62 @@ function App() {
               );
               if (!result.expired.length) return 0;
               const expiredIds = new Set(result.expired.map((session) => session.id));
-              setSessions((current) => current.filter((session) => !expiredIds.has(session.id)));
-              setDraft((current) => (current && expiredIds.has(current.id) ? null : current));
+              const ownerEmail = normalizeEmail(auth.email);
+              const nextSessions = sessions.filter(
+                (session) =>
+                  !(
+                    sessionOwnerEmail(session) === ownerEmail &&
+                    expiredIds.has(session.id)
+                  ),
+              );
+              const nextDraft =
+                draft &&
+                sessionOwnerEmail(draft) === ownerEmail &&
+                expiredIds.has(draft.id)
+                  ? null
+                  : draft;
+              const nextState = {
+                ...currentState(),
+                sessions: nextSessions,
+                draft: nextDraft,
+              };
+              await enqueueLocalStateWrite(nextState);
+              setSessions(nextSessions);
+              setDraft(nextDraft);
+              void syncOwnerStateToCloud(nextState, ownerEmail, "Retention applied on this device");
               return result.expired.length;
             }}
-            clearClassData={() => {
-              const teacherSessionIds = new Set(teacherSessions.map((session) => session.id));
-              setSessions((current) => current.filter((session) => !teacherSessionIds.has(session.id)));
-              setDraft(null);
-              setDemoLoaded(false);
+            clearClassData={async () => {
+              const ownerEmail = normalizeEmail(auth.email);
+              const nextSessions = sessions.filter(
+                (session) => sessionOwnerEmail(session) !== ownerEmail,
+              );
+              const nextDraft =
+                draft && sessionOwnerEmail(draft) === ownerEmail ? null : draft;
+              const nextClassGroups = classGroups.filter(
+                (group) => normalizeEmail(group.ownerEmail) !== ownerEmail,
+              );
+              const nextRosterTemplates = rosterTemplates.filter(
+                (template) => normalizeEmail(template.ownerEmail) !== ownerEmail,
+              );
+              const nextAuditLog = auditLog.filter(
+                (entry) => normalizeEmail(entry.actorEmail) !== ownerEmail,
+              );
+              const nextState = {
+                ...currentState(),
+                sessions: nextSessions,
+                draft: nextDraft,
+                classGroups: nextClassGroups,
+                rosterTemplates: nextRosterTemplates,
+                auditLog: nextAuditLog,
+              };
+              await enqueueLocalStateWrite(nextState);
+              setSessions(nextSessions);
+              setDraft(nextDraft);
+              setClassGroups(nextClassGroups);
+              setRosterTemplates(nextRosterTemplates);
+              setAuditLog(nextAuditLog);
+              void syncOwnerStateToCloud(nextState, ownerEmail, "Class data deleted on this device");
             }}
           />
         )}
@@ -3869,6 +4054,157 @@ function App() {
         />
       )}
     </div>
+  );
+}
+
+function CloudPasswordRecoveryPage() {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [sessionReady, setSessionReady] = useState<boolean | null>(null);
+  const [message, setMessage] = useState("");
+  const [completed, setCompleted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const checkRecoverySession = () => {
+      setSessionReady(null);
+      getCloudPasswordRecoverySession()
+        .then((session) => {
+          if (active) setSessionReady(Boolean(session));
+        })
+        .catch(() => {
+          if (active) setSessionReady(false);
+        });
+    };
+    checkRecoverySession();
+    window.addEventListener("hashchange", checkRecoverySession);
+    return () => {
+      active = false;
+      window.removeEventListener("hashchange", checkRecoverySession);
+    };
+  }, []);
+
+  const submitRecovery = async (event: FormEvent) => {
+    event.preventDefault();
+    setMessage("");
+    if (password !== confirmPassword) {
+      setMessage("Passwords do not match.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const result = await updateCloudPassword(password);
+      setMessage(result.message);
+      setCompleted(result.ok);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const returnToSignIn = async () => {
+    await signOutCloud().catch(() => undefined);
+    window.history.replaceState({}, "", window.location.pathname);
+    navigate("dashboard");
+  };
+
+  return (
+    <main className="login-page">
+      <section className="login-panel">
+        <div className="login-brand">
+          <span className="brand-mark">
+            <BrainCircuit size={26} />
+          </span>
+          <div>
+            <strong>ClassLoop</strong>
+            <small>Secure account recovery</small>
+          </div>
+        </div>
+        <div className="login-copy">
+          <span className="eyebrow">Cloud password recovery</span>
+          <h1>
+            {completed
+              ? "Password updated."
+              : sessionReady === false
+                ? "Recovery link unavailable."
+                : "Choose a new password."}
+          </h1>
+          <p>
+            {completed
+              ? "Your Supabase cloud password is ready. Return to sign in and use the new password."
+              : "This page only works from the secure recovery link sent to your email."}
+          </p>
+        </div>
+        {sessionReady === null ? (
+          <p className="settings-message" role="status">Checking the recovery link...</p>
+        ) : !sessionReady ? (
+          <div className="settings-stack">
+            <p className="settings-message">
+              This recovery link is invalid or expired. Return to sign in and request a fresh reset email.
+            </p>
+            <button className="primary-button full" type="button" onClick={() => void returnToSignIn()}>
+              Return to sign in
+            </button>
+          </div>
+        ) : completed ? (
+          <button className="primary-button full" type="button" onClick={() => void returnToSignIn()}>
+            Return to sign in
+          </button>
+        ) : (
+          <form className="login-form" onSubmit={submitRecovery}>
+            <label className="field compact">
+              <span>New password</span>
+              <div className="input-with-icon password-control">
+                <KeyRound size={17} />
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </label>
+            <label className="field compact">
+              <span>Confirm new password</span>
+              <div className="input-with-icon">
+                <KeyRound size={17} />
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                />
+              </div>
+            </label>
+            <button className="primary-button full" type="submit" disabled={submitting}>
+              {submitting ? "Updating..." : "Update password"}
+            </button>
+          </form>
+        )}
+        {message && (
+          <p className={completed ? "settings-message success" : "settings-message"} role="status">
+            {message}
+          </p>
+        )}
+      </section>
+      <section className="login-side">
+        <div className="security-card">
+          <span>
+            <ShieldCheck size={22} />
+          </span>
+          <strong>Email-verified recovery</strong>
+          <p>ClassLoop never displays or accepts a local reset code. Password changes require the Supabase recovery session from your inbox.</p>
+        </div>
+      </section>
+    </main>
   );
 }
 
@@ -4404,7 +4740,7 @@ function LandingPage({
                   </p>
                   <ul className="landing-doc-list">
                     <li><strong>Free:</strong> one generated session per day, transcript import, roster tools, student preview, local encrypted storage, and multi-device cloud sync.</li>
-                    <li><strong>Teacher Pro:</strong> $3.99/month for unlimited sessions, live in-person/online capture, analytics, delivery proof, and exports.</li>
+                    <li><strong>Teacher Pro:</strong> $3.99/month for unlimited sessions, online meeting capture, analytics, delivery proof, and exports.</li>
                     <li><strong>School/team later:</strong> per-teacher seats with SSO, retention controls, audit/export, admin policy, and reviewed student-data agreements.</li>
                   </ul>
                   <p>No per-minute transcript pricing. Long classes and messy transcripts should not punish teachers.</p>
@@ -4972,7 +5308,6 @@ function LoginPage({
   onCreateAccount,
   onCreateLocalAccount,
   onRequestPasswordReset,
-  onCompletePasswordReset,
   demoOnly,
   workspaceNotice,
 }: {
@@ -4992,12 +5327,6 @@ function LoginPage({
   onRequestPasswordReset: (
     role: AuthRole,
     email: string,
-  ) => Promise<{ ok: boolean; message?: string; code?: string; email?: string; name?: string }>;
-  onCompletePasswordReset: (
-    role: AuthRole,
-    email: string,
-    code: string,
-    newPassword: string,
   ) => Promise<{ ok: boolean; message?: string }>;
   demoOnly: boolean;
   workspaceNotice?: WorkspaceNotice | null;
@@ -5012,12 +5341,8 @@ function LoginPage({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
-  const [resetStep, setResetStep] = useState<"request" | "confirm">("request");
-  const [resetCode, setResetCode] = useState("");
-  const [issuedResetCode, setIssuedResetCode] = useState("");
-  const [resetPassword, setResetPassword] = useState("");
-  const [resetConfirmPassword, setResetConfirmPassword] = useState("");
   const [resetMessage, setResetMessage] = useState("");
+  const [resetSubmitting, setResetSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [cloudConfirmation, setCloudConfirmation] = useState<CloudConfirmationPrompt | null>(null);
@@ -5110,11 +5435,6 @@ function LoginPage({
 
   const closeResetModal = () => {
     setResetOpen(false);
-    setResetStep("request");
-    setResetCode("");
-    setIssuedResetCode("");
-    setResetPassword("");
-    setResetConfirmPassword("");
     setResetMessage("");
     setShowPassword(false);
   };
@@ -5122,55 +5442,15 @@ function LoginPage({
   const requestReset = async () => {
     setResetMessage("");
     if (!role) {
-      setResetMessage("Choose an account type before requesting a reset code.");
+      setResetMessage("Choose an account type before requesting a reset link.");
       return;
     }
-    const result = await onRequestPasswordReset(role, email);
-    setResetMessage(result.message ?? "Reset request received.");
-    if (result.ok && result.code && result.email) {
-      setResetStep("confirm");
-      setIssuedResetCode(result.code);
-      setEmail(result.email);
-    }
-  };
-
-  const openResetEmailDraft = () => {
-    if (!issuedResetCode || !email) return;
-    const subject = encodeURIComponent("ClassLoop password reset code");
-    const body = encodeURIComponent(
-      `Your ClassLoop password reset code is ${issuedResetCode}.\n\nThis code expires in 15 minutes.\n`,
-    );
-    window.open(`mailto:${normalizeEmail(email)}?subject=${subject}&body=${body}`);
-  };
-
-  const copyResetCode = async () => {
-    if (!issuedResetCode) return;
+    setResetSubmitting(true);
     try {
-      await navigator.clipboard.writeText(issuedResetCode);
-      setResetMessage("Reset code copied.");
-    } catch {
-      setResetMessage("Copy failed. Select the code and copy it manually.");
-    }
-  };
-
-  const completeReset = async () => {
-    setResetMessage("");
-    if (!role) {
-      setResetMessage("Choose an account type before resetting your password.");
-      return;
-    }
-    if (resetPassword !== resetConfirmPassword) {
-      setResetMessage("New passwords do not match.");
-      return;
-    }
-    const result = await onCompletePasswordReset(role, email, resetCode, resetPassword);
-    setResetMessage(result.message ?? "Password reset.");
-    if (result.ok) {
-      setMode("signin");
-      setPassword("");
-      setConfirmPassword("");
-      closeResetModal();
-      setNotice(result.message ?? "Password reset. You can sign in now.");
+      const result = await onRequestPasswordReset(role, email);
+      setResetMessage(result.message ?? "Reset request received.");
+    } finally {
+      setResetSubmitting(false);
     }
   };
 
@@ -5432,7 +5712,7 @@ function LoginPage({
               : "Start with personal meetings for your own follow-through, or class workflows for teacher-reviewed student updates."}
           </p>
         </div>
-        <form className="login-form" onSubmit={submit}>
+        <form className="login-form" onSubmit={submit} noValidate>
           {demoOnly && (
             <p className="demo-login-note">
               Web demo mode uses sample credentials only. Your changes will reset and will not be saved.
@@ -5506,7 +5786,16 @@ function LoginPage({
                 <span>Email</span>
                 <div className="input-with-icon">
                   <Mail size={17} />
-                  <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" />
+                  <input
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    spellCheck={false}
+                    required
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="name@example.com"
+                  />
                 </div>
               </label>
               <label className="field compact">
@@ -5530,7 +5819,6 @@ function LoginPage({
                   className="text-button forgot-password-link"
                   onClick={() => {
                     setResetOpen(true);
-                    setResetStep("request");
                     setResetMessage("");
                   }}
                 >
@@ -5605,7 +5893,7 @@ function LoginPage({
               <div>
                 <span className="eyebrow">Account recovery</span>
                 <h2>Reset password</h2>
-                <p>Choose the account, get a short reset code, then set a new password.</p>
+                <p>ClassLoop will send a secure Supabase recovery link when cloud account recovery is available.</p>
               </div>
               <button type="button" className="text-button" onClick={closeResetModal}>
                 Close
@@ -5615,51 +5903,15 @@ function LoginPage({
               <span>{selectedAccountLabel} account</span>
               <strong>{email || "Enter email on the sign-in form"}</strong>
             </div>
-            {resetStep === "request" ? (
-              <button type="button" className="primary-button full" onClick={requestReset}>
-                <KeyRound size={17} />
-                Get reset code
-              </button>
-            ) : (
-              <div className="reset-confirm-grid">
-                {issuedResetCode && (
-                  <div className="reset-code-card">
-                    <span>Reset code</span>
-                    <button type="button" onClick={copyResetCode}>{issuedResetCode}</button>
-                  </div>
-                )}
-                <button type="button" className="ghost-button full" onClick={openResetEmailDraft}>
-                  <Mail size={17} />
-                  Open email draft
-                </button>
-                <label className="field compact">
-                  <span>Code</span>
-                  <input value={resetCode} onChange={(event) => setResetCode(event.target.value)} placeholder="6-digit code" />
-                </label>
-                <label className="field compact">
-                  <span>New password</span>
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    value={resetPassword}
-                    onChange={(event) => setResetPassword(event.target.value)}
-                    placeholder="New password"
-                  />
-                </label>
-                <label className="field compact">
-                  <span>Confirm new password</span>
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    value={resetConfirmPassword}
-                    onChange={(event) => setResetConfirmPassword(event.target.value)}
-                    placeholder="Confirm new password"
-                  />
-                </label>
-                <button type="button" className="primary-button full" onClick={completeReset}>
-                  <KeyRound size={17} />
-                  Reset password
-                </button>
-              </div>
-            )}
+            <button
+              type="button"
+              className="primary-button full"
+              onClick={() => void requestReset()}
+              disabled={resetSubmitting}
+            >
+              <Mail size={17} />
+              {resetSubmitting ? "Sending..." : "Send reset email"}
+            </button>
             {resetMessage && (
               <p className={/incorrect|expired|match|enter|failed/i.test(resetMessage) ? "settings-message" : "settings-message success"}>
                 {resetMessage}
@@ -5813,7 +6065,7 @@ function GuidedWalkthroughOverlay({
           },
           {
             title: "Create the session",
-            detail: "Pick a template, preload a class roster, then choose transcript, in-person capture, or online meeting capture.",
+            detail: "Pick a template, preload a class roster, then choose a transcript or online meeting capture.",
             route: "new-session" as RouteKey,
             position: "top-right",
             target: '[data-tour="new-session-button"]',
@@ -7139,15 +7391,23 @@ function NewPersonalMeeting({
     setUploadedRecordingName(file.name);
     setError("");
     if (isTextTranscriptFile(file)) {
-      const text = await readTranscriptFileText(file);
-      setMinutes(text);
-      setStructuredTranscript(
-        createStructuredTranscriptFromText(text, {
-          title: `${title || file.name} transcript`,
-          source: "file",
-        }),
-      );
-      setWhisperStatus(`Loaded ${file.name}.`);
+      try {
+        const text = await readTranscriptFileText(file);
+        if (!text.trim()) {
+          setWhisperStatus(`${file.name} is empty. Choose another transcript or paste meeting minutes.`);
+          return;
+        }
+        setMinutes(text);
+        setStructuredTranscript(
+          createStructuredTranscriptFromText(text, {
+            title: `${title || file.name} transcript`,
+            source: "file",
+          }),
+        );
+        setWhisperStatus(`Loaded ${file.name}.`);
+      } catch {
+        setError(`ClassLoop could not read ${file.name}. Choose a text transcript or paste the minutes.`);
+      }
       return;
     }
 
@@ -7796,7 +8056,7 @@ function CloudEmailConfirmationOverlay({
             </h2>
             <p>
               {isAccountCreation
-                ? `ClassLoop created an account for ${prompt.email}. Confirm the address before multi-device sign-in works.`
+                ? `ClassLoop is waiting for email confirmation for ${prompt.email}. If this email already has an account, sign in or request a password reset instead.`
                 : isEmailChange
                   ? `ClassLoop sent a confirmation email to ${prompt.email}. Confirm the address before signing in with the new email.`
                 : `ClassLoop sent a confirmation email to ${prompt.email}. Confirm the address to finish linking this account.`}
@@ -7910,7 +8170,7 @@ function EmbeddedCheckoutPage({
       setStatus("verifying");
       setMessage("Payment complete. Checking your plan before Pro turns on...");
       try {
-        const profile = await getCloudProfile();
+        const profile = await getCloudProfile(auth.email);
         const verifiedProfile = normalizeTrustedBillingProfile(profile.billingProfile);
         if (!active) return;
         setBillingProfile(verifiedProfile);
@@ -8344,15 +8604,14 @@ function SyncBillingPage({
   billingProfile: BillingProfile;
   setBillingProfile: (profile: BillingProfile) => void;
   currentState: () => SharedState;
-  applyCloudState: (state: Partial<CloudWorkspaceState>) => void;
+  applyCloudState: (state: Partial<CloudWorkspaceState>) => Promise<void>;
   appendAudit: (action: string, detail: string, actor?: AuthSession | null) => void;
   sessionCount: number;
   localAuthSecret: LocalAuthSecret | null;
 }) {
   const backendStatus = getBackendStatus();
-  const [cloudEmail, setCloudEmail] = useState("");
-  const [cloudPassword, setCloudPassword] = useState("");
-  const [message, setMessage] = useState("");
+  const [syncMessage, setSyncMessage] = useState("");
+  const [billingMessage, setBillingMessage] = useState("");
   const [connectedEmail, setConnectedEmail] = useState("");
   const [cloudConfirmation, setCloudConfirmation] = useState<CloudConfirmationPrompt | null>(null);
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
@@ -8367,9 +8626,19 @@ function SyncBillingPage({
     getCloudSession()
       .then(async (session) => {
         if (!active) return;
-        setConnectedEmail(session?.user.email ?? "");
-        if (!session || isDemoAccount) return;
-        const profile = await getCloudProfile();
+        const sessionEmail = normalizeEmail(session?.user.email ?? "");
+        if (!session || sessionEmail !== normalizeEmail(auth.email)) {
+          setConnectedEmail("");
+          if (session && !isDemoAccount) {
+            setSyncMessage(
+              "The connected cloud account does not match this ClassLoop login. Sign out, then use the main ClassLoop sign-in page with the matching email.",
+            );
+          }
+          return;
+        }
+        setConnectedEmail(sessionEmail);
+        if (isDemoAccount) return;
+        const profile = await getCloudProfile(auth.email);
         if (active) setBillingProfile(normalizeTrustedBillingProfile(profile.billingProfile));
       })
       .catch(() => {
@@ -8378,7 +8647,7 @@ function SyncBillingPage({
     return () => {
       active = false;
     };
-  }, [isDemoAccount, setBillingProfile]);
+  }, [auth.email, isDemoAccount, setBillingProfile]);
 
   useEffect(() => {
     let active = true;
@@ -8400,7 +8669,11 @@ function SyncBillingPage({
   useEffect(() => {
     if (isDemoAccount) return;
     if (billingReturnStatus === "canceled") {
-      setMessage("Checkout was canceled. Your plan was not changed.");
+      setBillingMessage("Checkout was canceled. Your plan was not changed.");
+      return;
+    }
+    if (billingReturnStatus === "subscription-updated") {
+      setBillingMessage("Stripe received the subscription update. ClassLoop will refresh after Stripe confirms it.");
       return;
     }
     if (billingReturnStatus !== "success") return;
@@ -8410,22 +8683,22 @@ function SyncBillingPage({
 
     const verifyPaidProfile = async (attempt = 1) => {
       if (!active) return;
-      setMessage("Payment complete. Checking your plan before Pro turns on...");
+      setBillingMessage("Payment complete. Checking your plan before Pro turns on...");
       try {
-        const profile = await getCloudProfile();
+        const profile = await getCloudProfile(auth.email);
         const verifiedProfile = normalizeTrustedBillingProfile(profile.billingProfile);
         if (!active) return;
         setBillingProfile(verifiedProfile);
         if (isPaidPlan(verifiedProfile)) {
-          setMessage("Payment confirmed. Pro is active.");
+          setBillingMessage("Payment confirmed. Pro is active.");
           return;
         }
         if (attempt < 5) {
-          setMessage("Payment was submitted. Waiting for confirmation before Pro turns on...");
+          setBillingMessage("Payment was submitted. Waiting for confirmation before Pro turns on...");
           retryTimer = window.setTimeout(() => void verifyPaidProfile(attempt + 1), 1500);
           return;
         }
-        setMessage(
+        setBillingMessage(
           "Payment is still pending. ClassLoop will stay Free until Stripe confirms it.",
         );
       } catch (error) {
@@ -8434,7 +8707,7 @@ function SyncBillingPage({
           retryTimer = window.setTimeout(() => void verifyPaidProfile(attempt + 1), 1500);
           return;
         }
-        setMessage(error instanceof Error ? error.message : "Unable to verify the payment yet.");
+        setBillingMessage(error instanceof Error ? error.message : "Unable to verify the payment yet.");
       }
     };
 
@@ -8445,61 +8718,29 @@ function SyncBillingPage({
     };
   }, [billingReturnStatus, isDemoAccount, setBillingProfile]);
 
-  const refreshProfile = async () => {
-    try {
-      const profile = await getCloudProfile();
-      setBillingProfile(normalizeTrustedBillingProfile(profile.billingProfile));
-      setMessage("Plan refreshed.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to refresh account plan.");
-    }
-  };
-
-  const showEmailConfirmation = (result: CloudAuthResult, fallbackEmail: string, context: CloudConfirmationPrompt["context"]) => {
-    const prompt = cloudConfirmationFromResult(result, fallbackEmail, context);
-    if (!prompt) return false;
-    setCloudConfirmation(prompt);
-    setMessage("");
-    return true;
-  };
-
-  const connectCloud = async (mode: "signin" | "signup" = "signin") => {
-    const result =
-      mode === "signin"
-        ? await signIntoCloud(cloudEmail, cloudPassword)
-        : await createCloudAccount(cloudEmail, cloudPassword, {
-            role: auth.role,
-            name: auth.name,
-            source: "classloop_plan_options",
-          });
-    if (showEmailConfirmation(result, cloudEmail, "cloud-login")) return;
-    setMessage(result.message);
-    setConnectedEmail(result.session?.user.email ?? "");
-    if (result.ok) {
-      appendAudit("cloud_connect", `Connected cloud sync for ${cloudEmail}.`);
-      await refreshProfile();
-    }
-  };
-
   const uploadCloud = async () => {
     try {
       await cloudRequest("/api/cloud-state", {
         method: "PUT",
         body: JSON.stringify(toOwnerCloudWorkspaceState(currentState(), auth.email)),
-      });
-      setMessage("Uploaded this account's workspace to cloud sync.");
+      }, auth.email);
+      setSyncMessage("Uploaded this account's workspace to cloud sync.");
       appendAudit("cloud_upload", "Uploaded this account's workspace to cloud sync.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Cloud upload failed.");
+      setSyncMessage(error instanceof Error ? error.message : "Cloud upload failed.");
     }
   };
 
   const downloadCloud = async () => {
     try {
-      const response = await cloudRequest<CloudWorkspaceState | CloudWorkspaceSnapshot | null>("/api/cloud-state");
+      const response = await cloudRequest<CloudWorkspaceState | CloudWorkspaceSnapshot | null>(
+        "/api/cloud-state",
+        {},
+        auth.email,
+      );
       const snapshot = parseCloudWorkspaceResponse<CloudWorkspaceState>(response);
       if (!snapshot) {
-        setMessage("No cloud workspace has been saved yet.");
+        setSyncMessage("No cloud workspace has been saved yet.");
         return;
       }
       const local = toOwnerCloudWorkspaceState(currentState(), auth.email);
@@ -8515,56 +8756,86 @@ function SyncBillingPage({
           `Replace this account's local workspace with the cloud copy${snapshot.updatedAt ? ` saved ${new Date(snapshot.updatedAt).toLocaleString()}` : ""}? Other local accounts and billing access stay on this device.`,
         )
       ) {
-        setMessage("Cloud download canceled. Local work was not changed.");
+        setSyncMessage("Cloud download canceled. Local work was not changed.");
         return;
       }
-      applyCloudState(snapshot.state);
-      setMessage("Downloaded this account's cloud workspace to this device.");
+      await applyCloudState(snapshot.state);
+      setSyncMessage("Downloaded this account's cloud workspace to this device.");
       appendAudit("cloud_download", "Downloaded this account's workspace from cloud sync.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Cloud download failed.");
+      setSyncMessage(error instanceof Error ? error.message : "Cloud download failed.");
     }
   };
 
   const startCheckout = async () => {
     try {
       if (isDemoAccount) {
-        setMessage(demoBillingMessage);
+        setBillingMessage(demoBillingMessage);
         return;
       }
       if (!backendStatus.stripePaymentLinkConfigured || !backendStatus.supabaseConfigured) {
-        setMessage("Online upgrades are unavailable right now. Try again later or contact ClassLoop support.");
+        setBillingMessage("Online upgrades are unavailable right now. Try again later or contact ClassLoop support.");
         return;
       }
-      setMessage("Preparing your ClassLoop account for payment...");
+      setBillingMessage("Preparing your ClassLoop account for payment...");
       const checkout = await resolveStripeCheckoutIdentity(auth, localAuthSecret);
       if (checkout.kind === "confirmation") {
         setCloudConfirmation(cloudConfirmationFromResult(checkout.result, auth.email, "checkout"));
-        setMessage("Confirm your email before checkout continues.");
+        setBillingMessage("Confirm your email before checkout continues.");
         return;
       }
       if (checkout.kind === "error") throw new Error(checkout.message);
-      const profile = await getCloudProfile();
+      const profile = await getCloudProfile(auth.email);
       const verifiedProfile = normalizeTrustedBillingProfile(profile.billingProfile);
       setBillingProfile(verifiedProfile);
       if (isPaidPlan(verifiedProfile)) {
-        setMessage("Pro is already active for this account.");
+        setBillingMessage("Pro is already active for this account.");
         return;
       }
       setConnectedEmail(checkout.identity.email);
       appendAudit("cloud_connect", `Prepared payment account for ${checkout.identity.email}.`);
-      setMessage("Opening Stripe Payment Link. Pro turns on after payment is confirmed.");
+      setBillingMessage("Opening Stripe Payment Link. Pro turns on after payment is confirmed.");
       openStripePaymentLink(checkout.identity);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Online payment is not available right now.");
+      setBillingMessage(error instanceof Error ? error.message : "Online payment is not available right now.");
+    }
+  };
+
+  const openCancellationPortal = async () => {
+    try {
+      setBillingMessage("Opening Stripe subscription cancellation...");
+      const response = await cloudRequest<{ url?: unknown }>(
+        "/api/billing/portal",
+        { method: "POST" },
+        auth.email,
+      );
+      if (!isStripeBillingPortalUrl(response.url)) {
+        throw new Error("Stripe returned an invalid billing portal link.");
+      }
+      window.location.href = response.url;
+    } catch (error) {
+      setBillingMessage(error instanceof Error ? error.message : "Unable to open Stripe subscription cancellation.");
     }
   };
 
   const disconnect = async () => {
-    await signOutCloud();
-    setConnectedEmail("");
-    setMessage("Cloud sync disconnected on this device.");
+    let remoteSignOutFailed = false;
+    try {
+      await signOutCloud();
+    } catch {
+      remoteSignOutFailed = true;
+    } finally {
+      setConnectedEmail("");
+      setSyncMessage(
+        remoteSignOutFailed
+          ? "Cloud sync disconnected on this device. The server could not be reached, but local cloud credentials were cleared."
+          : "Cloud sync disconnected on this device.",
+      );
+    }
   };
+
+  const hasStripeSubscription = isPaidPlan(billingProfile) && !isManualProBillingProfile(billingProfile);
+  const hasIncludedProAccess = isPaidPlan(billingProfile) && isManualProBillingProfile(billingProfile);
 
   const composioToolkits = integrationStatus?.composio?.toolkits ?? [];
   const configuredComposioToolkits = composioToolkits.filter(
@@ -8584,37 +8855,29 @@ function SyncBillingPage({
     <div className="page-stack">
       <section className="review-banner">
         <div>
-          <span className="eyebrow">Upgrade</span>
-          <h2>Upgrade to Pro.</h2>
+          <span className="eyebrow">Account</span>
+          <h2>Plan options.</h2>
         </div>
       </section>
 
       <section className="content-grid two-columns align-start">
-        <Panel title="Cloud workspace" icon={RefreshCw}>
+        <Panel title="Cloud sync" icon={RefreshCw}>
             <div className="settings-stack">
-              <div className="integration-card">
-                <strong>{backendStatus.supabaseConfigured ? "Cloud account ready" : "Cloud sync unavailable"}</strong>
+              <div className={`integration-card ${connectedEmail ? "active" : ""}`}>
+                <strong>
+                  {connectedEmail
+                    ? "Cloud sync connected"
+                    : backendStatus.supabaseConfigured && !isDemoAccount
+                      ? "Sign in to connect cloud sync"
+                      : "Cloud sync unavailable"}
+                </strong>
                 <small>
-                  {backendStatus.supabaseConfigured
+                  {connectedEmail
                     ? "Use the same ClassLoop account on desktop, browser, and phone. Free accounts can sync workspaces too."
-                    : "Cloud sync is not available in this build. You can keep working on this device."}
+                    : backendStatus.supabaseConfigured && !isDemoAccount
+                      ? "Cloud login is available only from the main ClassLoop sign-in page. Sign out, then sign in with this account."
+                      : "This workspace stays on this device."}
                 </small>
-              </div>
-              <label className="field compact">
-                <span>Cloud email</span>
-                <input value={cloudEmail} onChange={(event) => setCloudEmail(event.target.value)} placeholder="you@school.org" />
-              </label>
-              <label className="field compact">
-                <span>Cloud password</span>
-                <input type="password" value={cloudPassword} onChange={(event) => setCloudPassword(event.target.value)} />
-              </label>
-              <div className="button-row">
-                <button className="primary-button" type="button" onClick={() => void connectCloud("signin")}>
-                  Sign in
-                </button>
-                <button className="ghost-button" type="button" onClick={() => void connectCloud("signup")} disabled={!backendStatus.supabaseConfigured}>
-                  Create account
-                </button>
               </div>
               {connectedEmail && <p className="settings-message success">Connected as {connectedEmail}</p>}
               <div className="settings-options-list">
@@ -8646,7 +8909,7 @@ function SyncBillingPage({
                     <button className="settings-option-button" type="button" onClick={disconnect} disabled={!connectedEmail}>
                       <LogOut size={18} aria-hidden="true" />
                       <span>
-                        <strong>Disconnect cloud login</strong>
+                        <strong>Disconnect cloud sync</strong>
                         <small>Sign out of cloud sync on this device only.</small>
                       </span>
                       <ChevronRight size={16} aria-hidden="true" />
@@ -8654,7 +8917,7 @@ function SyncBillingPage({
                   </div>
                 </details>
               </div>
-              {message && <p className="settings-message">{message}</p>}
+              {syncMessage && <p className="settings-message">{syncMessage}</p>}
             </div>
           </Panel>
 
@@ -8665,6 +8928,22 @@ function SyncBillingPage({
                 <strong>Demo account</strong>
                 <small>{demoBillingMessage}</small>
               </span>
+            </div>
+          ) : hasStripeSubscription ? (
+            <div className="settings-stack">
+              <button className="ghost-button full" type="button" onClick={() => void openCancellationPortal()}>
+                <LogOut size={17} />
+                Unsubscribe
+              </button>
+              <small>Stripe will show the cancellation date and ask you to confirm before changing the subscription.</small>
+            </div>
+          ) : hasIncludedProAccess ? (
+            <div className="settings-stack">
+              <button className="ghost-button full" type="button" disabled>
+                <ShieldCheck size={17} />
+                Pro access included
+              </button>
+              <small>This account has included Pro access and no Stripe subscription to cancel.</small>
             </div>
           ) : (
             <div className="settings-stack">
@@ -8682,6 +8961,7 @@ function SyncBillingPage({
               </small>
             </span>
           </div>
+          {billingMessage && <p className="settings-message">{billingMessage}</p>}
         </Panel>
       </section>
 
@@ -8742,16 +9022,11 @@ function SyncBillingPage({
       {cloudConfirmation && (
         <CloudEmailConfirmationOverlay
           prompt={cloudConfirmation}
-          actionLabel={cloudConfirmation.context === "checkout" ? "Try checkout again" : "Try cloud sign-in again"}
+          actionLabel="Try checkout again"
           onClose={() => setCloudConfirmation(null)}
           onAction={() => {
-            const retryCheckout = cloudConfirmation.context === "checkout";
             setCloudConfirmation(null);
-            if (retryCheckout) {
-              void startCheckout();
-            } else {
-              void connectCloud();
-            }
+            void startCheckout();
           }}
           onResend={() => resendCloudConfirmation(cloudConfirmation.email, cloudConfirmation.redirectUrl)}
         />
@@ -9034,7 +9309,7 @@ function ImportSession({
         const speakerLabel =
           mode === "transcript"
             ? captureModeLabels[mode]
-            : liveCaptureSpeakerLabel(mode, liveSegmentCountRef.current);
+            : liveCaptureSpeakerLabel(liveSegmentCountRef.current);
         setTranscript((current) => appendCapturedText(current, `${speakerLabel}: ${finalText}`));
       }
     };
@@ -9048,9 +9323,10 @@ function ImportSession({
     setTranscriptionAvailable(true);
   };
 
-  const startCapture = async (mode: SessionCaptureMode) => {
-    if ((mode === "in_person" || mode === "audio" || mode === "online_meeting") && !canUseLiveCapture) {
-      setPlanMessage("Live in-person and online meeting capture are Pro features. Upgrade to Pro to unlock them.");
+  const startOnlineMeetingCapture = async () => {
+    const mode: SessionCaptureMode = "online_meeting";
+    if (!canUseLiveCapture) {
+      setPlanMessage("Online meeting capture is a Pro feature. Upgrade to Pro to unlock it.");
       return;
     }
     if (recordingConsentRequired && !recordingConsent) {
@@ -9070,7 +9346,7 @@ function ImportSession({
       let stream: MediaStream;
       let startedMessage = "";
 
-      if (mode === "online_meeting" && navigator.mediaDevices.getDisplayMedia) {
+      if (navigator.mediaDevices.getDisplayMedia) {
         stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
         const hasAudio = stream.getAudioTracks().length > 0;
         startedMessage = hasAudio
@@ -9080,10 +9356,7 @@ function ImportSession({
         stream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         });
-        startedMessage =
-          mode === "online_meeting"
-            ? "This browser cannot capture meeting tab audio directly, so ClassLoop is using the microphone as best-effort notes."
-            : "In-person class capture is running. Place the device where discussion is clear and keep ClassLoop open.";
+        startedMessage = "This browser cannot capture meeting tab audio directly, so ClassLoop is using the microphone as best-effort notes.";
       }
 
       // Track the acquired source before constructing dependent resources so
@@ -9244,11 +9517,30 @@ function ImportSession({
     setZoomMessage("");
     setIntegrationActionMessage("");
     if (isTextTranscriptFile(file)) {
-      const text = await readTranscriptFileText(file);
-      setStructuredTranscript(createStructuredTranscriptFromText(text, { title: `${title || file.name} transcript`, source: "file" }));
-      setCaptureMessage(`Loaded ${file.name}.`);
-      setWhisperStatus("");
-      setTranscript(text);
+      try {
+        const text = await readTranscriptFileText(file);
+        if (!text.trim()) {
+          setCaptureMessage("");
+          setWhisperStatus(`${file.name} is empty. Choose another transcript or paste transcript text.`);
+          setTranscript("");
+          setStructuredTranscript(undefined);
+          return;
+        }
+        setStructuredTranscript(
+          createStructuredTranscriptFromText(text, {
+            title: `${title || file.name} transcript`,
+            source: "file",
+          }),
+        );
+        setCaptureMessage(`Loaded ${file.name}.`);
+        setWhisperStatus("");
+        setTranscript(text);
+      } catch {
+        setCaptureMessage("");
+        setWhisperStatus(`ClassLoop could not read ${file.name}. Choose a .txt, .vtt, or .srt file, or paste the transcript.`);
+        setTranscript("");
+        setStructuredTranscript(undefined);
+      }
       return;
     }
 
@@ -9284,9 +9576,6 @@ function ImportSession({
             `Capture method: ${captureModeLabels[captureMode]}.`,
             recordedSeconds ? `Captured duration: ${recordedSeconds} seconds.` : "",
             recordingConsent ? "Audio capture consent was confirmed before capture." : "",
-            captureMode === "in_person" || captureMode === "audio"
-              ? "Student voice identification is teacher-assisted. Live segments are labeled as unknown voices until you link them to roster students."
-              : "",
             captureMode === "online_meeting"
               ? "Online meeting capture used browser tab/window audio when available. Platform transcripts remain the most reliable source when live text is incomplete."
               : "",
@@ -9403,7 +9692,7 @@ function ImportSession({
       title: "Google Meet transcripts",
       detail: meetConnectorReady ? "Connected for Meet recordings and transcript entries." : "Meet transcript imports for Google schools.",
       ready: meetConnectorReady,
-      buttonLabel: meetConnectorReady ? "Check" : "Connect",
+      buttonLabel: meetConnectorReady ? "Review setup" : "Connect",
       onClick: () => (meetConnectorReady ? handleReadyImportConnector("Google Meet") : openConnectorSettings("Google Meet")),
     },
     {
@@ -9412,7 +9701,7 @@ function ImportSession({
       title: "Classroom roster/resources",
       detail: classroomConnectorReady ? "Connected for course rosters, coursework, and materials." : "Course roster and material context after Classroom setup.",
       ready: classroomConnectorReady,
-      buttonLabel: classroomConnectorReady ? "Check" : "Connect",
+      buttonLabel: classroomConnectorReady ? "Review setup" : "Connect",
       onClick: () => (classroomConnectorReady ? handleReadyImportConnector("Google Classroom") : openConnectorSettings("Google Classroom")),
     },
     {
@@ -9421,7 +9710,7 @@ function ImportSession({
       title: "Drive, Docs, or Sheets",
       detail: workspaceImportReady ? "Connected for class files, notes, rosters, or tracker sheets." : "Class materials, note docs, and roster spreadsheets.",
       ready: workspaceImportReady,
-      buttonLabel: workspaceImportReady ? "Check" : "Connect",
+      buttonLabel: workspaceImportReady ? "Review setup" : "Connect",
       onClick: () => (workspaceImportReady ? handleReadyImportConnector("Google Workspace") : openConnectorSettings("Google Workspace")),
     },
   ];
@@ -9575,7 +9864,7 @@ function ImportSession({
             <div className="capture-panel wide">
               <div>
                 <span className="eyebrow">Capture source</span>
-                <h3>Use a transcript, in-person capture, or meeting audio.</h3>
+                <h3>Use a transcript or meeting audio.</h3>
                 <p>
                   Transcript paste/upload stays the most reliable path. Live capture is best-effort, consent-first, and keeps speaker matching in your hands.
                 </p>
@@ -9589,28 +9878,6 @@ function ImportSession({
                   <UploadCloud size={18} />
                   <strong>Transcript</strong>
                   <small>Upload or paste Zoom, Meet, text, VTT, or notes.</small>
-                </button>
-                <button
-                  type="button"
-                  className={[
-                    "capture-mode-card",
-                    captureMode === "in_person" || captureMode === "audio" ? "active" : "",
-                    canUseLiveCapture ? "" : "locked",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  onClick={() => {
-                    if (!canUseLiveCapture) {
-                      setPlanMessage("In-person live capture is available with Pro.");
-                      return;
-                    }
-                    setCaptureMode("in_person");
-                  }}
-                >
-                  <Mic2 size={18} />
-                  <strong>In-person class</strong>
-                  <small>Use the device microphone for live notes during classroom discussion.</small>
-                  {!canUseLiveCapture && <small className="pro-lock-note">Pro only</small>}
                 </button>
                 <button
                   type="button"
@@ -9647,9 +9914,7 @@ function ImportSession({
                     <small>
                       {captureStatus === "recording"
                         ? `${recordedSeconds}s captured`
-                        : captureMode === "online_meeting"
-                          ? "Start capture when the call begins. If live text is incomplete, paste the platform transcript afterward."
-                          : "Start capture before discussion, then stop before generating the draft."}
+                        : "Start capture when the call begins. If live text is incomplete, paste the platform transcript afterward."}
                     </small>
                   </div>
                   {recordingConsentRequired && (
@@ -9666,7 +9931,7 @@ function ImportSession({
                     <button
                       type="button"
                       className="primary-button"
-                      onClick={() => startCapture(captureMode)}
+                      onClick={startOnlineMeetingCapture}
                       disabled={captureStatus === "recording" || (recordingConsentRequired && !recordingConsent)}
                     >
                       <Mic2 size={17} />
@@ -9936,7 +10201,7 @@ function ImportSession({
           onClose={() => setShowMeetingHelp(false)}
           onStart={() => {
             setShowMeetingHelp(false);
-            void startCapture("online_meeting");
+            void startOnlineMeetingCapture();
           }}
         />
       )}
@@ -10335,6 +10600,7 @@ function RosterManager({
 }) {
   const csvInputRef = useRef<HTMLInputElement | null>(null);
   const [rosterSearch, setRosterSearch] = useState("");
+  const [csvMessage, setCsvMessage] = useState("");
   const visibleStudents = useMemo(() => {
     const query = rosterSearch.trim().toLowerCase();
     if (!query) return students;
@@ -10348,8 +10614,10 @@ function RosterManager({
   };
   const addStudent = () => onStudentsChange([...students, makeRosterStudent("", "", students.length)]);
   const removeStudent = (studentId: string) => onStudentsChange(students.filter((student) => student.id !== studentId));
-  const linkAccount = (student: Student) => {
-    updateStudent(student.id, { linkedAccountEmail: normalizeEmail(student.email) });
+  const toggleAccountLink = (student: Student) => {
+    updateStudent(student.id, {
+      linkedAccountEmail: student.linkedAccountEmail ? "" : normalizeEmail(student.email),
+    });
   };
   const sendInvite = (student: Student) => {
     const email = normalizeEmail(student.email);
@@ -10363,9 +10631,20 @@ function RosterManager({
   };
   const importCsv = async (file?: File) => {
     if (!file) return;
-    const importedStudents = rosterStudentsFromCsv(await file.text());
-    if (importedStudents.length) onStudentsChange(importedStudents);
-    if (csvInputRef.current) csvInputRef.current.value = "";
+    setCsvMessage("");
+    try {
+      const importedStudents = rosterStudentsFromCsv(await file.text());
+      if (!importedStudents.length) {
+        setCsvMessage("No students with valid names and email addresses were found in that CSV.");
+        return;
+      }
+      onStudentsChange(importedStudents);
+      setCsvMessage(`Imported ${importedStudents.length} student${importedStudents.length === 1 ? "" : "s"} from ${file.name}.`);
+    } catch {
+      setCsvMessage(`ClassLoop could not read ${file.name}. Export it as a CSV and try again.`);
+    } finally {
+      if (csvInputRef.current) csvInputRef.current.value = "";
+    }
   };
 
   const content = (
@@ -10422,7 +10701,20 @@ function RosterManager({
             </label>
             <label className="field compact roster-email-field">
               <span>Email</span>
-              <input value={student.email} onChange={(event) => updateStudent(student.id, { email: event.target.value })} />
+              <input
+                type="email"
+                value={student.email}
+                onChange={(event) => {
+                  const nextEmail = event.target.value;
+                  updateStudent(student.id, {
+                    email: nextEmail,
+                    ...(student.linkedAccountEmail &&
+                    normalizeEmail(student.linkedAccountEmail) !== normalizeEmail(nextEmail)
+                      ? { linkedAccountEmail: "" }
+                      : {}),
+                  });
+                }}
+              />
             </label>
             {showAttendance && (
               <label className="field compact roster-attendance-field">
@@ -10457,6 +10749,8 @@ function RosterManager({
               <small>
                 {student.linkedAccountEmail
                   ? `Linked to ${student.linkedAccountEmail}`
+                  : Object.prototype.hasOwnProperty.call(student, "linkedAccountEmail")
+                    ? "Student access revoked"
                   : studentAccountEmails.includes(normalizeEmail(student.email))
                     ? "Matching account found"
                     : student.inviteSentAt
@@ -10464,9 +10758,9 @@ function RosterManager({
                       : "No account linked"}
               </small>
               <div>
-                <button className="text-button" type="button" onClick={() => linkAccount(student)} disabled={!student.email}>
+                <button className="text-button" type="button" onClick={() => toggleAccountLink(student)} disabled={!student.email}>
                   <Link2 size={16} />
-                  Link
+                  {student.linkedAccountEmail ? "Unlink" : "Link"}
                 </button>
                 <button className="text-button" type="button" onClick={() => sendInvite(student)} disabled={!student.email}>
                   <Mail size={16} />
@@ -10496,6 +10790,7 @@ function RosterManager({
         <UserPlus size={17} />
         Add student
       </button>
+      {csvMessage && <p className="settings-message" role="status">{csvMessage}</p>}
     </div>
   );
 
@@ -10733,6 +11028,7 @@ function RosterTemplatesPage({
   const [activeTemplateId, setActiveTemplateId] = useState(templates[0]?.id ?? "");
   const [activeClassGroupId, setActiveClassGroupId] = useState(classGroups[0]?.id ?? "");
   const csvInputRef = useRef<HTMLInputElement | null>(null);
+  const [csvMessage, setCsvMessage] = useState("");
   const activeTemplate = templates.find((template) => template.id === activeTemplateId) ?? templates[0];
   const activeClassGroup = classGroups.find((group) => group.id === activeClassGroupId) ?? classGroups[0];
   const activeAttendance =
@@ -10781,11 +11077,20 @@ function RosterTemplatesPage({
 
   const importCsvIntoActiveTemplate = async (file?: File) => {
     if (!file || !activeTemplate) return;
-    const students = rosterStudentsFromCsv(await file.text());
-    if (students.length) {
+    setCsvMessage("");
+    try {
+      const students = rosterStudentsFromCsv(await file.text());
+      if (!students.length) {
+        setCsvMessage("No students with valid names and email addresses were found in that CSV.");
+        return;
+      }
       onUpdate(activeTemplate.id, { students });
+      setCsvMessage(`Imported ${students.length} student${students.length === 1 ? "" : "s"} from ${file.name}.`);
+    } catch {
+      setCsvMessage(`ClassLoop could not read ${file.name}. Export it as a CSV and try again.`);
+    } finally {
+      if (csvInputRef.current) csvInputRef.current.value = "";
     }
-    if (csvInputRef.current) csvInputRef.current.value = "";
   };
 
   if (!templates.length && !classGroups.length) {
@@ -10948,6 +11253,7 @@ function RosterTemplatesPage({
                 <ChevronRight size={16} />
               </button>
             </div>
+            {csvMessage && <p className="settings-message" role="status">{csvMessage}</p>}
           </div>
           <RosterManager
             students={activeTemplate.students}
@@ -11215,12 +11521,14 @@ function ImportQualityPanel({
 
 function PublishPreview({
   draft,
+  ownerEmail,
   selectedStudentId,
   setSelectedStudentId,
   setDraft,
   publishDraft,
 }: {
   draft: Session | null;
+  ownerEmail: string;
   selectedStudentId: string;
   setSelectedStudentId: (id: string) => void;
   setDraft: (session: Session | null) => void;
@@ -11331,11 +11639,16 @@ function PublishPreview({
         }),
       };
       const cloudSession = await getCloudSession();
-      const result = cloudSession
-        ? await cloudRequest<EmailDeliveryResult>("/api/email/send-recaps", request)
+      const matchingCloudSession =
+        cloudSession &&
+        normalizeEmail(cloudSession.user.email ?? "") === normalizeEmail(ownerEmail);
+      const result = matchingCloudSession
+        ? await cloudRequest<EmailDeliveryResult>("/api/email/send-recaps", request, ownerEmail)
         : await apiJson<EmailDeliveryResult>("/api/email/send-recaps", request);
       updateDraft((current) => markSessionEmailsSent(current, result));
-      setDeliveryMessage(`Sent recap emails to ${result.recipients.length} students.`);
+      setDeliveryMessage(
+        `Sent recap emails to ${result.recipients.length} student${result.recipients.length === 1 ? "" : "s"}.`,
+      );
     } catch (error) {
       setDeliveryMessage(error instanceof Error ? error.message : "Unable to send recap emails.");
     } finally {
@@ -11378,9 +11691,9 @@ function PublishPreview({
               <strong>{emailSent ? "Recaps sent" : "Send recap and action items"}</strong>
               <p>
                 {emailSent
-                  ? `Sent to ${delivery.recipients.length} students${delivery.sentAt ? ` on ${formatDate(delivery.sentAt)}` : ""}.`
+                  ? `Sent to ${delivery.recipients.length} student${delivery.recipients.length === 1 ? "" : "s"}${delivery.sentAt ? ` on ${formatDate(delivery.sentAt)}` : ""}.`
                   : isPublished
-                    ? `${recipientCount} students have deliverable roster or linked account emails.`
+                    ? `${recipientCount} student${recipientCount === 1 ? "" : "s"} ${recipientCount === 1 ? "has" : "have"} deliverable roster or linked account emails.`
                     : "Publish the session first, then send the approved recap and action items."}
               </p>
               {!emailSent && integrationStatus?.email?.configured && (
@@ -11659,11 +11972,11 @@ function SessionReport({
   sessions: Session[];
   fallback?: Session;
   editSession: (session: Session) => void;
-  deleteSession: (session: Session) => void;
+  deleteSession: (session: Session) => void | Promise<void>;
 }) {
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const sessionId = getParam("session");
-  const session = sessions.find((item) => item.id === sessionId) ?? fallback;
+  const session = sessionId ? sessions.find((item) => item.id === sessionId) : fallback;
 
   if (!session) {
     return (
@@ -12718,7 +13031,7 @@ function TeacherAnalytics({ sessions }: { sessions: Session[] }) {
 function PrivacyControlsPage({
   auth,
   sessions,
-  accounts,
+  account,
   privacySettings,
   setPrivacySettings,
   auditLog,
@@ -12728,20 +13041,25 @@ function PrivacyControlsPage({
 }: {
   auth: AuthSession;
   sessions: Session[];
-  accounts: Account[];
+  account?: Account;
   privacySettings: PrivacySettings;
   setPrivacySettings: React.Dispatch<React.SetStateAction<PrivacySettings>>;
   auditLog: AuditLogEntry[];
   appendAudit: (action: string, detail: string, actor?: AuthSession | null) => void;
-  purgeExpiredSessions: () => number;
-  clearClassData: () => void;
+  purgeExpiredSessions: () => Promise<number>;
+  clearClassData: () => Promise<void>;
 }) {
+  const [statusMessage, setStatusMessage] = useState("");
+  const [busyAction, setBusyAction] = useState<"retention" | "delete" | "">("");
   const exportData = () => {
+    const exportAccount = account
+      ? (({ passwordHash: _passwordHash, ...safeAccount }) => safeAccount)(account)
+      : undefined;
     const payload = {
       exportedAt: new Date().toISOString(),
       teacher: { email: auth.email, name: auth.name },
       sessions,
-      accounts: accounts.map(({ passwordHash, ...account }) => account),
+      account: exportAccount,
       privacySettings,
       auditLog,
     };
@@ -12751,20 +13069,36 @@ function PrivacyControlsPage({
     link.href = url;
     link.download = `classloop-export-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
     appendAudit("export_data", "Exported teacher workspace data.");
+    setStatusMessage("Workspace export downloaded.");
   };
 
-  const deleteClassData = () => {
-    if (!window.confirm("Delete this teacher workspace's class sessions and drafts? Accounts will remain.")) return;
-    clearClassData();
-    appendAudit("delete_class_data", "Deleted class sessions and current draft from the teacher workspace.");
+  const deleteClassData = async () => {
+    if (
+      !window.confirm(
+        "Delete this teacher workspace's sessions, draft, classes, saved rosters, and previous audit history? The account will remain.",
+      )
+    ) {
+      return;
+    }
+    setBusyAction("delete");
+    try {
+      await clearClassData();
+      appendAudit("delete_class_data", "Deleted class sessions and current draft from the teacher workspace.");
+      setStatusMessage("This teacher account's class sessions, draft, classes, and saved rosters were deleted.");
+    } catch {
+      setStatusMessage("Class data was not deleted because this device could not save the change. Check storage access and try again.");
+    } finally {
+      setBusyAction("");
+    }
   };
 
-  const enforceRetention = () => {
+  const enforceRetention = async () => {
     const preview = partitionSessionsByRetention(sessions, privacySettings.retentionDays);
     if (!preview.expired.length) {
       appendAudit("retention_review", `No sessions exceeded the ${privacySettings.retentionDays}-day retention window.`);
+      setStatusMessage(`No sessions exceed the ${privacySettings.retentionDays}-day retention window.`);
       return;
     }
     if (
@@ -12774,8 +13108,16 @@ function PrivacyControlsPage({
     ) {
       return;
     }
-    const deleted = purgeExpiredSessions();
-    appendAudit("retention_enforced", `Deleted ${deleted} expired session${deleted === 1 ? "" : "s"}.`);
+    setBusyAction("retention");
+    try {
+      const deleted = await purgeExpiredSessions();
+      appendAudit("retention_enforced", `Deleted ${deleted} expired session${deleted === 1 ? "" : "s"}.`);
+      setStatusMessage(`Deleted ${deleted} expired session${deleted === 1 ? "" : "s"}.`);
+    } catch {
+      setStatusMessage("No sessions were deleted because this device could not save the change. Check storage access and try again.");
+    } finally {
+      setBusyAction("");
+    }
   };
 
   return (
@@ -12798,10 +13140,18 @@ function PrivacyControlsPage({
                 min={30}
                 max={2555}
                 value={privacySettings.retentionDays}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const requestedDays = Number(event.target.value);
+                  if (!Number.isFinite(requestedDays)) return;
                   setPrivacySettings((current) => ({
                     ...current,
-                    retentionDays: Number(event.target.value) || current.retentionDays,
+                    retentionDays: Math.round(requestedDays),
+                  }));
+                }}
+                onBlur={() =>
+                  setPrivacySettings((current) => ({
+                    ...current,
+                    retentionDays: Math.min(2555, Math.max(30, current.retentionDays)),
                   }))
                 }
               />
@@ -12809,7 +13159,8 @@ function PrivacyControlsPage({
             <button
               className="ghost-button full"
               type="button"
-              onClick={enforceRetention}
+              onClick={() => void enforceRetention()}
+              disabled={Boolean(busyAction)}
             >
               <Search size={17} />
               Enforce retention
@@ -12827,17 +13178,7 @@ function PrivacyControlsPage({
                   setPrivacySettings((current) => ({ ...current, recordingConsentRequired: event.target.checked }))
                 }
               />
-              <span>Require confirmation before live audio notes start.</span>
-            </label>
-            <label className="switch-row">
-              <input
-                type="checkbox"
-                checked={privacySettings.allowStudentExport}
-                onChange={(event) =>
-                  setPrivacySettings((current) => ({ ...current, allowStudentExport: event.target.checked }))
-                }
-              />
-              <span>Allow student-specific data exports from the workspace.</span>
+              <span>Require confirmation before online meeting audio capture starts.</span>
             </label>
             <label className="switch-row">
               <input
@@ -12849,16 +13190,13 @@ function PrivacyControlsPage({
               />
               <span>Keep audit history for sign-ins, publishing, exports, and data changes.</span>
             </label>
-            <label className="switch-row">
-              <input
-                type="checkbox"
-                checked={privacySettings.noTrainingOnStudentData}
-                onChange={(event) =>
-                  setPrivacySettings((current) => ({ ...current, noTrainingOnStudentData: event.target.checked }))
-                }
-              />
-              <span>No training on student data unless you explicitly allow it.</span>
-            </label>
+            <div className="capture-guidance">
+              <ShieldCheck size={17} aria-hidden="true" />
+              <div>
+                <strong>No model training on student data</strong>
+                <small>This protection is always on and cannot be disabled in ClassLoop.</small>
+              </div>
+            </div>
           </div>
         </Panel>
       </section>
@@ -12870,9 +13208,14 @@ function PrivacyControlsPage({
               <UploadCloud size={17} />
               Export workspace data
             </button>
-            <button className="ghost-button full danger-soft" type="button" onClick={deleteClassData}>
+            <button
+              className="ghost-button full danger-soft"
+              type="button"
+              onClick={() => void deleteClassData()}
+              disabled={Boolean(busyAction)}
+            >
               <Trash2 size={17} />
-              Delete class data
+              Delete all class data
             </button>
           </div>
         </Panel>
@@ -12895,6 +13238,7 @@ function PrivacyControlsPage({
           </div>
         </Panel>
       </section>
+      {statusMessage && <p className="settings-message success" role="status">{statusMessage}</p>}
     </div>
   );
 }

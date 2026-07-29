@@ -35,6 +35,7 @@ export default async function handler(request, response) {
           maxBytes: CLOUD_STATE_BODY_MAX_BYTES,
           name: "Cloud workspace state",
         }),
+        { ownerEmail: user.email },
       );
       const { error } = await supabase.from("classloop_workspace_state").upsert({
         owner_id: user.id,

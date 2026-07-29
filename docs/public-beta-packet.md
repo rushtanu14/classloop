@@ -87,7 +87,7 @@ Included:
 - Hosted sample demo and installable PWA shell.
 - Desktop app with encrypted local state.
 - Public Privacy, Terms, EULA, Support, and Download routes.
-- Free tier copy includes multi-device cloud sync when Supabase is configured; Pro billing scaffold is `$3.99/month` for unlimited sessions, live capture, delivery proof, analytics, and exports.
+- Free tier copy includes multi-device cloud sync when Supabase is configured; Pro billing scaffold is `$3.99/month` for unlimited sessions, online meeting capture, delivery proof, analytics, and exports.
 - Stripe Checkout and webhook-owned entitlement scaffolding.
 - Supabase auth/sync scaffolding with credential-absent desktop fallback.
 

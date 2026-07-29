@@ -33,8 +33,11 @@ export function assertRecapEmailAuthorization({ user, profile, session }) {
   }
 }
 
-function studentEmail(student) {
-  return normalizeEmail(student?.linkedAccountEmail || student?.email);
+export function studentEmail(student) {
+  if (student && Object.prototype.hasOwnProperty.call(student, "linkedAccountEmail")) {
+    return normalizeEmail(student.linkedAccountEmail);
+  }
+  return normalizeEmail(student?.email);
 }
 
 function deliverableStudents(session) {
@@ -208,7 +211,7 @@ function markSessionEmailsSent(session, result) {
         status: result.failed.length ? "failed" : "sent",
         message: result.failed.length
           ? `Sent ${result.recipients.length}; failed ${result.failed.length}.`
-          : `Sent recap emails to ${result.recipients.length} students.`,
+          : `Sent recap emails to ${result.recipients.length} student${result.recipients.length === 1 ? "" : "s"}.`,
         recipientCount: result.recipients.length,
         createdAt: result.sentAt,
       },
@@ -239,8 +242,8 @@ async function loadEmailDeliveryProfile(supabase, userId) {
   return data;
 }
 
-async function saveWorkspaceState(supabase, userId, state) {
-  const payload = validateCloudWorkspaceStatePayload(state);
+export async function saveWorkspaceState(supabase, userId, ownerEmail, state) {
+  const payload = validateCloudWorkspaceStatePayload(state, { ownerEmail });
   const { error } = await supabase.from("classloop_workspace_state").upsert({
     owner_id: userId,
     state: payload,
@@ -276,7 +279,7 @@ export default async function handler(request, response) {
       ...state,
       sessions: sessions.map((item, index) => (index === sessionIndex ? markSessionEmailsSent(item, result) : item)),
     };
-    await saveWorkspaceState(supabase, user.id, nextState);
+    await saveWorkspaceState(supabase, user.id, user.email, nextState);
 
     return json(response, 200, result);
   } catch (error) {

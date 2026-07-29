@@ -14,7 +14,7 @@ import {
   manualProCustomerId,
   manualProProfileColumns,
 } from "../server/backend/api/billing/manual-pro.js";
-import { billingProfileFromRow, profilePatchColumns } from "../server/backend/api/profile.js";
+import { billingProfileFromRow, profilePatchColumns, profileSelectColumns } from "../server/backend/api/profile.js";
 import { isPaidPlan, manualProBillingProfileForEmail } from "../.test-build/src/cloud.js";
 
 function fakeSupabase() {
@@ -221,6 +221,11 @@ assert.deepEqual(profile, {
 assert.equal(manualProCustomerId("rushilcpm02@gmail.com"), "manual_pro_rushilcpm02_gmail_com");
 assert.equal(isManualProCustomerId("manual_pro_rushilcpm02_gmail_com"), true, "Manual Pro ids should be distinguishable from Stripe ids");
 assert.deepEqual(manualProProfileColumns("teacher@classloop.test"), {}, "Non-owner emails should not get manual Pro columns");
+assert.match(
+  profileSelectColumns,
+  /subscription_id/,
+  "Profile reads must include subscription_id so a real owner subscription can take precedence over the manual grant.",
+);
 assert.deepEqual(
   applyManualProGrantToRow({
     email: "rushilcpm02@gmail.com",

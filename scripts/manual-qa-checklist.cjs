@@ -92,8 +92,8 @@ const sections = [
     "Supabase/Stripe plugins for live projects, Playwright for local fallbacks",
     [
       "With credentials absent, confirm desktop/local mode works and hosted sync/billing failures are clear.",
-      "With test credentials configured, verify Supabase login/logout, token expiry, upload/download, conflict resolution, and offline queue behavior.",
-      "Verify the Pro button opens the hidden embedded Stripe Checkout page, hosted Checkout fallback still works, return-to-ClassLoop verification keeps Pro locked until paid webhook/profile confirmation, and portal, downgrade/cancel, canceled/past-due/unpaid states, Pro-only live capture, and locked-feature UI behave correctly.",
+      "With test credentials configured, verify Supabase login/logout happens only from the main sign-in/create-account page; Plan options must show connected state plus upload/download/disconnect controls without another email/password form.",
+      "Verify Upgrade to Pro opens the Stripe Payment Link, return-to-ClassLoop verification keeps Pro locked until paid webhook/profile confirmation, verified Stripe-backed Pro changes the action to Unsubscribe and opens Stripe's direct cancellation flow, included/manual Pro shows no fake cancellation action, and canceled/past-due/unpaid states remove paid access appropriately.",
       "Attempt client-side entitlement tampering and confirm profile/API helpers ignore paid fields submitted by the client.",
     ],
   ],

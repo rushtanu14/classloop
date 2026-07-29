@@ -4,6 +4,8 @@ import { validateProfilePatchPayload } from "./validators.js";
 
 const PROFILE_RATE_LIMIT = { endpoint: "profile", limit: 120, windowMs: 60 * 1000 };
 const PROFILE_BODY_MAX_BYTES = 2_000;
+export const profileSelectColumns =
+  "email, role, plan_tier, subscription_status, stripe_customer_id, subscription_id, current_period_end, no_training_on_student_data";
 
 export function billingProfileFromRow(row) {
   const entitledRow = applyManualProGrantToRow(row);
@@ -28,7 +30,7 @@ async function ensureProfile(supabase, user) {
   const initialRole = ["teacher", "student", "individual"].includes(requestedRole) ? requestedRole : "teacher";
   const { data, error } = await supabase
     .from("classloop_profiles")
-    .select("email, role, plan_tier, subscription_status, stripe_customer_id, current_period_end, no_training_on_student_data")
+    .select(profileSelectColumns)
     .eq("id", user.id)
     .maybeSingle();
   if (error) throw error;
@@ -45,7 +47,7 @@ async function ensureProfile(supabase, user) {
       no_training_on_student_data: true,
       ...manualProProfileColumns(user.email || ""),
     })
-    .select("email, role, plan_tier, subscription_status, stripe_customer_id, current_period_end, no_training_on_student_data")
+    .select(profileSelectColumns)
     .single();
   if (insertError) throw insertError;
   return applyManualProGrantToRow(inserted);
@@ -79,7 +81,7 @@ export default async function handler(request, response) {
       const { data, error } = await supabase
         .from("classloop_profiles")
         .upsert({ id: user.id, email: user.email || "", ...allowed, updated_at: new Date().toISOString() })
-        .select("email, role, plan_tier, subscription_status, stripe_customer_id, current_period_end, no_training_on_student_data")
+        .select(profileSelectColumns)
         .single();
       if (error) throw error;
       const entitledData = applyManualProGrantToRow(data);

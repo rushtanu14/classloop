@@ -179,7 +179,7 @@ tests/
 ## Pricing
 
 - Free: 1 generated session per day, transcript import, read/search/draft Google/Zoom workflow surfaces, student accounts, controlled-pilot recap email delivery, CSV roster tools, local encrypted storage, and multi-device cloud sync when Supabase is configured.
-- Pro: `$3.99/month` for unlimited generated sessions, live in-person/online capture, delivery proof, private analytics, and JSON/CSV/print report exports.
+- Pro: `$3.99/month` for unlimited generated sessions, online meeting capture, delivery proof, private analytics, and JSON/CSV/print report exports.
 - School/team later: per-teacher seats with SSO, retention controls, audit/export, admin policy, and reviewed student-data agreements.
 
 ClassLoop should follow a Granola-style business shape without copying meeting-note pricing exactly: give teachers enough Free value to trust the workflow, charge when it becomes a weekly habit, and avoid per-minute transcript pricing so long classes do not feel punished.

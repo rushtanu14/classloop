@@ -145,7 +145,7 @@ Keep external services free-first and narrow:
 - Email should work with a Gmail account the user owns, including a no-reply-like account such as `classloop.noreply@gmail.com`. Do not imply ClassLoop can generate Gmail accounts or send from unauthenticated domains.
 - Do not add paid API-key features to the working app.
 - Do not show Google Classroom OAuth posting, LMS posting, OpenAI transcription, or custom transcription-service hooks unless the user explicitly asks to reintroduce external integrations.
-- Audio capture should use free browser capabilities only: in-person microphone capture and browser tab/window capture for online meetings when available. Transcript paste/upload must remain the reliable free path, and live capture should create reviewable unknown speaker segments instead of claiming biometric voice identification.
+- Audio capture should use free browser capabilities only for browser tab/window capture during online meetings when available. Transcript paste/upload must remain the reliable free path, and online capture should create reviewable unknown speaker segments instead of claiming biometric voice identification. Do not reintroduce the removed in-person class capture mode.
 
 ## Hosted Backend / Freemium Notes
 
@@ -153,7 +153,7 @@ Keep external services free-first and narrow:
 - Paid access is scaffolded with Stripe Checkout plus `api/billing/webhook.js`; the webhook updates `classloop_profiles` so entitlements are server-owned.
 - The local desktop app must remain useful without Supabase or Stripe credentials.
 - Free tier target: 1 generated session per day, transcript import, CSV import/export, student portal preview, and local desktop storage.
-- Pro target: `$3.99/month` for unlimited sessions, live in-person/online capture modes, multi-device cloud login/sync, delivery logs, privacy exports, and advanced reports.
+- Pro target: `$3.99/month` for unlimited sessions, online meeting capture, multi-device cloud login/sync, delivery logs, privacy exports, and advanced reports.
 - Never commit `.env.local`; use `.env.example` as the setup checklist.
 
 ## Real Session Example
@@ -275,7 +275,7 @@ Essential Questions:
 - Paid access is scaffolded with Stripe Checkout plus `api/billing/webhook.js`; the webhook updates `classloop_profiles` so entitlements are server-owned.
 - The local desktop app must remain useful without Supabase or Stripe credentials.
 - Free tier target: 1 generated session per day, transcript import, CSV import/export, student portal preview, and local desktop storage.
-- Pro target: `$3.99/month` for unlimited sessions, live in-person/online capture modes, multi-device cloud login/sync, delivery logs, privacy exports, and advanced reports.
+- Pro target: `$3.99/month` for unlimited sessions, online meeting capture, multi-device cloud login/sync, delivery logs, privacy exports, and advanced reports.
 - Never commit `.env.local`; use `.env.example` as the setup checklist.
 
 ## Testing

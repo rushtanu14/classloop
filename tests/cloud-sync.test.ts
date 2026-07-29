@@ -8,21 +8,28 @@ import {
   type QueuedCloudOperation,
 } from "../src/cloudSync.js";
 import {
+  __setSupabaseClientForTests,
   buildStripePaymentLinkUrl,
   cloudRequest,
   createCloudAccount,
   ensureCloudAccount,
   getBackendStatus,
   getCloudAuthState,
+  getCloudPasswordRecoveryRedirectUrl,
   getCloudSession,
+  isStripeBillingPortalUrl,
+  requestCloudPasswordReset,
   requestCloudEmailChange,
+  resendCloudConfirmation,
   signIntoCloud,
   signOutCloud,
+  updateCloudPassword,
 } from "../src/cloud.js";
 import { partitionSessionsAndDraftByRetention, partitionSessionsByRetention } from "../src/retention.js";
 import {
   mergeOwnerCloudWorkspaceState,
   parseCloudWorkspaceResponse,
+  reassignOwnerEmailInWorkspace,
   toOwnerCloudWorkspaceState,
 } from "../src/cloudWorkspace.js";
 
@@ -82,6 +89,21 @@ const loggedIn = transitionCloudAuthState({ status: "signed_out" }, {
 });
 assertEqual(loggedIn.status, "signed_in", "login transition should enter signed-in state");
 assertEqual(transitionCloudAuthState(loggedIn, { type: "logout" }).status, "signed_out", "logout transition should clear cloud auth state");
+assertEqual(
+  isStripeBillingPortalUrl("https://billing.stripe.com/p/session/cancel"),
+  true,
+  "Stripe billing portal URLs should be accepted",
+);
+assertEqual(
+  isStripeBillingPortalUrl("https://billing.stripe.com.attacker.test/p/session/cancel"),
+  false,
+  "lookalike Stripe hostnames must be rejected",
+);
+assertEqual(
+  isStripeBillingPortalUrl("http://billing.stripe.com/p/session/cancel"),
+  false,
+  "Stripe billing portal URLs must use HTTPS",
+);
 assertEqual(
   transitionCloudAuthState(loggedIn, { type: "token_expired", nowMs: futureExpiry * 1000 + 1_000 }).status,
   "expired",
@@ -174,6 +196,37 @@ assertEqual(cloudWorkspace.personalMeetings.length, 1, "cloud upload must not in
 assertEqual(cloudWorkspace.classGroups.length, 1, "cloud upload must not include another owner's classes");
 assertEqual(cloudWorkspace.rosterTemplates.length, 1, "cloud upload must not include another owner's rosters");
 assertEqual(cloudWorkspace.auditLog.length, 1, "cloud upload must not include another owner's audit history");
+
+const reassignedWorkspace = reassignOwnerEmailInWorkspace(
+  localWorkspace,
+  "teacher-a@classloop.test",
+  "teacher-a-new@classloop.test",
+);
+assertEqual(
+  reassignedWorkspace.sessions.find((session) => session.id === "teacher-a-session")?.ownerEmail,
+  "teacher-a-new@classloop.test",
+  "local email changes must migrate owned sessions to the new address",
+);
+assertEqual(
+  reassignedWorkspace.personalMeetings.find((meeting) => meeting.id === "teacher-a-meeting")?.ownerEmail,
+  "teacher-a-new@classloop.test",
+  "local email changes must migrate personal meetings",
+);
+assertEqual(
+  reassignedWorkspace.draft?.ownerEmail,
+  "teacher-a-new@classloop.test",
+  "local email changes must migrate the active draft",
+);
+assertEqual(
+  reassignedWorkspace.auditLog.find((entry) => entry.id === "teacher-a-audit")?.actorEmail,
+  "teacher-a-new@classloop.test",
+  "local email changes must migrate owned audit history",
+);
+assertEqual(
+  reassignedWorkspace.sessions.find((session) => session.id === "teacher-b-session")?.ownerEmail,
+  "teacher-b@classloop.test",
+  "local email changes must not alter another account's workspace",
+);
 
 const mergedWorkspace = mergeOwnerCloudWorkspaceState(
   localWorkspace,
@@ -281,6 +334,31 @@ assertEqual(
   "cloud login should fail gracefully when Supabase credentials are absent",
 );
 assertEqual(
+  (await signIntoCloud("bad email@example.com", "password")).code,
+  "invalid_email",
+  "cloud signin should reject an invalid email before checking Supabase configuration",
+);
+assertEqual(
+  (await createCloudAccount("bad email@example.com", "password")).code,
+  "invalid_email",
+  "cloud signup should reject an invalid email before checking Supabase configuration",
+);
+assertEqual(
+  (await createCloudAccount("bad()local@example.com", "password")).code,
+  "invalid_email",
+  "cloud signup should reject invalid unquoted local-part characters",
+);
+assertEqual(
+  (await resendCloudConfirmation("bad email@example.com")).code,
+  "invalid_email",
+  "confirmation resend should reject an invalid email before checking Supabase configuration",
+);
+assertEqual(
+  (await requestCloudEmailChange("teacher@classloop.test", "password", "bad email@example.com")).code,
+  "invalid_email",
+  "cloud email changes should reject an invalid new email before checking Supabase configuration",
+);
+assertEqual(
   (await createCloudAccount("teacher@classloop.test", "password")).code,
   "not_configured",
   "cloud signup should identify absent Supabase credentials",
@@ -306,3 +384,173 @@ await assertRejects(
   /Sign in to cloud sync/i,
   "cloud sync writes without credentials should fail before touching the network",
 );
+
+const originalFetch = globalThis.fetch;
+const testWindow = globalThis as typeof globalThis & {
+  window?: {
+    localStorage: Pick<Storage, "getItem" | "setItem" | "removeItem">;
+  };
+};
+const storage = new Map<string, string>();
+Object.defineProperty(globalThis, "window", {
+  configurable: true,
+  value: {
+    localStorage: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
+      removeItem: (key: string) => {
+        storage.delete(key);
+      },
+    },
+  },
+});
+
+let getSessionEmail = "teacher@classloop.test";
+const resetPasswordRequests: Array<{ email: string; redirectTo?: string }> = [];
+const updateUserRequests: Array<{ password?: string }> = [];
+let signOutCalledWith: unknown = null;
+let failSignOut = false;
+let failUpdateUser = false;
+let signupIdentityMode: "confirmed_existing" | "new_unconfirmed" = "confirmed_existing";
+__setSupabaseClientForTests({
+  auth: {
+    getSession: async () => ({
+      data: {
+        session: {
+          access_token: "mock-access-token",
+          expires_at: futureExpiry,
+          user: { email: getSessionEmail },
+        },
+      },
+    }),
+    resetPasswordForEmail: async (email: string, options: { redirectTo?: string }) => {
+      resetPasswordRequests.push({ email, redirectTo: options.redirectTo });
+      return { data: {}, error: null };
+    },
+    signUp: async ({ email }: { email: string }) => ({
+      data: {
+        session: null,
+        user: {
+          email,
+          identities: signupIdentityMode === "confirmed_existing" ? [] : [{ id: "new-email-identity" }],
+        },
+      },
+      error: null,
+    }),
+    updateUser: async (payload: { password?: string }) => {
+      updateUserRequests.push(payload);
+      if (failUpdateUser) return { data: { user: null }, error: new Error("expired recovery session") };
+      return { data: { user: { email: getSessionEmail } }, error: null };
+    },
+    signOut: async (options?: unknown) => {
+      signOutCalledWith = options;
+      if (failSignOut) throw new Error("sign out failed");
+      return { error: null };
+    },
+  },
+} as never);
+
+const passwordReset = await requestCloudPasswordReset(" Teacher@ClassLoop.test ");
+assertEqual(passwordReset.ok, true, "cloud password reset should return a generic success for valid email");
+assertEqual(
+  passwordReset.code,
+  "password_reset_requested",
+  "cloud password reset should use a non-secret request status",
+);
+assertEqual(
+  passwordReset.message,
+  "If a ClassLoop cloud account exists for that email, a password reset email will be sent.",
+  "cloud password reset should not reveal whether the account exists",
+);
+assertEqual(resetPasswordRequests[0]?.email, "teacher@classloop.test", "cloud password reset should normalize the email");
+assertEqual(
+  resetPasswordRequests[0]?.redirectTo,
+  getCloudPasswordRecoveryRedirectUrl(),
+  "cloud password reset should use the ClassLoop recovery redirect",
+);
+assertEqual(
+  (await requestCloudPasswordReset("bad email@example.com")).code,
+  "invalid_email",
+  "cloud password reset should reject malformed emails before Supabase calls",
+);
+const shortPasswordUpdate = await updateCloudPassword("short");
+assertEqual(shortPasswordUpdate.ok, false, "cloud password update should reject short passwords");
+assertEqual(
+  updateUserRequests.length,
+  0,
+  "cloud password update should reject short passwords before calling Supabase",
+);
+const passwordUpdate = await updateCloudPassword("new-cloud-password");
+assertEqual(passwordUpdate.ok, true, "cloud password update should succeed for a recovery session");
+assertEqual(
+  passwordUpdate.message,
+  "Cloud password updated. Sign in with the new password.",
+  "cloud password update should return a safe success message",
+);
+assertEqual(
+  updateUserRequests[0]?.password,
+  "new-cloud-password",
+  "cloud password update should pass only the new password to Supabase",
+);
+failUpdateUser = true;
+const failedPasswordUpdate = await updateCloudPassword("another-cloud-password");
+assertEqual(failedPasswordUpdate.ok, false, "cloud password update should handle Supabase failures safely");
+assertEqual(
+  failedPasswordUpdate.message,
+  "Unable to update the cloud password. Request a fresh reset link and try again.",
+  "cloud password update should not expose Supabase error details",
+);
+const existingSignup = await createCloudAccount("existing@classloop.test", "classloop-password");
+assertEqual(
+  existingSignup.code,
+  "email_confirmation_required",
+  "duplicate-safe signup responses should not reveal whether an account already exists",
+);
+signupIdentityMode = "new_unconfirmed";
+const newUnconfirmedSignup = await createCloudAccount("new-unconfirmed@classloop.test", "classloop-password");
+assertEqual(
+  newUnconfirmedSignup.code,
+  "email_confirmation_required",
+  "no-session signup with a non-empty identities array should remain an unconfirmed new signup",
+);
+assertEqual(
+  existingSignup.message,
+  newUnconfirmedSignup.message,
+  "new and duplicate no-session signups should use the same account-enumeration-safe message",
+);
+
+let fetchCalls = 0;
+globalThis.fetch = async () => {
+  fetchCalls += 1;
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+};
+await assertRejects(
+  cloudRequest("/api/cloud-state", { method: "GET" }, "other@classloop.test"),
+  /does not match this ClassLoop login/i,
+  "cloud requests should fail closed when the Supabase session email is not the active local account",
+);
+assertEqual(fetchCalls, 0, "cloud request email mismatch must fail before sending the API request");
+await cloudRequest("/api/cloud-state", { method: "GET" }, "teacher@classloop.test");
+assertEqual(fetchCalls, 1, "cloud request should continue when the session email matches the expected email");
+
+storage.set("classloop:cloud-offline-queue:v1", JSON.stringify([{ body: "legacy-sensitive-data" }]));
+failSignOut = true;
+await assertRejects(signOutCloud(), /sign out failed/i, "signOutCloud should surface local Supabase sign-out failures");
+assertEqual(
+  testWindow.window?.localStorage.getItem("classloop:cloud-offline-queue:v1"),
+  null,
+  "signOutCloud should clear the legacy queue even when Supabase sign-out fails",
+);
+assertEqual(
+  JSON.stringify(signOutCalledWith),
+  JSON.stringify({ scope: "local" }),
+  "signOutCloud should clear the local Supabase session only",
+);
+
+globalThis.fetch = originalFetch;
+__setSupabaseClientForTests(null);

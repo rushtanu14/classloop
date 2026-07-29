@@ -34,7 +34,7 @@ Snapshot checked 2026-06-01 from Granola's public pricing and help pages:
 ClassLoop adaptation:
 
 - Free: enough value for a teacher to trust the workflow, including sample demo, transcript import, roster import, student preview, and a daily/session limit.
-- Teacher Pro: low-cost individual plan for unlimited sessions, saved classes, live in-person/online capture, reports/exports, delivery logs, advanced analytics, and richer assistant features. Current target remains `$3.99/month`; multi-device cloud sync belongs to Free when Supabase is configured.
+- Teacher Pro: low-cost individual plan for unlimited sessions, saved classes, online meeting capture, reports/exports, delivery logs, advanced analytics, and richer assistant features. Current target remains `$3.99/month`; multi-device cloud sync belongs to Free when Supabase is configured.
 - School/team later: per-teacher or per-seat plan with admin controls, SSO, retention controls, audit/export, district-ready support, and stricter privacy/legal review.
 - Avoid per-minute pricing early. Teachers should not feel punished for long classes or messy transcripts.
 - Make the upgrade moment value-based: "I need this every week and want history, exports, delivery proof, and less manual cleanup."
@@ -59,8 +59,8 @@ The first buying trigger is not "AI notes." It is:
 
 | Plan | Buyer | Promise | Limit or Gate |
 | --- | --- | --- | --- |
-| Free | Teacher trying it once or weekly-light user | Real transcript-to-follow-up value with local desktop storage | 1 generated session per day; live capture and advanced repeat-use layers locked |
-| Teacher Pro | Teacher who uses ClassLoop every week | Unlimited sessions, live capture, delivery proof, analytics, and exports | Requires Stripe-verified entitlement; no local/client unlock |
+| Free | Teacher trying it once or weekly-light user | Real transcript-to-follow-up value with local desktop storage | 1 generated session per day; online meeting capture and advanced repeat-use layers locked |
+| Teacher Pro | Teacher who uses ClassLoop every week | Unlimited sessions, online meeting capture, delivery proof, analytics, and exports | Requires Stripe-verified entitlement; no local/client unlock |
 | School/team pilot | Department, tutoring center, or school admin | Shared governance, retention, audit/export, support, and admin policy | Only after reviewed legal, privacy, support, and hosted data agreements |
 
 ### Conversion Moments
@@ -68,7 +68,7 @@ The first buying trigger is not "AI notes." It is:
 - Teacher hits the Free daily session cap during a real week.
 - Teacher wants to reuse saved classes and reports across multiple sessions.
 - Teacher needs delivery proof, completion history, or exports for follow-up.
-- Teacher wants live in-person/online capture after trusting transcript import.
+- Teacher wants online meeting capture after trusting transcript import.
 - Teacher wants the same workspace on desktop, browser, and phone.
 
 ### Launch Metrics
@@ -324,7 +324,7 @@ Title: Free to try, paid when it becomes a weekly habit.
 Bullets:
 
 - Free tier for initial trust and lightweight use.
-- Teacher Pro for unlimited sessions, live capture, history, exports, delivery proof, and advanced assistant workflows.
+- Teacher Pro for unlimited sessions, online meeting capture, history, exports, delivery proof, and advanced assistant workflows.
 - School/team plans only after privacy, admin, and legal readiness.
 
 ### Slide 8: Beta Ask

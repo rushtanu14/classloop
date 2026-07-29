@@ -275,7 +275,7 @@ Make the code changes and then summarize exactly what changed and how you verifi
 
 ## 2026-05-06 Feature QA Prompt: Access, Appearance, Storage, Capture, Privacy, Rosters
 
-Use this prompt when testing the ClassLoop feature set after appearance, storage, browser tests, live audio notes, delivery logging, privacy controls, roster templates, or sidebar navigation are changed:
+Use this prompt when testing the ClassLoop feature set after appearance, storage, browser tests, online meeting capture, delivery logging, privacy controls, roster templates, or sidebar navigation are changed:
 
 ```text
 You are testing ClassLoop. Verify functionality; do not redesign the app.
@@ -306,12 +306,21 @@ Feature checks:
    - Sign back in and confirm the student's saved theme returns.
 10. Teacher appearance settings remain teacher-account scoped.
 11. Image backdrop URL updates the live preview and app background when a safe HTTPS image URL is used.
-12. Live capture modes require verified Pro plus consent confirmation when privacy settings require it; Free users should see locked in-person/online capture cards and keep transcript/Zoom transcript import available.
+12. The removed in-person class capture control stays absent. Online meeting capture requires verified Pro plus consent confirmation when privacy settings require it; Free users should see one locked online capture card and keep transcript/Zoom transcript import available.
 13. Paid/API-key/external-platform features do not pretend to be live: Whisper upload transcription only works through the hosted `/api/transcribe` endpoint when `OPENAI_API_KEY` is configured; Google Classroom posting, fully automatic Google Calendar/Docs/Gmail actions, and any live Zoom bot remain OAuth/API setup work. Google Classroom and Zoom cloud surfaces are allowed only as honest scaffolds until OAuth/API credentials are connected.
 14. Publish preview shows delivery logs after email send actions, supports teacher toggles for email recipients, and includes an editable class-wide Google Classroom post composer.
 15. Privacy page is accessible to teachers and exposes retention settings, export, delete class data, consent settings, and audit log.
 16. After students mark a follow-up complete, student follow-up pages can include a student note/file link and then show a bottom-right ClassLoop usefulness feedback popup; low ratings ask what would make ClassLoop better, post product feedback to the creator feedback endpoint without student names/emails, and do not appear in teacher Analytics or action queues.
 17. Account/session/browser roster fallback storage uses secure classloop:secure:* localStorage keys; legacy plain classloop:accounts/session keys should migrate away.
+17a. Real account creation rejects malformed email addresses before any Supabase request; every valid non-demo signup attempts Supabase Auth with the dashboard confirmation redirect; an unconfirmed user can continue locally and sees a persistent status telling them to check the correct email inbox for the confirmation link.
+17b. Account identity is unique by normalized email across roles. Creating a second local or cloud account with the same email never authenticates that email, never exposes its prior sessions, returns neutral cloud-confirmation copy, and keeps the local account pending until a real Supabase session is established.
+17c. Pending cloud confirmation survives logout/relogin. A pending student account cannot claim previously published sessions by reusing an email, and changing an email updates the inbox reminder to the new address.
+17d. Password recovery accepts only Supabase recovery proof: implicit recovery tokens and PKCE codes work, while an ordinary signed-in session or a manually added recovery query cannot unlock password replacement.
+17e. Cloud profile, billing, workspace upload/download, and recap-delivery actions require a Supabase session whose email matches the current local account. Disconnect clears local Supabase credentials even if the remote logout request fails.
+17f. Delete session is owner-scoped, persists before reporting success, survives reload, cannot be resurrected by an older delayed save, and only queues cloud sync after the local durable write succeeds.
+17g. Exercise every class, roster, retention, and privacy deletion confirmation, including cancel, accept, teacher scoping, reload durability, and forced encrypted-write failure. Never show deletion success when persistence fails.
+17h. Exercise transcript file upload, unmatched-speaker add/link controls, publish, recipient selection, authenticated recap delivery, cloud upload/download, and visible post-action state.
+17i. Backend cloud snapshots validate every nested owner/actor email, reject local `accounts` and `billingProfile` fields, require no-training and bounded retention values, and preserve an explicitly revoked blank student-account link instead of falling back to the roster email.
 18. Responsive layout has no horizontal overflow at a phone-sized viewport.
 19. WCAG-targeted checks pass for keyboard navigation, focus order, visible focus indicators, accessible control names, live status announcements, contrast on key text/buttons, and mobile PWA/add-to-home-screen readability.
 20. Error-state recovery checks pass for boot loading/data-outline delay, bad transcript format, malformed URLs, sync API outage/local fallback, non-JSON sync responses, browser storage read/write failures, download-manifest outages/malformed/Vercel Blob URLs, package init failures, desktop storage corruption, and privacy-safe actionable logging.
@@ -356,19 +365,19 @@ Playwright is a required dev dependency for ClassLoop browser QA.
 - Browser fallback storage should use `classloop:secure:*` keys with AES-GCM encryption and migrate legacy plain localStorage keys.
 - This is local encryption at rest. It is not true multi-device sync. Real multi-device student access requires a backend database, server-side auth/session validation, HTTPS, and school-approved identity/OAuth.
 
-## 2026-05-06 Live Audio Notes
+## 2026-05-06 Online Meeting Capture
 
 - Browser live speech recognition is the only audio-to-text path kept in the working app.
 - Transcript paste/upload is the reliable free fallback.
 - Do not add `/api/transcribe`, OpenAI speech-to-text, custom transcription-provider APIs, or external transcription-dependent online-call capture unless the user explicitly reopens paid/external integration work.
-- Live audio notes should require explicit in-app consent when privacy settings require it.
+- Online meeting capture should require explicit in-app consent when privacy settings require it.
 
 ## 2026-05-06 Free-First External Services Policy
 
 - The user does not want to pay for integrations during the prototype stage.
 - ClassLoop cannot generate a Gmail account or send from an address the user does not own.
 - Free email path: the user creates/owns a Gmail account such as `classloop.noreply@gmail.com`, enables 2-Step Verification, creates an app password, and configures ClassLoop to send from that mailbox with `CLASSLOOP_REPLY_TO` set to the teacher/support inbox.
-- Google Classroom and Zoom cloud import can be shown as launch scaffolds only when the UI is explicit that OAuth/API connection is not live yet. Keep LMS posting, OpenAI transcription, custom transcription endpoints, and live Zoom bots removed/deferred because they require external integration setup or paid API-key paths. Browser-only in-person and online meeting capture are Pro-only best-effort features; transcript paste/upload and Zoom transcript import remain the reliable Free path.
+- Google Classroom and Zoom cloud import can be shown as launch scaffolds only when the UI is explicit that OAuth/API connection is not live yet. Keep LMS posting, OpenAI transcription, custom transcription endpoints, live Zoom bots, and the removed in-person class capture mode out of the product. Browser-only online meeting capture is a Pro-only best-effort feature; transcript paste/upload and Zoom transcript import remain the reliable Free path.
 - If no external credentials are configured, ClassLoop must remain useful through transcript paste/upload, local review, publish preview, student portal, roster manager, and analytics.
 
 ## 2026-05-06 Roster Template Notes
@@ -429,10 +438,10 @@ When using the ClassLoop testing script, also verify:
   - Vercel browser deployment config in `vercel.json`.
 - Freemium MVP:
   - Free: `$0`, 1 generated session per day, transcript import, Google/Zoom workflow scaffolding, student accounts, recap email delivery, CSV import/export, student portal preview, local desktop storage.
-  - Pro: `$3.99/month`, unlimited generated sessions, live in-person/online capture, private analytics, and JSON/CSV/print report exports.
+  - Pro: `$3.99/month`, unlimited generated sessions, online meeting capture, private analytics, and JSON/CSV/print report exports.
 - Added teacher-only Plan options and Privacy controls.
 - Added `AGENT.md` operational memory at repo root.
-- Consolidated `main` keeps the richer features: live audio notes, browser meeting capture, Gmail/SMTP delivery, class manager, publish audit, and submitted/reviewed student workflow.
+- Consolidated `main` keeps browser online-meeting capture, Gmail/SMTP delivery, class manager, publish audit, and submitted/reviewed student workflow. The in-person class capture mode is removed.
 - Recap email delivery is server-authoritative: send requests use a published `sessionId` and owner email instead of trusting a client-provided draft session.
 - Verification passed on `main`: `npm run build`, `npm run test:import`, `node -c desktop/main.cjs`, `node --check api/*.js api/billing/*.js`, `npm run test:browser`, and `git diff --check`.
 
@@ -537,3 +546,10 @@ All three validate with `quick_validate.py`.
 - Download and Support pages include an installer feedback form for clean-machine failures, OS blocking, checksum mismatch, checkout issues, and cloud sync problems. The form posts to `/api/feedback` with installer metadata and should notify the creator when feedback SMTP/Gmail env vars are configured.
 - `public/classloop-downloads.json` should point to GitHub Release URLs for macOS DMGs/ZIPs, Windows EXE/ZIPs, Linux AppImages, and `SHA256SUMS.txt`. Keep release binaries out of Vercel Blob.
 - QA prompt update: when testing public release readiness, verify `#/download`, `#/support`, `#/terms`, `#/privacy`, and `#/eula` across desktop and phone widths; submit a mocked installer feedback report; confirm Vercel Blob URLs remain blocked; confirm missing URLs stay `Packaging pending`; confirm legal copy is treated as a launch baseline pending final legal review.
+
+## 2026-07-28 Cloud Sign-In And Pro Cancellation Update
+
+- Cloud email/password entry now stays on the main ClassLoop sign-in/create-account page. Plan options shows cloud connection status and upload/download/disconnect controls without a second login form.
+- Verified Stripe-backed Pro accounts see `Unsubscribe`; the action posts through the authenticated billing portal endpoint and opens Stripe's direct subscription-cancellation flow.
+- Included/manual founder Pro access shows `Pro access included` because no Stripe subscription exists to cancel. A real active Stripe subscription now takes precedence over the founder grant if one is attached later.
+- QA must cover disconnected and connected sync states, removal of Plan-page credentials, authenticated Stripe portal authorization, strict `billing.stripe.com` redirect validation, and the separate Stripe-backed versus included-Pro button states.

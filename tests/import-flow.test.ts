@@ -967,38 +967,38 @@ assert(
 
 const liveCaptureRoster = "Maya Chen, maya@classloop.test\nAarav Patel, aarav@classloop.test";
 
-const noisyInPersonCaptureSession = createGeneratedSession({
-  title: "Noisy In-Person Capture",
+const noisyOnlineCaptureSession = createGeneratedSession({
+  title: "Noisy Online Capture",
   template: "Math review",
-  captureMode: "in_person",
-  captureSourceLabel: "In-person class capture",
+  captureMode: "online_meeting",
+  captureSourceLabel: "Online meeting capture",
   captureDurationSeconds: 74,
   transcriptSource: "live_transcription",
   transcript: [
-    "Unknown in-person voice 1: um uh like the ratio is maybe six over x and audio unclear near the projector.",
+    "Unknown meeting voice 1: um uh like the ratio is maybe six over x and audio unclear near the projector.",
     "Maya Chen: Is the similar triangles practice due Friday?",
     "Aarav Patel: I can explain the scale factor if the room is quiet.",
-    "Unknown in-person voice 2: [inaudible] homework problem seven maybe okay so yeah.",
+    "Unknown meeting voice 2: [inaudible] homework problem seven maybe okay so yeah.",
   ].join("\n"),
   notes: "Noisy room. Teacher will review unknown speaker segments before publishing.",
   roster: liveCaptureRoster,
   resources: "https://example.com/noisy-capture-review",
 });
-assertEqual(noisyInPersonCaptureSession.capture?.mode, "in_person", "in-person capture should preserve capture mode");
-assertEqual(noisyInPersonCaptureSession.capture?.transcriptSource, "live_transcription", "in-person capture should mark live transcript source");
-assertEqual(noisyInPersonCaptureSession.capture?.durationSeconds, 74, "in-person capture should preserve duration for review context");
+assertEqual(noisyOnlineCaptureSession.capture?.mode, "online_meeting", "online capture should preserve capture mode");
+assertEqual(noisyOnlineCaptureSession.capture?.transcriptSource, "live_transcription", "online capture should mark live transcript source");
+assertEqual(noisyOnlineCaptureSession.capture?.durationSeconds, 74, "online capture should preserve duration for review context");
 assert(
-  noisyInPersonCaptureSession.importWarnings?.some((warning) => warning.id === "noisy-asr" && warning.severity === "blocking") ?? false,
-  "noisy in-person live capture should require teacher review before publishing",
+  noisyOnlineCaptureSession.importWarnings?.some((warning) => warning.id === "noisy-asr" && warning.severity === "blocking") ?? false,
+  "noisy online live capture should require teacher review before publishing",
 );
 assert(
-  (noisyInPersonCaptureSession.unmatchedParticipants ?? []).some((participant) =>
-    /Unknown in-person voice/i.test(participant.name),
+  (noisyOnlineCaptureSession.unmatchedParticipants ?? []).some((participant) =>
+    /Unknown meeting voice/i.test(participant.name),
   ),
-  "unknown in-person live capture segments should stay unmatched until the teacher links them",
+  "unknown online live capture segments should stay unmatched until the teacher links them",
 );
 assert(
-  noisyInPersonCaptureSession.participationEvents.every((event) => event.approved === false || event.reviewRequired),
+  noisyOnlineCaptureSession.participationEvents.every((event) => event.approved === false || event.reviewRequired),
   "noisy live-capture participation should not auto-approve student-specific signals",
 );
 

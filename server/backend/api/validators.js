@@ -40,6 +40,11 @@ const requiredTrimmed = (max, pattern) => field.string({ max, pattern });
 const optionalTrimmed = (max, defaultValue, pattern) => field.string({ max, optional: true, defaultValue, pattern });
 const optionalEmail = field.string({ max: 320, optional: true, pattern: emailPattern });
 const emailOrBlank = field.string({ max: 320, pattern: /^$|^[^\s@]+@[^\s@]+\.[^\s@]+$/ });
+const optionalEmailOrBlank = field.string({
+  max: 320,
+  optional: true,
+  pattern: /^$|^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+});
 
 const studentSchema = {
   id: requiredTrimmed(160, looseIdPattern),
@@ -48,7 +53,7 @@ const studentSchema = {
   avatarColor: requiredTrimmed(40),
   guardian: optionalTrimmed(200),
   aliases: field.array(requiredTrimmed(160), { max: 20, optional: true, defaultValue: [] }),
-  linkedAccountEmail: optionalEmail,
+  linkedAccountEmail: optionalEmailOrBlank,
   inviteSentAt: optionalIsoDate,
 };
 
@@ -107,6 +112,8 @@ const importWarningSchema = {
 };
 
 const captureSchema = {
+  // Legacy snapshots may contain audio/in_person. Current clients expose only
+  // transcript and online_meeting, but old saved sessions must remain readable.
   mode: field.enum(["transcript", "audio", "in_person", "online_meeting"]),
   sourceLabel: requiredTrimmed(220),
   capturedAt: requiredIsoDate,
@@ -276,7 +283,7 @@ const rosterTemplateSchema = {
 };
 
 const privacySettingsSchema = {
-  retentionDays: field.number({ min: 1, max: 3_650, integer: true }),
+  retentionDays: field.number({ min: 30, max: 2_555, integer: true }),
   recordingConsentRequired: field.boolean(),
   allowStudentExport: field.boolean(),
   auditLogEnabled: field.boolean(),
@@ -304,6 +311,52 @@ const cloudWorkspaceStateSchema = {
   privacySettings: field.object(privacySettingsSchema),
   auditLog: field.array(field.object(auditLogEntrySchema), { max: 2_000 }),
 };
+
+function normalizeCloudOwnerEmail(value) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function requireAuthenticatedCloudOwnerEmail(ownerEmail) {
+  const normalizedOwnerEmail = normalizeCloudOwnerEmail(ownerEmail);
+  if (!normalizedOwnerEmail || !emailPattern.test(normalizedOwnerEmail)) {
+    throw httpError(403, "Authenticated account email is required for cloud workspace sync.");
+  }
+  return normalizedOwnerEmail;
+}
+
+function assertCloudRecordOwnerEmail(value, ownerEmail, name) {
+  const normalizedRecordEmail = normalizeCloudOwnerEmail(value);
+  if (!normalizedRecordEmail) {
+    throw httpError(400, `${name} must include the authenticated workspace owner email.`);
+  }
+  if (normalizedRecordEmail !== ownerEmail) {
+    throw httpError(400, `${name} must match the authenticated workspace owner email.`);
+  }
+}
+
+function assertCloudWorkspaceOwnership(workspace, ownerEmail) {
+  if (workspace.privacySettings.noTrainingOnStudentData !== true) {
+    throw httpError(400, "Cloud workspace privacy must keep no-training protection enabled.");
+  }
+  workspace.sessions.forEach((session, index) => {
+    assertCloudRecordOwnerEmail(session.ownerEmail, ownerEmail, `cloud workspace state.sessions[${index}].ownerEmail`);
+  });
+  if (workspace.draft) {
+    assertCloudRecordOwnerEmail(workspace.draft.ownerEmail, ownerEmail, "cloud workspace state.draft.ownerEmail");
+  }
+  workspace.personalMeetings.forEach((meeting, index) => {
+    assertCloudRecordOwnerEmail(meeting.ownerEmail, ownerEmail, `cloud workspace state.personalMeetings[${index}].ownerEmail`);
+  });
+  workspace.classGroups.forEach((classGroup, index) => {
+    assertCloudRecordOwnerEmail(classGroup.ownerEmail, ownerEmail, `cloud workspace state.classGroups[${index}].ownerEmail`);
+  });
+  workspace.rosterTemplates.forEach((template, index) => {
+    assertCloudRecordOwnerEmail(template.ownerEmail, ownerEmail, `cloud workspace state.rosterTemplates[${index}].ownerEmail`);
+  });
+  workspace.auditLog.forEach((entry, index) => {
+    assertCloudRecordOwnerEmail(entry.actorEmail, ownerEmail, `cloud workspace state.auditLog[${index}].actorEmail`);
+  });
+}
 
 export function validateFeedbackPayload(payload) {
   return validateSchema(
@@ -336,6 +389,9 @@ export function validateProfilePatchPayload(payload) {
   );
   if (patch.noTrainingOnStudentData === undefined) {
     throw httpError(400, "No supported profile updates were provided.");
+  }
+  if (patch.noTrainingOnStudentData !== true) {
+    throw httpError(400, "No-training protection cannot be disabled.");
   }
   return patch;
 }
@@ -379,13 +435,21 @@ export function validateEmailRecapPayload(payload) {
   );
 }
 
-export function validateCloudWorkspaceStatePayload(payload) {
+export function validateCloudWorkspaceStatePayload(payload, { ownerEmail } = {}) {
   if (!isPlainObject(payload)) {
     throw httpError(400, "Cloud workspace state must be an object.");
   }
-  const legacySensitiveFields = new Set(["accounts", "billingProfile"]);
-  const workspacePayload = Object.fromEntries(
-    Object.entries(payload).filter(([key]) => !legacySensitiveFields.has(key)),
+  const normalizedOwnerEmail = requireAuthenticatedCloudOwnerEmail(ownerEmail);
+  const forbiddenFields = ["accounts", "billingProfile"].filter((key) =>
+    Object.prototype.hasOwnProperty.call(payload, key),
   );
-  return validateSchema(workspacePayload, cloudWorkspaceStateSchema, { name: "cloud workspace state" });
+  if (forbiddenFields.length) {
+    throw httpError(
+      400,
+      `Cloud workspace state must not include local identity or billing fields: ${forbiddenFields.join(", ")}.`,
+    );
+  }
+  const workspace = validateSchema(payload, cloudWorkspaceStateSchema, { name: "cloud workspace state" });
+  assertCloudWorkspaceOwnership(workspace, normalizedOwnerEmail);
+  return workspace;
 }

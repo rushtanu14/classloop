@@ -32,6 +32,31 @@ function belongsToOwner(record: EmailOwnedRecord | AuditOwnedRecord, ownerEmail:
   return Boolean(recordEmail) && normalizeOwnerEmail(recordEmail) === ownerEmail;
 }
 
+export function reassignOwnerEmailInWorkspace<T extends OwnerWorkspaceShape>(
+  state: T,
+  previousEmail: string,
+  nextEmail: string,
+): T {
+  const previousOwner = normalizeOwnerEmail(previousEmail);
+  const nextOwner = normalizeOwnerEmail(nextEmail);
+  if (!previousOwner || !nextOwner || previousOwner === nextOwner) return state;
+
+  const reassignRecord = <R extends EmailOwnedRecord>(record: R): R =>
+    belongsToOwner(record, previousOwner) ? { ...record, ownerEmail: nextOwner } : record;
+  const reassignAudit = <R extends AuditOwnedRecord>(record: R): R =>
+    belongsToOwner(record, previousOwner) ? { ...record, actorEmail: nextOwner } : record;
+
+  return {
+    ...state,
+    sessions: state.sessions.map(reassignRecord),
+    personalMeetings: state.personalMeetings.map(reassignRecord),
+    draft: state.draft ? reassignRecord(state.draft) : null,
+    classGroups: state.classGroups.map(reassignRecord),
+    rosterTemplates: state.rosterTemplates.map(reassignRecord),
+    auditLog: state.auditLog.map(reassignAudit),
+  };
+}
+
 function replaceOwnerRecords<T extends EmailOwnedRecord | AuditOwnedRecord>(
   localRecords: T[],
   remoteRecords: T[] | undefined,

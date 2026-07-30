@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fix Node CI Compatibility"
+  short_description: "Make Node test and coverage gates portable"
+  default_prompt: "Diagnose and fix Node.js CI scripts that fail across supported runtime versions without weakening their quality gates."

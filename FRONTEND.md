@@ -11,8 +11,8 @@
 **Component Patterns**:
 - Functional components with hooks
 - Props interfaces defined inline or in types.ts
-- Event handlers: `handleEventName`
 - State variables: descriptive names
+- Keep new domain logic in focused modules instead of adding unrelated responsibilities to `src/App.tsx`
 
 ## UI Patterns
 
@@ -72,14 +72,14 @@
 ## Performance
 
 **Rendering Optimization**:
-- `React.memo` for expensive components
 - `useMemo` for computed values
 - `useCallback` for event handlers
+- Measure before adding `React.memo`; the current app does not apply it systematically
 
 **Bundle Optimization**:
 - Tree shaking enabled
-- Code splitting for routes
-- Lazy loading for heavy components
+- Vite vendor chunking for React, Supabase, Stripe, Lucide, and other dependencies
+- Route-level code splitting is future work because most application views currently live in `src/App.tsx`
 
 ## Development Workflow
 
@@ -90,8 +90,9 @@
 
 **Code Quality**:
 - TypeScript strict mode
-- ESLint configuration
-- Pre-commit hooks for quality checks
+- `npm run lint` currently runs the TypeScript type check; the repository does not configure ESLint
+- `npm run verify:ci` runs type checking, build, unit/security checks, coverage, dependency audit, and whitespace validation
+- Git hooks are not installed by the repository, so run the documented checks before committing
 
 ## Common Patterns
 

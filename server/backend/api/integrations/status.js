@@ -6,24 +6,16 @@ import {
 
 function emailConfig() {
   if (process.env.CLASSLOOP_SMTP_HOST) {
-    const senderEmail = process.env.CLASSLOOP_NO_REPLY_EMAIL || process.env.CLASSLOOP_SMTP_FROM || process.env.CLASSLOOP_SMTP_USER;
-    const senderName = process.env.CLASSLOOP_NO_REPLY_NAME || "ClassLoop";
     return {
       configured: true,
       provider: process.env.CLASSLOOP_SMTP_PROVIDER || (process.env.CLASSLOOP_NO_REPLY_EMAIL ? "No-reply SMTP" : "SMTP"),
-      from: senderName && senderEmail ? `${senderName} <${senderEmail}>` : senderEmail,
-      replyTo: process.env.CLASSLOOP_REPLY_TO || undefined,
     };
   }
 
   if (process.env.CLASSLOOP_GMAIL_USER && process.env.CLASSLOOP_GMAIL_APP_PASSWORD) {
-    const senderEmail = process.env.CLASSLOOP_NO_REPLY_EMAIL || process.env.CLASSLOOP_GMAIL_FROM || process.env.CLASSLOOP_GMAIL_USER;
-    const senderName = process.env.CLASSLOOP_NO_REPLY_NAME || "ClassLoop";
     return {
       configured: true,
       provider: process.env.CLASSLOOP_NO_REPLY_EMAIL ? "No-reply Gmail SMTP" : "Gmail SMTP",
-      from: senderName && senderEmail ? `${senderName} <${senderEmail}>` : senderEmail,
-      replyTo: process.env.CLASSLOOP_REPLY_TO || undefined,
     };
   }
 

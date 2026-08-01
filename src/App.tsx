@@ -65,6 +65,14 @@ import {
 import { createStructuredTranscriptFromText, formatTranscriptTime } from "./transcript";
 import { partitionSessionsAndDraftByRetention, partitionSessionsByRetention } from "./retention";
 import {
+  IntegrationImportWizard,
+  type PreparedIntegrationImport,
+} from "./components/IntegrationImportWizard";
+import {
+  applyIntegrationDraftPatch,
+  type IntegrationImportFormState,
+} from "./integration-imports";
+import {
   mergeOwnerCloudWorkspaceState,
   parseCloudWorkspaceResponse,
   reassignOwnerEmailInWorkspace,
@@ -101,6 +109,7 @@ import type {
   ClassGroup,
   DeliveryLog,
   ImportQualityWarning,
+  IntegrationImportReceipt,
   ParticipationEvent,
   ParticipationType,
   PersonalMeeting,
@@ -402,8 +411,6 @@ type IntegrationStatus = {
   email: {
     configured: boolean;
     provider: string;
-    from?: string;
-    replyTo?: string;
   };
   localMcp?: {
     available: boolean;
@@ -435,11 +442,46 @@ type IntegrationStatus = {
       mode: string;
       allowedToolsEnv?: string;
       allowedTools: string[];
+      authProvisioning?: string;
     }>;
   };
 };
 
 type ComposioToolkitStatus = NonNullable<IntegrationStatus["composio"]>["toolkits"][number];
+
+type IntegrationConnection = {
+  integrationId: string;
+  toolkit: string;
+  connectionStatus: string;
+  connected: boolean;
+  updatedAt?: string;
+};
+
+type IntegrationConnectionsResponse = {
+  connections: IntegrationConnection[];
+};
+
+type IntegrationConnectResponse = Pick<
+  IntegrationConnection,
+  "integrationId" | "connectionStatus" | "connected"
+> & {
+  redirectUrl?: string;
+};
+
+const emptyIntegrationImportForm: IntegrationImportFormState = {
+  title: "",
+  transcript: "",
+  notes: "",
+  roster: "",
+  resources: "",
+};
+
+type IntegrationLifecycleLabel =
+  | "Needs setup"
+  | "Ready to connect"
+  | "Connecting"
+  | "Connected"
+  | "Reconnect";
 
 type ClassLoopIntegrationWorkflow = {
   id: string;
@@ -472,15 +514,6 @@ const classLoopIntegrationWorkflows: ClassLoopIntegrationWorkflow[] = [
     followUpUse: "Use existing classwide coursework and announcement context while reviewing the recap.",
     reviewRule: "The current connector is read-only; Classroom posting remains a manual teacher action.",
     unlocks: ["Course roster import", "Recent assignment/resource context", "Announcement context"],
-  },
-  {
-    id: "gmail",
-    label: "Gmail",
-    icon: Mail,
-    summary: "Create teacher-reviewed recap and reminder drafts from a teacher-owned mailbox.",
-    followUpUse: "Draft recap emails, missing-work reminders, and parent/guardian messages only after review.",
-    reviewRule: "Gmail remains draft-only; ClassLoop does not silently send messages.",
-    unlocks: ["Recap email drafts", "Reminder email drafts", "Mailbox search when explicitly requested"],
   },
   {
     id: "googlecalendar",
@@ -571,10 +604,10 @@ const classLoopIntegrationWorkflows: ClassLoopIntegrationWorkflow[] = [
     id: "outlook",
     label: "Outlook",
     icon: Mail,
-    summary: "Read Microsoft-school email/calendar context and create teacher-reviewed email drafts.",
-    followUpUse: "Draft Outlook messages and review existing calendar events.",
-    reviewRule: "Outlook email remains draft-only; the connector does not create calendar events.",
-    unlocks: ["Outlook message drafts", "Microsoft calendar context", "Inbox context when requested"],
+    summary: "Preview teacher-owned Microsoft-school email and calendar context.",
+    followUpUse: "Review existing Outlook messages and calendar records as read-only context.",
+    reviewRule: "This page keeps Outlook records read-only and does not change calendar events.",
+    unlocks: ["Outlook record preview", "Microsoft calendar context", "Inbox context when requested"],
   },
   {
     id: "microsoft_teams",
@@ -628,7 +661,7 @@ function workflowForToolkit(toolkit: ComposioToolkitStatus): ClassLoopIntegratio
       id: toolkit.id,
       label: toolkit.label,
       icon: Link2,
-      summary: toolkit.purpose || "Preview connector for teacher-reviewed ClassLoop workflows.",
+      summary: toolkit.purpose || "Read-only connector for teacher-reviewed ClassLoop imports.",
       reviewRule: "External actions require teacher review before sending, posting, sharing, or importing.",
       unlocks: [toolkit.category ?? "Connector workflow"],
     }
@@ -636,6 +669,7 @@ function workflowForToolkit(toolkit: ComposioToolkitStatus): ClassLoopIntegratio
 }
 
 function integrationModeLabel(mode: string) {
+  if (mode === "preview_first") return "reviewed import";
   return mode.replace(/_/g, " ");
 }
 
@@ -645,15 +679,83 @@ function toolkitHasReadCapability(toolkit?: ComposioToolkitStatus) {
   );
 }
 
-function toolkitHasDraftCapability(toolkit?: ComposioToolkitStatus) {
-  return Boolean(toolkit?.allowedTools.some((tool) => /CREATE(?:_EMAIL)?_DRAFT|CREATE_EMAIL_DRAFT/.test(tool)));
-}
-
 function toolkitCapabilityLabel(toolkit: ComposioToolkitStatus) {
   if (!toolkit.authConfigured) return "Needs setup";
-  if (toolkitHasDraftCapability(toolkit)) return "Draft ready";
   if (toolkitHasReadCapability(toolkit)) return "Read/search ready";
   return "No safe tools";
+}
+
+function integrationConnectionLabel(
+  authConfigured: boolean,
+  connection?: IntegrationConnection,
+  connecting = false,
+): IntegrationLifecycleLabel {
+  if (!authConfigured) return "Needs setup";
+  if (connecting) return "Connecting";
+  if (connection?.connected) return "Connected";
+  const status = connection?.connectionStatus.trim() ?? "";
+  if (/^(?:initiated|initializing|pending|connecting|authorization_required)$/i.test(status)) {
+    return "Connecting";
+  }
+  if (/^(?:reconnect|failed|expired|inactive|revoked)$/i.test(status)) return "Reconnect";
+  return "Ready to connect";
+}
+
+function isTrustedComposioRedirect(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "connect.composio.dev" &&
+      url.port === "" &&
+      url.username === "" &&
+      url.password === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+function integrationCloudGuidance(error: unknown, auth: Pick<AuthSession, "email" | "multiDevicePending">) {
+  const message = error instanceof Error ? error.message : "";
+  if (/does not match/i.test(message)) {
+    return `The active cloud session belongs to a different account. Sign out, then sign in again as ${auth.email} before connecting a provider.`;
+  }
+  if (/expired/i.test(message)) {
+    return `The cloud session for ${auth.email} expired. Sign in again before connecting a provider.`;
+  }
+  if (/sign in to cloud sync|signed out/i.test(message) || auth.multiDevicePending) {
+    return `Confirm the ClassLoop cloud email in your inbox, then sign in again as ${auth.email} before connecting a provider.`;
+  }
+  return message || "Unable to load this teacher's provider connections.";
+}
+
+function integrationQueryField(toolkit: ComposioToolkitStatus) {
+  const normalizedId = toolkit.id.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const fields: Record<string, { label: string; placeholder: string }> = {
+    googledocs: {
+      label: "Google Docs document ID or URL",
+      placeholder: "Paste a document ID or docs.google.com URL",
+    },
+    googlesheets: {
+      label: "Google Sheets spreadsheet ID or URL",
+      placeholder: "Paste a spreadsheet ID or docs.google.com/spreadsheets URL",
+    },
+    googleforms: {
+      label: "Google Forms form ID or URL",
+      placeholder: "Paste a form ID or docs.google.com/forms URL",
+    },
+    googledrive: {
+      label: "Google Drive optional search",
+      placeholder: "Optional file name or search terms",
+    },
+    notion: {
+      label: "Notion optional search",
+      placeholder: "Optional page title or search terms",
+    },
+  };
+  return fields[normalizedId];
 }
 
 type EmailDeliveryResult = {
@@ -2345,6 +2447,12 @@ function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [personalMeetings, setPersonalMeetings] = useState<PersonalMeeting[]>([]);
   const [draft, setDraft] = useState<Session | null>(null);
+  const [integrationImportForm, setIntegrationImportForm] =
+    useState<IntegrationImportFormState>(emptyIntegrationImportForm);
+  const [pendingIntegrationImport, setPendingIntegrationImport] =
+    useState<PreparedIntegrationImport | null>(null);
+  const [integrationImportReceipts, setIntegrationImportReceipts] =
+    useState<IntegrationImportReceipt[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string>(() => localStorage.getItem("classloop:selected-student") ?? "maya");
   const [auth, setAuth] = useState<AuthSession | null>(null);
   const [theme, setTheme] = useState<ThemeSettings>(defaultTheme);
@@ -2386,6 +2494,17 @@ function App() {
   );
   const pendingSharedJsonRef = useRef(lastSharedJsonRef.current);
   const localWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const integrationImportOwnerRef = useRef("");
+
+  useEffect(() => {
+    const ownerKey = auth?.accountId ?? "";
+    if (integrationImportOwnerRef.current && ownerKey !== integrationImportOwnerRef.current) {
+      setPendingIntegrationImport(null);
+      setIntegrationImportForm(emptyIntegrationImportForm);
+      setIntegrationImportReceipts([]);
+    }
+    integrationImportOwnerRef.current = ownerKey;
+  }, [auth?.accountId]);
 
   const setPersistenceBaseline = useCallback((state: Parameters<typeof persistableSharedState>[0]) => {
     const baselineJson = sharedStateJson(persistableSharedState(state));
@@ -3708,6 +3827,9 @@ function App() {
       if (wasDemo) resetDemoWorkspaceAfterUse();
       demoSessionRef.current = false;
       localAuthSecretRef.current = null;
+      setPendingIntegrationImport(null);
+      setIntegrationImportForm(emptyIntegrationImportForm);
+      setIntegrationImportReceipts([]);
       setAuth(null);
       setTheme(defaultTheme);
       navigate("dashboard");
@@ -3857,9 +3979,12 @@ function App() {
           <ImportSession
             ownerEmail={auth.email}
             setDraft={setDraft}
-            onDraftCreated={(session) =>
-              triggerCelebration("New session draft created", `${session.title} is ready for teacher review.`)
-            }
+            onDraftCreated={(session) => {
+              setPendingIntegrationImport(null);
+              setIntegrationImportForm(emptyIntegrationImportForm);
+              setIntegrationImportReceipts([]);
+              triggerCelebration("New session draft created", `${session.title} is ready for teacher review.`);
+            }}
             onUseDemo={() => setDemoLoaded(true)}
             recordingConsentRequired={privacySettings.recordingConsentRequired}
             rosterTemplates={teacherRosterTemplates}
@@ -3869,6 +3994,18 @@ function App() {
             dailySessionsUsed={freeSessionsToday}
             planName={billingProfile.tier === "free" ? "Free" : "Pro"}
             classTemplateCopyUrl={templateLinks.classTemplateCopyUrl}
+            initialFormState={integrationImportForm}
+            onFormStateChange={setIntegrationImportForm}
+            pendingIntegrationImport={pendingIntegrationImport}
+            onClearPendingIntegrationImport={() => setPendingIntegrationImport(null)}
+            integrationImportReceipts={integrationImportReceipts}
+            onIntegrationImportApplied={(receipt) =>
+              setIntegrationImportReceipts((current) =>
+                current.some((candidate) => candidate.id === receipt.id)
+                  ? current
+                  : [...current, receipt]
+              )
+            }
           />
         )}
         {effectiveRoute === "processing" && <Processing draft={visibleDraft} />}
@@ -3926,7 +4063,16 @@ function App() {
           />
         )}
         {effectiveRoute === "analytics" && <TeacherAnalytics sessions={teacherSessions} />}
-        {effectiveRoute === "integrations" && auth.role === "teacher" && <IntegrationsPage />}
+        {effectiveRoute === "integrations" && auth.role === "teacher" && (
+          <IntegrationsPage
+            auth={auth}
+            onPreparedImport={(prepared) => {
+              setPendingIntegrationImport(prepared);
+              navigate("new-session");
+            }}
+            onManualImport={() => navigate("new-session")}
+          />
+        )}
         {effectiveRoute === "billing" && auth.role === "teacher" && (
           <SyncBillingPage
             auth={auth}
@@ -8338,40 +8484,85 @@ function EmbeddedCheckoutPage({
   );
 }
 
-function IntegrationsPage() {
+function IntegrationsPage({
+  auth,
+  onPreparedImport,
+  onManualImport,
+}: {
+  auth: AuthSession;
+  onPreparedImport: (prepared: PreparedIntegrationImport) => void;
+  onManualImport: () => void;
+}) {
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
+  const [connectionRefreshNonce, setConnectionRefreshNonce] = useState(0);
   const [integrationStatusMessage, setIntegrationStatusMessage] = useState("");
+  const [connectionMessage, setConnectionMessage] = useState("");
+  const [connectionsById, setConnectionsById] = useState<Record<string, IntegrationConnection>>({});
+  const [connectingIds, setConnectingIds] = useState<string[]>([]);
+  const connectingIdsRef = useRef<Set<string>>(new Set());
+  const [actionMessagesById, setActionMessagesById] = useState<Record<string, string>>({});
+  const [activeToolkitId, setActiveToolkitId] = useState("");
 
   useEffect(() => {
     let active = true;
-    apiJson<IntegrationStatus>("/api/integrations/status")
-      .then((status) => {
+    setIntegrationStatus(null);
+    setIntegrationStatusMessage("");
+    setConnectionMessage("");
+    setConnectionsById({});
+    setConnectingIds([]);
+    connectingIdsRef.current = new Set();
+    setActionMessagesById({});
+
+    void (async () => {
+      try {
+        const status = await apiJson<IntegrationStatus>("/api/integrations/status");
+        let connections: IntegrationConnection[] = [];
+        try {
+          const response = await cloudRequest<IntegrationConnectionsResponse>(
+            "/api/integrations/connections",
+            {},
+            auth.email,
+          );
+          connections = Array.isArray(response.connections) ? response.connections : [];
+        } catch (error) {
+          if (active) setConnectionMessage(integrationCloudGuidance(error, auth));
+        }
         if (!active) return;
         setIntegrationStatus(status);
-        setIntegrationStatusMessage("");
-      })
-      .catch((error) => {
+        setConnectionsById(
+          connections.reduce<Record<string, IntegrationConnection>>(
+            (byId, connection) => ({ ...byId, [connection.integrationId]: connection }),
+            {},
+          ),
+        );
+      } catch (error) {
         if (!active) return;
         setIntegrationStatus(null);
         setIntegrationStatusMessage(error instanceof Error ? error.message : "Unable to load integration status.");
-      });
+      }
+    })();
+
     return () => {
       active = false;
     };
-  }, []);
+  }, [auth.email, connectionRefreshNonce]);
+
+  useEffect(() => {
+    setActiveToolkitId("");
+  }, [auth.accountId]);
 
   const composioToolkits = integrationStatus?.composio?.toolkits ?? [];
-  const configuredComposioToolkits = composioToolkits.filter(
-    (toolkit) =>
-      toolkit.authConfigured &&
-      (toolkitHasReadCapability(toolkit) || toolkitHasDraftCapability(toolkit)),
+  const activeToolkit = composioToolkits.find((toolkit) => toolkit.id === activeToolkitId);
+  const serverConfiguredToolkitCount = composioToolkits.filter((toolkit) => toolkit.authConfigured).length;
+  const connectedToolkitCount = composioToolkits.filter(
+    (toolkit) => toolkit.authConfigured && connectionsById[toolkit.id]?.connected,
   ).length;
   const coreToolkitCount = integrationStatus?.composio?.coreToolkitCount ?? composioToolkits.filter((toolkit) => toolkit.priority === "core").length;
-  const configuredCoreToolkitCount = composioToolkits.filter(
+  const connectedCoreToolkitCount = composioToolkits.filter(
     (toolkit) =>
       toolkit.priority === "core" &&
       toolkit.authConfigured &&
-      (toolkitHasReadCapability(toolkit) || toolkitHasDraftCapability(toolkit)),
+      connectionsById[toolkit.id]?.connected,
   ).length;
   const localMcpToolCount = integrationStatus?.localMcp?.tools.length ?? 0;
   const groupedToolkits = ["core", "high", "optional"]
@@ -8386,14 +8577,14 @@ function IntegrationsPage() {
     {
       title: "Easier imports",
       icon: UploadCloud,
-      detail: "Zoom, Google Meet, Classroom, Drive, Docs, and Sheets bring transcript, roster, and material context into the import flow.",
+      detail: "Zoom, Google Meet, Classroom, Drive, Docs, and Sheets make transcript, roster, and material context reviewable before a teacher imports it.",
       connectors: ["Zoom", "Google Meet", "Google Classroom", "Drive", "Docs", "Sheets"],
     },
     {
-      title: "Review context and email drafts",
+      title: "Review context",
       icon: CheckCircle2,
-      detail: "Gmail and Outlook can create drafts; Calendar, Classroom, Docs, Sheets, Tasks, and Forms currently provide read-only context.",
-      connectors: ["Google Calendar", "Gmail", "Google Classroom", "Google Docs", "Google Sheets", "Google Tasks", "Google Forms"],
+      detail: "Calendar, Classroom, Docs, Sheets, Tasks, Forms, and Outlook provide read-only records for teacher review.",
+      connectors: ["Google Calendar", "Google Classroom", "Google Docs", "Google Sheets", "Google Tasks", "Google Forms", "Outlook"],
     },
     {
       title: "School ecosystem",
@@ -8403,8 +8594,71 @@ function IntegrationsPage() {
     },
   ];
 
+  const setActionMessage = (integrationId: string, message: string) => {
+    setActionMessagesById((current) => ({ ...current, [integrationId]: message }));
+  };
+
+  const handleConnect = async (toolkit: ComposioToolkitStatus) => {
+    if (!toolkit.authConfigured || connectingIdsRef.current.has(toolkit.id)) return;
+    connectingIdsRef.current = new Set([...connectingIdsRef.current, toolkit.id]);
+    setConnectingIds((current) => [...current.filter((id) => id !== toolkit.id), toolkit.id]);
+    setActionMessage(toolkit.id, "Starting a secure Composio connection…");
+
+    try {
+      const response = await cloudRequest<IntegrationConnectResponse>(
+        "/api/integrations/connect",
+        {
+          method: "POST",
+          body: JSON.stringify({ integrationId: toolkit.id }),
+        },
+        auth.email,
+      );
+      if (response.integrationId !== toolkit.id) {
+        throw new Error("The connection response did not match the requested integration.");
+      }
+      if (response.redirectUrl !== undefined && !isTrustedComposioRedirect(response.redirectUrl)) {
+        setActionMessage(
+          toolkit.id,
+          "ClassLoop rejected an untrusted Composio redirect. The connection page was not opened.",
+        );
+        return;
+      }
+
+      const nextConnection: IntegrationConnection = {
+        integrationId: response.integrationId,
+        toolkit: toolkit.toolkit ?? toolkit.id,
+        connectionStatus: response.connectionStatus,
+        connected: response.connected,
+      };
+      setConnectionsById((current) => ({ ...current, [toolkit.id]: nextConnection }));
+
+      if (response.redirectUrl) {
+        setActionMessage(toolkit.id, "Opening the trusted Composio connection page in this tab…");
+        window.location.assign(response.redirectUrl);
+        return;
+      }
+      setActionMessage(
+        toolkit.id,
+        response.connected
+          ? `${toolkit.label} is connected for this teacher.`
+          : `${toolkit.label} connection started. Finish the provider approval before previewing records.`,
+      );
+    } catch (error) {
+      setActionMessage(toolkit.id, integrationCloudGuidance(error, auth));
+    } finally {
+      connectingIdsRef.current = new Set(
+        [...connectingIdsRef.current].filter((id) => id !== toolkit.id),
+      );
+      setConnectingIds((current) => current.filter((id) => id !== toolkit.id));
+    }
+  };
+
   return (
-    <div className="page-stack">
+    <div
+      className="page-stack"
+      data-testid="integration-page"
+      aria-busy={!integrationStatus && !integrationStatusMessage}
+    >
       <section className="review-banner">
         <div>
           <span className="eyebrow">Composio integrations</span>
@@ -8415,12 +8669,12 @@ function IntegrationsPage() {
         </div>
         <div className="integration-summary-strip" aria-label="Integration setup summary">
           <span>
-            <strong>{configuredCoreToolkitCount}/{coreToolkitCount || 4}</strong>
-            <small>core connectors configured</small>
+            <strong>{connectedCoreToolkitCount}/{coreToolkitCount || 3}</strong>
+            <small>core teacher connections</small>
           </span>
           <span>
-            <strong>{configuredComposioToolkits}/{composioToolkits.length || classLoopIntegrationWorkflows.length}</strong>
-            <small>connectors with allowed tools</small>
+            <strong>{connectedToolkitCount}/{composioToolkits.length || classLoopIntegrationWorkflows.length}</strong>
+            <small>teacher connections</small>
           </span>
           <span>
             <strong>{localMcpToolCount}</strong>
@@ -8461,8 +8715,21 @@ function IntegrationsPage() {
                 <strong>Composio API</strong>
                 <small>
                   {integrationStatus?.composio?.configured
-                    ? `Ready for ${integrationStatus.composio.serverName}.`
+                    ? `Server setup is ready for ${integrationStatus.composio.serverName}; each teacher still connects their own provider account.`
                     : "Set COMPOSIO_API_KEY before creating the ClassLoop MCP config."}
+                </small>
+              </span>
+            </div>
+            <div
+              className={`integration-card ${integrationStatus?.email?.configured ? "active" : ""}`}
+              data-testid="email-delivery-status"
+            >
+              <span>
+                <strong>Email delivery (not Composio)</strong>
+                <small>
+                  {integrationStatus?.email?.configured
+                    ? `${integrationStatus.email.provider} is configured server-side. The sender address stays private.`
+                    : "Configure CLASSLOOP_GMAIL_* or CLASSLOOP_SMTP_* server variables for recap email delivery."}
                 </small>
               </span>
             </div>
@@ -8478,22 +8745,26 @@ function IntegrationsPage() {
             </div>
             <div className="integration-card">
               <span>
-                <strong>Core Composio auth config IDs</strong>
-                <small>COMPOSIO_GOOGLE_CLASSROOM_AUTH_CONFIG_ID</small>
-                <small>COMPOSIO_ZOOM_AUTH_CONFIG_ID</small>
-                <small>COMPOSIO_GMAIL_AUTH_CONFIG_ID</small>
-                <small>COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID</small>
+                <strong>Server auth configurations</strong>
+                <small>{serverConfiguredToolkitCount}/{composioToolkits.length} connector auth configs are present.</small>
+                <small>Auth configuration only enables the Connect button; it is not a teacher connection.</small>
               </span>
             </div>
-            <div className={`integration-card ${integrationStatus?.email?.configured ? "active" : ""}`}>
+            <div className={`integration-card ${connectedToolkitCount > 0 ? "active" : ""}`}>
               <span>
-                <strong>Email delivery</strong>
+                <strong>Teacher OAuth</strong>
                 <small>
-                  {integrationStatus?.email?.configured
-                    ? `${integrationStatus.email.provider}${integrationStatus.email.from ? ` from ${integrationStatus.email.from}` : ""}.`
-                    : "Gmail SMTP is still available as the free sender path for recap delivery."}
+                  {connectionMessage ||
+                    `${connectedToolkitCount} provider account${connectedToolkitCount === 1 ? "" : "s"} connected for ${auth.email}.`}
                 </small>
               </span>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => setConnectionRefreshNonce((current) => current + 1)}
+              >
+                Refresh connections
+              </button>
             </div>
             <div className={`integration-card ${integrationStatus?.localMcp?.available ? "active" : ""}`}>
               <span>
@@ -8505,24 +8776,66 @@ function IntegrationsPage() {
                 </small>
               </span>
             </div>
-            {integrationStatusMessage && <p className="settings-message">{integrationStatusMessage}</p>}
-            {!integrationStatus && !integrationStatusMessage && <p className="settings-message">Loading integration status...</p>}
+            {integrationStatusMessage && (
+              <div className="settings-message danger" role="alert" data-testid="integration-page-status">
+                <span>{integrationStatusMessage}</span>
+                <button
+                  className="text-button"
+                  type="button"
+                  onClick={() => setConnectionRefreshNonce((current) => current + 1)}
+                >
+                  Try again
+                </button>
+              </div>
+            )}
+            {!integrationStatus && !integrationStatusMessage && (
+              <p className="settings-message" role="status" data-testid="integration-page-status">
+                Loading integration status…
+              </p>
+            )}
           </div>
         </Panel>
       </section>
 
+      {activeToolkit && (
+        <IntegrationImportWizard
+          toolkit={activeToolkit}
+          connection={connectionsById[activeToolkit.id]}
+          authEmail={auth.email}
+          queryField={
+            integrationQueryField(activeToolkit)
+              ? {
+                  ...integrationQueryField(activeToolkit)!,
+                  required: ["googledocs", "googlesheets", "googleforms"].includes(activeToolkit.id),
+                }
+              : undefined
+          }
+          connecting={connectingIds.includes(activeToolkit.id)}
+          onConnect={() => handleConnect(activeToolkit)}
+          onRefresh={() => setConnectionRefreshNonce((current) => current + 1)}
+          onClose={() => setActiveToolkitId("")}
+          onManualImport={onManualImport}
+          onPrepared={onPreparedImport}
+        />
+      )}
+
       {groupedToolkits.map((group) => (
         <Panel title={group.label} icon={Link2} key={group.priority}>
-          <div className="integration-workflow-grid">
+          <div className="integration-workflow-grid" data-testid="integration-catalog">
             {group.items.map((toolkit) => {
               const workflow = workflowForToolkit(toolkit);
               const WorkflowIcon = workflow.icon;
-              const targetRoute: RouteKey = workflow.importUse ? "new-session" : "review";
-              const hasReadCapability = toolkitHasReadCapability(toolkit);
-              const hasDraftCapability = toolkitHasDraftCapability(toolkit);
-              const capabilityReady = toolkit.authConfigured && (hasReadCapability || hasDraftCapability);
+              const connection = connectionsById[toolkit.id];
+              const isConnecting = connectingIds.includes(toolkit.id);
+              const lifecycleLabel = integrationConnectionLabel(toolkit.authConfigured, connection, isConnecting);
+              const isConnected = lifecycleLabel === "Connected";
+              const actionMessage = actionMessagesById[toolkit.id];
               return (
-                <article className={`integration-workflow-card ${capabilityReady ? "active" : ""}`} key={toolkit.id}>
+                <article
+                  className={`integration-workflow-card ${isConnected ? "active" : ""}`}
+                  data-integration-id={toolkit.id}
+                  key={toolkit.id}
+                >
                   <div className="integration-workflow-card-header">
                     <span className="integration-workflow-icon">
                       <WorkflowIcon size={19} aria-hidden="true" />
@@ -8531,8 +8844,8 @@ function IntegrationsPage() {
                       <strong>{workflow.label}</strong>
                       <small>{toolkit.category ?? "ClassLoop connector"}</small>
                     </span>
-                    <span className={capabilityReady ? "status-pill complete" : "status-pill"}>
-                      {toolkitCapabilityLabel(toolkit)}
+                    <span className={isConnected ? "status-pill complete" : "status-pill"}>
+                      {lifecycleLabel}
                     </span>
                   </div>
                   <p>{workflow.summary}</p>
@@ -8560,20 +8873,23 @@ function IntegrationsPage() {
                   <div className="integration-workflow-footer">
                     <small>
                       {toolkit.authConfigured
-                        ? `${integrationModeLabel(toolkit.mode)} · ${toolkit.allowedTools.length} allowed tools`
+                        ? `Server setup ready · ${integrationModeLabel(toolkit.mode)} · ${toolkit.allowedTools.length} allowlisted tools; previews are read-only`
                         : `Set ${toolkit.authConfigEnv}`}
                     </small>
-                    <button className="ghost-button" type="button" onClick={() => navigate(targetRoute)}>
-                      {workflow.importUse
-                        ? "Use in import"
-                        : hasDraftCapability
-                          ? "Use after draft"
-                          : hasReadCapability
-                            ? "Review context"
-                            : "View workflow"}
+                    <button
+                      className={isConnected ? "ghost-button" : "primary-button"}
+                      type="button"
+                      onClick={() => setActiveToolkitId(toolkit.id)}
+                    >
+                      {isConnected ? `Browse ${workflow.label}` : `Set up ${workflow.label}`}
                     </button>
                   </div>
                   <small className="integration-review-rule">{workflow.reviewRule}</small>
+                  {actionMessage && (
+                    <p className="settings-message" role="status">
+                      {actionMessage}
+                    </p>
+                  )}
                 </article>
               );
             })}
@@ -8839,15 +9155,13 @@ function SyncBillingPage({
 
   const composioToolkits = integrationStatus?.composio?.toolkits ?? [];
   const configuredComposioToolkits = composioToolkits.filter(
-    (toolkit) =>
-      toolkit.authConfigured &&
-      (toolkitHasReadCapability(toolkit) || toolkitHasDraftCapability(toolkit)),
+    (toolkit) => toolkit.authConfigured && toolkitHasReadCapability(toolkit),
   ).length;
   const configuredCoreComposioToolkits = composioToolkits.filter(
     (toolkit) =>
       toolkit.priority === "core" &&
       toolkit.authConfigured &&
-      (toolkitHasReadCapability(toolkit) || toolkitHasDraftCapability(toolkit)),
+      toolkitHasReadCapability(toolkit),
   ).length;
   const localMcpToolCount = integrationStatus?.localMcp?.tools.length ?? 0;
 
@@ -8982,8 +9296,8 @@ function SyncBillingPage({
               <strong>Composio MCP config</strong>
               <small>
                 {integrationStatus?.composio?.configured
-                  ? `${configuredComposioToolkits} of ${composioToolkits.length} connectors have auth plus allowed read/draft tools for ${integrationStatus.composio.serverName}.`
-                  : "Set COMPOSIO_API_KEY and connector auth config ids to enable preview connectors."}
+                  ? `${configuredComposioToolkits} of ${composioToolkits.length} connectors have auth plus allowlisted read tools for ${integrationStatus.composio.serverName}.`
+                  : "Set COMPOSIO_API_KEY and connector auth config ids to enable reviewed imports."}
               </small>
               {integrationStatus?.composio?.coreToolkitCount ? (
                 <small>
@@ -8995,7 +9309,7 @@ function SyncBillingPage({
           {composioToolkits.map((toolkit) => {
             const capabilityReady =
               toolkit.authConfigured &&
-              (toolkitHasReadCapability(toolkit) || toolkitHasDraftCapability(toolkit));
+              toolkitHasReadCapability(toolkit);
             return (
               <div className={`integration-card ${capabilityReady ? "active" : ""}`} key={toolkit.id}>
                 <span>
@@ -9097,6 +9411,12 @@ function ImportSession({
   dailySessionsUsed,
   planName,
   classTemplateCopyUrl,
+  initialFormState,
+  onFormStateChange,
+  pendingIntegrationImport,
+  onClearPendingIntegrationImport,
+  integrationImportReceipts,
+  onIntegrationImportApplied,
 }: {
   ownerEmail: string;
   setDraft: (session: Session) => void;
@@ -9110,13 +9430,19 @@ function ImportSession({
   dailySessionsUsed: number;
   planName: string;
   classTemplateCopyUrl?: string;
+  initialFormState: IntegrationImportFormState;
+  onFormStateChange: (state: IntegrationImportFormState) => void;
+  pendingIntegrationImport: PreparedIntegrationImport | null;
+  onClearPendingIntegrationImport: () => void;
+  integrationImportReceipts: IntegrationImportReceipt[];
+  onIntegrationImportApplied: (receipt: IntegrationImportReceipt) => void;
 }) {
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState(initialFormState.title);
   const [template, setTemplate] = useState<SessionType>("General classroom");
-  const [transcript, setTranscript] = useState("");
-  const [notes, setNotes] = useState("");
-  const [roster, setRoster] = useState("");
-  const [resources, setResources] = useState("");
+  const [transcript, setTranscript] = useState(initialFormState.transcript);
+  const [notes, setNotes] = useState(initialFormState.notes);
+  const [roster, setRoster] = useState(initialFormState.roster);
+  const [resources, setResources] = useState(initialFormState.resources);
   const [fileName, setFileName] = useState("");
   const [templateDetails, setTemplateDetails] = useState<Record<string, string>>({});
   const [zoomSearch, setZoomSearch] = useState("");
@@ -9126,6 +9452,9 @@ function ImportSession({
   const [zoomCloudImported, setZoomCloudImported] = useState(false);
   const [zoomMessage, setZoomMessage] = useState("");
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
+  const [integrationConnectionsById, setIntegrationConnectionsById] = useState<
+    Record<string, IntegrationConnection>
+  >({});
   const [integrationStatusMessage, setIntegrationStatusMessage] = useState("");
   const [integrationActionMessage, setIntegrationActionMessage] = useState("");
   const [captureMode, setCaptureMode] = useState<SessionCaptureMode>("transcript");
@@ -9151,7 +9480,6 @@ function ImportSession({
   const integrationToolkits = integrationStatus?.composio?.toolkits ?? [];
   const composioConfigured = Boolean(integrationStatus?.composio?.configured);
   const zoomToolkit = integrationToolkits.find((toolkit) => toolkit.id === "zoom");
-  const gmailToolkit = integrationToolkits.find((toolkit) => toolkit.id === "gmail");
   const calendarToolkit = integrationToolkits.find((toolkit) => toolkit.id === "googlecalendar");
   const classroomToolkit = integrationToolkits.find((toolkit) => toolkit.id === "google_classroom");
   const meetToolkit = integrationToolkits.find((toolkit) => toolkit.id === "googlemeet");
@@ -9160,16 +9488,22 @@ function ImportSession({
   const sheetsToolkit = integrationToolkits.find((toolkit) => toolkit.id === "googlesheets");
   const tasksToolkit = integrationToolkits.find((toolkit) => toolkit.id === "googletasks");
   const formsToolkit = integrationToolkits.find((toolkit) => toolkit.id === "googleforms");
-  const zoomConnectorReady = Boolean(composioConfigured && zoomToolkit?.authConfigured && toolkitHasReadCapability(zoomToolkit));
-  const gmailConnectorReady = Boolean(composioConfigured && gmailToolkit?.authConfigured && toolkitHasDraftCapability(gmailToolkit));
-  const calendarConnectorReady = Boolean(composioConfigured && calendarToolkit?.authConfigured && toolkitHasReadCapability(calendarToolkit));
-  const classroomConnectorReady = Boolean(composioConfigured && classroomToolkit?.authConfigured && toolkitHasReadCapability(classroomToolkit));
-  const meetConnectorReady = Boolean(composioConfigured && meetToolkit?.authConfigured && toolkitHasReadCapability(meetToolkit));
-  const driveConnectorReady = Boolean(composioConfigured && driveToolkit?.authConfigured && toolkitHasReadCapability(driveToolkit));
-  const docsConnectorReady = Boolean(composioConfigured && docsToolkit?.authConfigured && toolkitHasReadCapability(docsToolkit));
-  const sheetsConnectorReady = Boolean(composioConfigured && sheetsToolkit?.authConfigured && toolkitHasReadCapability(sheetsToolkit));
-  const tasksConnectorReady = Boolean(composioConfigured && tasksToolkit?.authConfigured && toolkitHasReadCapability(tasksToolkit));
-  const formsConnectorReady = Boolean(composioConfigured && formsToolkit?.authConfigured && toolkitHasReadCapability(formsToolkit));
+  const connectorHasReadConnection = (toolkit?: ComposioToolkitStatus) =>
+    Boolean(
+      composioConfigured &&
+        toolkit?.authConfigured &&
+        toolkitHasReadCapability(toolkit) &&
+        integrationConnectionsById[toolkit.id]?.connected,
+    );
+  const zoomConnectorReady = connectorHasReadConnection(zoomToolkit);
+  const calendarConnectorReady = connectorHasReadConnection(calendarToolkit);
+  const classroomConnectorReady = connectorHasReadConnection(classroomToolkit);
+  const meetConnectorReady = connectorHasReadConnection(meetToolkit);
+  const driveConnectorReady = connectorHasReadConnection(driveToolkit);
+  const docsConnectorReady = connectorHasReadConnection(docsToolkit);
+  const sheetsConnectorReady = connectorHasReadConnection(sheetsToolkit);
+  const tasksConnectorReady = connectorHasReadConnection(tasksToolkit);
+  const formsConnectorReady = connectorHasReadConnection(formsToolkit);
   const workspaceImportReady = driveConnectorReady || docsConnectorReady || sheetsConnectorReady;
   const connectedZoomMeetings = useMemo(() => (zoomConnectorReady ? zoomCloudMeetingOptions : []), [zoomConnectorReady]);
   const filteredZoomMeetings = useMemo(() => {
@@ -9193,6 +9527,10 @@ function ImportSession({
     [classGroups, template],
   );
   const [loadedClassGroupId, setLoadedClassGroupId] = useState("");
+
+  useEffect(() => {
+    onFormStateChange({ title, transcript, notes, roster, resources });
+  }, [notes, onFormStateChange, resources, roster, title, transcript]);
   const transcriptSpeakerCount = useMemo(
     () => (transcript.trim() ? extractTranscriptSpeakers(transcript).length : 0),
     [transcript],
@@ -9225,11 +9563,31 @@ function ImportSession({
 
   useEffect(() => {
     let active = true;
+    setIntegrationConnectionsById({});
     apiJson<IntegrationStatus>("/api/integrations/status")
-      .then((status) => {
+      .then(async (status) => {
         if (!active) return;
         setIntegrationStatus(status);
         setIntegrationStatusMessage("");
+        try {
+          const response = await cloudRequest<IntegrationConnectionsResponse>(
+            "/api/integrations/connections",
+            {},
+            ownerEmail,
+          );
+          if (!active) return;
+          const connections = Array.isArray(response.connections) ? response.connections : [];
+          setIntegrationConnectionsById(
+            connections.reduce<Record<string, IntegrationConnection>>(
+              (byId, connection) => ({ ...byId, [connection.integrationId]: connection }),
+              {},
+            ),
+          );
+        } catch (error) {
+          if (!active) return;
+          setIntegrationConnectionsById({});
+          setIntegrationStatusMessage(integrationCloudGuidance(error, { email: ownerEmail }));
+        }
       })
       .catch((error) => {
         if (!active) return;
@@ -9239,7 +9597,7 @@ function ImportSession({
     return () => {
       active = false;
     };
-  }, []);
+  }, [ownerEmail]);
 
   useEffect(() => {
     if (!selectedZoomMeeting) {
@@ -9465,24 +9823,54 @@ function ImportSession({
     navigate("integrations");
   };
 
+  const applyPendingIntegrationFields = () => {
+    if (!pendingIntegrationImport) return;
+    const nextForm = applyIntegrationDraftPatch(
+      { title, transcript, notes, roster, resources },
+      pendingIntegrationImport.patch,
+      pendingIntegrationImport.decisions,
+    );
+    setTitle(nextForm.title);
+    setTranscript(nextForm.transcript);
+    setNotes(nextForm.notes);
+    setRoster(nextForm.roster);
+    setResources(nextForm.resources);
+    if (nextForm.transcript !== transcript) {
+      setStructuredTranscript(undefined);
+      setZoomCloudImported(false);
+      setFileName("");
+    }
+    const selectedFields = Object.entries(pendingIntegrationImport.decisions)
+      .filter(([, decision]) => decision.include)
+      .map(([field]) => field as IntegrationImportReceipt["selectedFields"][number]);
+    onIntegrationImportApplied({
+      id: pendingIntegrationImport.patch.receipt?.id ?? pendingIntegrationImport.patch.importId,
+      integrationId: pendingIntegrationImport.patch.integrationId,
+      providerLabel: pendingIntegrationImport.patch.providerLabel,
+      sourceLabel: pendingIntegrationImport.patch.sourceLabel,
+      selectedFields,
+      importedAt:
+        pendingIntegrationImport.patch.receipt?.importedAt ??
+        new Date().toISOString(),
+    });
+    setIntegrationActionMessage(
+      `${pendingIntegrationImport.patch.providerLabel} fields applied. Review and edit them before generating the draft.`,
+    );
+    onClearPendingIntegrationImport();
+  };
+
   const handleFollowUpIntegrationAction = (
     connectorLabel: string,
     ready: boolean,
-    capability: "draft" | "read",
+    emailDelivery = false,
   ) => {
-    if (!ready) {
-      openConnectorSettings(connectorLabel);
+    if (emailDelivery && ready) {
+      setIntegrationActionMessage(
+        "Generate and review the draft first; ClassLoop can then send the approved recap through the configured email sender.",
+      );
       return;
     }
-    setIntegrationActionMessage(
-      capability === "draft"
-        ? `Generate the draft, then ClassLoop can prepare the ${connectorLabel} for review.`
-        : `${connectorLabel} is connected for read-only context. ClassLoop will not create or change records in that service.`,
-    );
-  };
-
-  const handleReadyImportConnector = (connectorLabel: string) => {
-    setZoomMessage(`${connectorLabel} is configured. ClassLoop will show connected records here once the import endpoint returns files for this account.`);
+    openConnectorSettings(connectorLabel);
   };
 
   const importZoomCloudTranscript = () => {
@@ -9595,30 +9983,34 @@ function ImportSession({
         : fileName
           ? "file"
           : "paste";
-    const session = createGeneratedSession({
-      title,
-      template,
-      transcript,
-      notes: [notes, detailNotes, captureNotes].filter(Boolean).join("\n\n"),
-      roster,
-      resources,
-      captureMode,
-      captureSourceLabel: captureModeLabels[captureMode],
-      captureDurationSeconds: recordedSeconds || undefined,
-      transcriptSource,
-      structuredTranscript:
-        structuredTranscript ??
-        createStructuredTranscriptFromText(transcript, {
-          title: `${title || "Class session"} transcript`,
-          source: transcriptSource,
-          durationSeconds: recordedSeconds || undefined,
-        }),
-    });
+    const session = {
+      ...createGeneratedSession({
+        title,
+        template,
+        transcript,
+        notes: [notes, detailNotes, captureNotes].filter(Boolean).join("\n\n"),
+        roster,
+        resources,
+        captureMode,
+        captureSourceLabel: captureModeLabels[captureMode],
+        captureDurationSeconds: recordedSeconds || undefined,
+        transcriptSource,
+        structuredTranscript:
+          structuredTranscript ??
+          createStructuredTranscriptFromText(transcript, {
+            title: `${title || "Class session"} transcript`,
+            source: transcriptSource,
+            durationSeconds: recordedSeconds || undefined,
+          }),
+      }),
+      integrationImports: [...integrationImportReceipts],
+    };
     const privacyAdjustedSession =
       zoomCloudImported && session.capture?.transcriptSource === "zoom_cloud_transcript"
         ? {
             ...session,
             transcript: "",
+            structuredTranscript: undefined,
             notes: appendCapturedText(session.notes, "Raw Zoom cloud transcript auto-deleted after draft generation."),
           }
         : session;
@@ -9674,44 +10066,45 @@ function ImportSession({
       id: "zoom",
       icon: PlayCircle,
       title: "Zoom transcripts",
-      detail: zoomConnectorReady ? "Connected for transcript-ready meeting imports." : "Meeting transcript picker after Zoom setup.",
+      detail: zoomConnectorReady
+        ? "Connected. Preview real provider records in Integrations before importing anything."
+        : "Connect this teacher's Zoom account in Integrations.",
       ready: zoomConnectorReady,
-      buttonLabel: zoomConnectorReady ? "Choose" : "Connect",
-      onClick: () => {
-        if (!zoomConnectorReady) {
-          openConnectorSettings("Zoom");
-          return;
-        }
-        setZoomPickerOpen((open) => !open);
-        setZoomMessage("");
-      },
+      buttonLabel: zoomConnectorReady ? "Preview records" : "Connect",
+      onClick: () => openConnectorSettings("Zoom"),
     },
     {
       id: "googlemeet",
       icon: PlayCircle,
       title: "Google Meet transcripts",
-      detail: meetConnectorReady ? "Connected for Meet recordings and transcript entries." : "Meet transcript imports for Google schools.",
+      detail: meetConnectorReady
+        ? "Connected. Preview real Meet records in Integrations."
+        : "Connect this teacher's Google Meet account in Integrations.",
       ready: meetConnectorReady,
-      buttonLabel: meetConnectorReady ? "Review setup" : "Connect",
-      onClick: () => (meetConnectorReady ? handleReadyImportConnector("Google Meet") : openConnectorSettings("Google Meet")),
+      buttonLabel: meetConnectorReady ? "Preview records" : "Connect",
+      onClick: () => openConnectorSettings("Google Meet"),
     },
     {
       id: "google_classroom",
       icon: GraduationCap,
       title: "Classroom roster/resources",
-      detail: classroomConnectorReady ? "Connected for course rosters, coursework, and materials." : "Course roster and material context after Classroom setup.",
+      detail: classroomConnectorReady
+        ? "Connected. Preview real Classroom records in Integrations."
+        : "Connect this teacher's Google Classroom account in Integrations.",
       ready: classroomConnectorReady,
-      buttonLabel: classroomConnectorReady ? "Review setup" : "Connect",
-      onClick: () => (classroomConnectorReady ? handleReadyImportConnector("Google Classroom") : openConnectorSettings("Google Classroom")),
+      buttonLabel: classroomConnectorReady ? "Preview records" : "Connect",
+      onClick: () => openConnectorSettings("Google Classroom"),
     },
     {
       id: "google_workspace",
       icon: FileText,
       title: "Drive, Docs, or Sheets",
-      detail: workspaceImportReady ? "Connected for class files, notes, rosters, or tracker sheets." : "Class materials, note docs, and roster spreadsheets.",
+      detail: workspaceImportReady
+        ? "Connected. Preview real Workspace records in Integrations."
+        : "Connect a teacher-owned Drive, Docs, or Sheets account in Integrations.",
       ready: workspaceImportReady,
-      buttonLabel: workspaceImportReady ? "Review setup" : "Connect",
-      onClick: () => (workspaceImportReady ? handleReadyImportConnector("Google Workspace") : openConnectorSettings("Google Workspace")),
+      buttonLabel: workspaceImportReady ? "Preview records" : "Connect",
+      onClick: () => openConnectorSettings("Google Workspace"),
     },
   ];
 
@@ -9720,64 +10113,65 @@ function ImportSession({
       id: "calendar",
       icon: CalendarDays,
       title: "Calendar context",
-      detail: calendarConnectorReady ? "Read-only schedule context connected." : "Connect Google Calendar for schedule context.",
+      detail: calendarConnectorReady ? "Connected; preview schedule records in Integrations." : "Connect Google Calendar for schedule context.",
       ready: calendarConnectorReady,
       connectorLabel: "Google Calendar",
-      capability: "read" as const,
     },
     {
-      id: "gmail",
+      id: "email",
       icon: Mail,
       title: "Email reminder",
-      detail: gmailConnectorReady ? "Ready as a Gmail draft after review." : "Connect Gmail.",
-      ready: gmailConnectorReady,
-      connectorLabel: "email reminder",
-      capability: "draft" as const,
+      detail: integrationStatus?.email?.configured
+        ? "Ready through the configured email sender."
+        : "Configure CLASSLOOP_GMAIL_* or CLASSLOOP_SMTP_* for approved recap delivery.",
+      ready: Boolean(integrationStatus?.email?.configured),
+      connectorLabel: "email delivery",
+      emailDelivery: true,
     },
     {
       id: "classroom",
       icon: Send,
       title: "Classroom context",
-      detail: classroomConnectorReady ? "Read-only course and announcement context connected." : "Connect Google Classroom for class context.",
+      detail: classroomConnectorReady ? "Connected; preview course records in Integrations." : "Set up Google Classroom OAuth before connecting course context.",
       ready: classroomConnectorReady,
       connectorLabel: "Google Classroom",
-      capability: "read" as const,
+      emailDelivery: false,
     },
     {
       id: "docs",
       icon: FileText,
       title: "Docs context",
-      detail: docsConnectorReady ? "Read-only selected-document context connected." : "Connect Google Docs for document context.",
+      detail: docsConnectorReady ? "Connected; preview a selected document in Integrations." : "Connect Google Docs for document context.",
       ready: docsConnectorReady,
       connectorLabel: "Google Docs",
-      capability: "read" as const,
+      emailDelivery: false,
     },
     {
       id: "sheets",
       icon: ClipboardCheck,
       title: "Sheets context",
-      detail: sheetsConnectorReady ? "Read-only roster and tracker context connected." : "Connect Google Sheets for tracker context.",
+      detail: sheetsConnectorReady ? "Connected; preview roster or tracker records in Integrations." : "Connect Google Sheets for tracker context.",
       ready: sheetsConnectorReady,
       connectorLabel: "Google Sheets",
-      capability: "read" as const,
+      emailDelivery: false,
     },
     {
       id: "tasks",
       icon: ListChecks,
       title: "Tasks context",
-      detail: tasksConnectorReady ? "Read-only teacher task context connected." : "Connect Google Tasks for task context.",
+      detail: tasksConnectorReady ? "Connected; preview teacher task records in Integrations." : "Connect Google Tasks for task context.",
       ready: tasksConnectorReady,
       connectorLabel: "Google Tasks",
-      capability: "read" as const,
+      emailDelivery: false,
     },
     {
       id: "forms",
       icon: MessageSquare,
       title: "Forms context",
-      detail: formsConnectorReady ? "Read-only form and response context connected." : "Connect Google Forms for response context.",
+      detail: formsConnectorReady ? "Connected; preview form records in Integrations." : "Set up Google Forms OAuth before connecting response context.",
       ready: formsConnectorReady,
       connectorLabel: "Google Forms",
-      capability: "read" as const,
+      emailDelivery: false,
     },
   ];
 
@@ -9790,6 +10184,61 @@ function ImportSession({
             <h2>Import a transcript, notes, or both.</h2>
             <p>ClassLoop will draft your review page, then wait for your approval before students see anything.</p>
           </div>
+
+          {pendingIntegrationImport && (
+            <section
+              className="pending-integration-import"
+              role="region"
+              aria-label={`${pendingIntegrationImport.patch.providerLabel} import ready`}
+            >
+              <div>
+                <span className="eyebrow">Provider import ready</span>
+                <h3>{pendingIntegrationImport.patch.sourceLabel}</h3>
+                <p>
+                  Choose whether to apply the reviewed {pendingIntegrationImport.patch.providerLabel} fields. Nothing has
+                  changed in this form yet.
+                </p>
+              </div>
+              <div className="connector-chip-row">
+                {Object.entries(pendingIntegrationImport.decisions)
+                  .filter(([, decision]) => decision.include)
+                  .map(([field]) => (
+                    <span className="connector-chip" key={field}>
+                      {field}
+                    </span>
+                  ))}
+              </div>
+              <div className="button-row">
+                <button className="primary-button" type="button" onClick={applyPendingIntegrationFields}>
+                  <CheckCircle2 size={17} />
+                  Apply selected fields
+                </button>
+                <button className="ghost-button" type="button" onClick={onClearPendingIntegrationImport}>
+                  Discard import
+                </button>
+              </div>
+            </section>
+          )}
+
+          {integrationImportReceipts.length > 0 && (
+            <section
+              className="integration-import-receipt"
+              data-testid="integration-import-receipt"
+              role="status"
+            >
+              <ShieldCheck size={19} />
+              <span>
+                <strong>
+                  {integrationImportReceipts.length} provider import
+                  {integrationImportReceipts.length === 1 ? "" : "s"} applied
+                </strong>
+                <small>
+                  {integrationImportReceipts.map((receipt) => receipt.sourceLabel).join(" · ")} · Nothing was posted back
+                  to any provider. Review the form before generating the draft.
+                </small>
+              </span>
+            </section>
+          )}
 
           <div className="form-grid">
             <label className="field wide">
@@ -10004,7 +10453,7 @@ function ImportSession({
                 <div className="capture-panel wide import-integration-panel" aria-label="Connect imports and follow-up integrations">
                   <div>
                     <span className="eyebrow">Connected imports</span>
-                    <h3>Connect sources when you want one-click imports.</h3>
+                    <h3>Connect sources when you want provider previews.</h3>
                     <p>Manual paste and upload stay available even when no external connector is set up.</p>
                   </div>
                   <div className="import-connector-grid">
@@ -10075,7 +10524,7 @@ function ImportSession({
                     <div className="post-transcript-actions" aria-label="Post-transcript integrations">
                       <div>
                         <strong>After the transcript is in</strong>
-                        <small>Use connected read-only context or prepare a Gmail draft from the generated draft.</small>
+                        <small>Preview connected provider records in Integrations before using them as read-only context.</small>
                       </div>
                       <div className="import-connector-grid">
                         {postTranscriptIntegrationRows.map((connector) => {
@@ -10088,7 +10537,7 @@ function ImportSession({
                                 handleFollowUpIntegrationAction(
                                   connector.connectorLabel,
                                   connector.ready,
-                                  connector.capability,
+                                  connector.emailDelivery ?? false,
                                 )
                               }
                               key={connector.id}
@@ -11697,10 +12146,7 @@ function PublishPreview({
                     : "Publish the session first, then send the approved recap and action items."}
               </p>
               {!emailSent && integrationStatus?.email?.configured && (
-                <small>
-                  Sender: {integrationStatus.email.from}
-                  {integrationStatus.email.replyTo ? ` · replies go to ${integrationStatus.email.replyTo}` : ""}
-                </small>
+                <small>{integrationStatus.email.provider} is ready. Sender details stay private on the server.</small>
               )}
               {!emailSent && integrationStatus && !integrationStatus.email?.configured && (
                 <small>

@@ -129,8 +129,6 @@ async function mockConfiguredEmailDelivery(page: Page, teacherEmail: string, ema
         email: {
           configured: true,
           provider: "Gmail SMTP",
-          from: "ClassLoop <classloop.noreply@gmail.com>",
-          replyTo: "delivery-teacher@classloop.test",
         },
         localMcp: {
           available: true,
@@ -289,7 +287,8 @@ Ms. Rivera: Homework for Friday is the short reflection.`;
 
   await page.goBack();
   await expect(page.getByText(/one-click student delivery/i)).toBeVisible();
-  await expect(page.getByText(/Sender: ClassLoop/i)).toContainText("classloop.noreply@gmail.com");
+  await expect(page.getByText(/Gmail SMTP is ready/i)).toBeVisible();
+  await expect(page.getByText(/Sender details stay private on the server/i)).toBeVisible();
 
   const recipientList = page.locator('[aria-label="Email recap recipients"]');
   const mayaRecipient = recipientList.locator("label").filter({ hasText: mayaEmail }).getByRole("checkbox");

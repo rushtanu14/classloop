@@ -178,6 +178,18 @@ const structuredTranscriptSchema = {
   segments: field.array(field.object(transcriptSegmentSchema), { max: 5_000 }),
 };
 
+const integrationImportReceiptSchema = {
+  id: requiredTrimmed(160, looseIdPattern),
+  integrationId: requiredTrimmed(80, /^[a-z0-9_]+$/),
+  providerLabel: requiredTrimmed(160),
+  sourceLabel: requiredTrimmed(240),
+  selectedFields: field.array(
+    field.enum(["title", "transcript", "notes", "roster", "resources"]),
+    { max: 5 },
+  ),
+  importedAt: requiredIsoDate,
+};
+
 const sessionSchema = {
   id: requiredTrimmed(160, looseIdPattern),
   ownerEmail: optionalEmail,
@@ -202,6 +214,7 @@ const sessionSchema = {
   followUps: field.array(field.object(followUpSchema), { max: 500 }),
   unmatchedParticipants: field.array(field.object(unmatchedParticipantSchema), { max: 100, optional: true, defaultValue: [] }),
   importWarnings: field.array(field.object(importWarningSchema), { max: 100, optional: true, defaultValue: [] }),
+  integrationImports: field.array(field.object(integrationImportReceiptSchema), { max: 25, optional: true, defaultValue: [] }),
   transcriptAliases: field.record(requiredTrimmed(160), { maxKeys: 500, keyMax: 160, optional: true, defaultValue: {} }),
   emailDelivery: field.object(emailDeliverySchema, { optional: true }),
   deliveryLogs: field.array(field.object(deliveryLogSchema), { max: 500, optional: true, defaultValue: [] }),

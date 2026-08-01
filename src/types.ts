@@ -230,6 +230,15 @@ export type UnmatchedParticipant = {
   suggestedStudentId?: string;
 };
 
+export type IntegrationImportReceipt = {
+  id: string;
+  integrationId: string;
+  providerLabel: string;
+  sourceLabel: string;
+  selectedFields: Array<"title" | "transcript" | "notes" | "roster" | "resources">;
+  importedAt: string;
+};
+
 export type Session = {
   id: string;
   ownerEmail?: string;
@@ -254,6 +263,7 @@ export type Session = {
   followUps: StudentFollowUp[];
   unmatchedParticipants?: UnmatchedParticipant[];
   importWarnings?: ImportQualityWarning[];
+  integrationImports?: IntegrationImportReceipt[];
   transcriptAliases?: Record<string, string>;
   emailDelivery?: SessionEmailDelivery;
   deliveryLogs?: DeliveryLog[];

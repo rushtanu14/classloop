@@ -2,7 +2,9 @@
 
 ClassLoop now keeps the working prototype free-first. It does not include paid API-key features, Google Classroom OAuth posting, LMS posting, OpenAI transcription, or custom transcription-service hooks.
 
-The only external delivery path kept in the app is email through an account the user owns. The current free path is Gmail SMTP with a Gmail app password.
+The only external delivery path kept in the app is email through an account the user owns. The current free path is Gmail SMTP with a Gmail app password. ClassLoop does not use Composio Gmail, Gmail OAuth, or browser-side credentials to send these messages.
+
+ClassLoop also supports private, per-teacher Composio connections for bounded read-only imports from supported classroom and productivity providers. Teachers choose a source, review a normalized field patch, continue to New Session, and explicitly apply the selected fields. This path is separate from email delivery and never silently posts, sends, edits, deletes, or shares provider records. See `docs/mcp-composio-integrations.md` for the complete connection and import steps.
 
 ## Local Setup
 
@@ -10,7 +12,21 @@ The only external delivery path kept in the app is email through an account the 
 2. Configure Gmail or another SMTP account you own.
 3. Start ClassLoop with `./run.sh`.
 
-`.env.local` is ignored by git. Do not commit real credentials.
+Verify the Gmail credentials without sending a message:
+
+```bash
+npm run verify:gmail
+```
+
+After confirming the configured destination is the sender account you own, send one self-addressed verification message:
+
+```bash
+npm run verify:gmail:send
+```
+
+The verifier never prints the mailbox or app password. The send check targets only `CLASSLOOP_GMAIL_USER` and reports whether Gmail SMTP accepted the message.
+
+`.env.local` is ignored by git. Do not commit real credentials. The launcher loads these values into the local desktop process; hosted deployments must set the same server-only variables in the hosting environment.
 
 ## Gmail Sender
 

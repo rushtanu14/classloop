@@ -34,14 +34,13 @@ The app does not silently create Google data without OAuth. Instead:
 ## To make Google actions fully automatic later
 
 1. Create a Google Cloud project for ClassLoop.
-2. Enable Google Calendar API, Google Drive API, and Gmail API.
+2. Enable Google Calendar API and Google Drive API.
 3. Configure OAuth consent for the app.
 4. Add these scopes only when needed:
    - `https://www.googleapis.com/auth/calendar.events`
    - `https://www.googleapis.com/auth/drive.file`
-   - `https://www.googleapis.com/auth/gmail.send`
 5. Add hosted redirect URI: `https://YOUR_CLASSLOOP_DOMAIN/api/google/oauth/callback`.
 6. Add desktop redirect URI for the packaged app if native OAuth is needed.
 7. Store refresh tokens server-side per user, encrypted.
-8. Add backend endpoints that create Calendar events, Google Docs files, and Gmail drafts.
-9. Keep the email permission checkbox even after Gmail API sending exists.
+8. Add backend endpoints that create Calendar events and Google Docs files.
+9. Keep email delivery on ClassLoop's server-only Gmail app-password or SMTP environment path.

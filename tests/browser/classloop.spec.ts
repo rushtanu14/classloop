@@ -628,18 +628,6 @@ async function mockIntegrationStatus(page: Page) {
       allowedTools: ["ZOOM_LIST_MEETINGS"],
     },
     {
-      id: "gmail",
-      toolkit: "gmail",
-      label: "Gmail",
-      category: "Classroom core",
-      priority: "core",
-      authConfigEnv: "COMPOSIO_GMAIL_AUTH_CONFIG_ID",
-      authConfigured: false,
-      mode: "draft_only",
-      purpose: "Create teacher-reviewed draft recap emails.",
-      allowedTools: ["GMAIL_CREATE_EMAIL_DRAFT"],
-    },
-    {
       id: "googlecalendar",
       toolkit: "googlecalendar",
       label: "Google Calendar",
@@ -658,7 +646,11 @@ async function mockIntegrationStatus(page: Page) {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        email: { configured: false, provider: "Not configured" },
+        email: {
+          configured: true,
+          provider: "Gmail SMTP",
+          from: "classloop.donotreply@gmail.com",
+        },
         localMcp: {
           available: true,
           transport: "stdio",
@@ -1077,14 +1069,18 @@ test("teacher sees connector-gated imports and can paste transcript manually", a
 
   await page.locator(".nav-list").getByRole("button", { name: /^Integrations$/i }).click();
   await expect(page.getByRole("heading", { name: /connect classloop to the places teachers already work/i })).toBeVisible();
-  await expect(page.getByLabel(/integration setup summary/i)).toContainText(/core connectors configured/i);
+  await expect(page.getByLabel(/integration setup summary/i)).toContainText(/core teacher connections/i);
   await expect(page.getByText(/Google Classroom/i).first()).toBeVisible();
   await expect(page.getByText(/Zoom/i).first()).toBeVisible();
-  await expect(page.getByText(/Gmail/i).first()).toBeVisible();
   await expect(page.getByText(/Google Calendar/i).first()).toBeVisible();
   await expect(page.getByText(/read calendar and event context/i)).toBeVisible();
   await expect(page.getByText(/does not create or change calendar events/i)).toBeVisible();
   await expect(page.getByText(/COMPOSIO_GOOGLE_CLASSROOM_AUTH_CONFIG_ID/i).first()).toBeVisible();
+  await expect(page.getByText(/COMPOSIO_GMAIL_AUTH_CONFIG_ID/i)).toHaveCount(0);
+  await expect(page.locator(".connector-chip").filter({ hasText: /^Gmail$/i })).toHaveCount(0);
+  await expect(page.locator(".integration-workflow-card").filter({ hasText: /^Gmail$/i })).toHaveCount(0);
+  await expect(page.getByTestId("email-delivery-status")).toContainText(/Gmail SMTP is configured server-side/i);
+  await expect(page.getByTestId("email-delivery-status")).toContainText(/sender address stays private/i);
 
   await page.getByRole("button", { name: /new session/i }).first().click();
   await page.getByLabel(/session title/i).fill(`Connector gated import ${runId}`);
@@ -1105,7 +1101,12 @@ test("teacher sees connector-gated imports and can paste transcript manually", a
   await page.getByLabel(/paste transcript text/i).fill(pastedTranscript);
   await expect(page.getByLabel(/post-transcript integrations/i)).toBeVisible();
   await expect(page.getByRole("button", { name: /calendar context/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /email reminder/i })).toBeVisible();
+  const emailReminder = page.getByRole("button", { name: /email reminder/i });
+  await expect(emailReminder).toBeVisible();
+  await expect(emailReminder).toHaveClass(/active/);
+  await expect(emailReminder).toContainText(/Ready through (?:the )?configured (?:SMTP|email) sender/i);
+  await expect(emailReminder).not.toContainText(/Connect Gmail|Gmail draft/i);
+  await expect(page.getByLabel(/post-transcript integrations/i)).not.toContainText(/Gmail draft/i);
   await expect(page.getByRole("button", { name: /classroom context/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /docs context/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /sheets context/i })).toBeVisible();

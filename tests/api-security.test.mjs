@@ -20,6 +20,7 @@ import {
   saveWorkspaceState,
   studentEmail,
 } from "../server/backend/api/email/send-recaps.js";
+import integrationsStatusHandler from "../server/backend/api/integrations/status.js";
 
 function assertThrowsStatus(fn, statusCode, messagePattern) {
   assert.throws(
@@ -51,6 +52,7 @@ function loadDesktopEmailContract() {
     `${source.slice(start, end)}
     ({
       assertLocalRecapEmailAuthorization,
+      emailConfig,
       textForStudentEmail,
       validateEmailRequestPayload,
     });`,
@@ -398,6 +400,34 @@ assertThrowsStatus(
 );
 
 const desktopEmailContract = loadDesktopEmailContract();
+const preservedDesktopEmailEnv = Object.fromEntries(
+  [
+    "CLASSLOOP_SMTP_HOST",
+    "CLASSLOOP_GMAIL_USER",
+    "CLASSLOOP_GMAIL_APP_PASSWORD",
+    "CLASSLOOP_GMAIL_FROM",
+  ].map((key) => [key, process.env[key]]),
+);
+try {
+  delete process.env.CLASSLOOP_SMTP_HOST;
+  process.env.CLASSLOOP_GMAIL_USER = "sender@classloop.test";
+  process.env.CLASSLOOP_GMAIL_APP_PASSWORD = "abcd efgh ijkl mnop";
+  process.env.CLASSLOOP_GMAIL_FROM = "sender@classloop.test";
+  const desktopGmailConfig = desktopEmailContract.emailConfig();
+  assert.equal(desktopGmailConfig.transport.host, "smtp.gmail.com");
+  assert.equal(desktopGmailConfig.transport.port, 465);
+  assert.equal(desktopGmailConfig.transport.secure, true);
+  assert.equal(
+    desktopGmailConfig.transport.auth.pass,
+    "abcdefghijklmnop",
+    "Desktop Gmail delivery must normalize the app password loaded from server-only environment variables.",
+  );
+} finally {
+  for (const [key, value] of Object.entries(preservedDesktopEmailEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
 const desktopEmailPayload = desktopEmailContract.validateEmailRequestPayload({
   sessionId: "session-1",
   recipients: ["MAYA@CLASSLOOP.TEST"],
@@ -414,6 +444,40 @@ assertThrowsStatus(
   400,
   /unsupported field/i,
 );
+
+const preservedPublicStatusEmailEnv = Object.fromEntries(
+  [
+    "CLASSLOOP_SMTP_HOST",
+    "CLASSLOOP_GMAIL_USER",
+    "CLASSLOOP_GMAIL_APP_PASSWORD",
+    "CLASSLOOP_GMAIL_FROM",
+    "CLASSLOOP_REPLY_TO",
+  ].map((key) => [key, process.env[key]]),
+);
+try {
+  delete process.env.CLASSLOOP_SMTP_HOST;
+  process.env.CLASSLOOP_GMAIL_USER = "private-sender@classloop.test";
+  process.env.CLASSLOOP_GMAIL_APP_PASSWORD = "private-app-password";
+  process.env.CLASSLOOP_GMAIL_FROM = "private-from@classloop.test";
+  process.env.CLASSLOOP_REPLY_TO = "private-reply@classloop.test";
+  const publicStatusResponse = mockResponse();
+  await integrationsStatusHandler(
+    mockRequest({ method: "GET", headers: { "content-type": "application/json" }, body: undefined }),
+    publicStatusResponse,
+  );
+  assert.equal(publicStatusResponse.statusCode, 200);
+  const publicEmailStatus = publicStatusResponse.json().email;
+  assert.deepEqual(publicEmailStatus, {
+    configured: true,
+    provider: "Gmail SMTP",
+  });
+  assert.equal(JSON.stringify(publicEmailStatus).includes("private-"), false);
+} finally {
+  for (const [key, value] of Object.entries(preservedPublicStatusEmailEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
 assertThrowsStatus(
   () => desktopEmailContract.validateEmailRequestPayload({
     sessionId: "session-1",
@@ -516,6 +580,56 @@ assert.equal(
   }).sessions[0].capture.mode,
   "in_person",
   "Legacy cloud sessions should stay readable without restoring the removed in-person control.",
+);
+const workspaceWithIntegrationReceipt = validateCloudWorkspaceStatePayload(
+  {
+    ...validWorkspaceState,
+    sessions: [
+      validCloudSession({
+        integrationImports: [
+          {
+            id: "clr_1234567890abcdef12345678",
+            integrationId: "googledocs",
+            providerLabel: "Google Docs",
+            sourceLabel: "Period 4 review",
+            selectedFields: ["title", "notes"],
+            importedAt: "2026-07-29T20:00:00.000Z",
+          },
+        ],
+      }),
+    ],
+  },
+  { ownerEmail: authenticatedOwnerEmail },
+);
+assert.deepEqual(
+  workspaceWithIntegrationReceipt.sessions[0].integrationImports[0].selectedFields,
+  ["title", "notes"],
+);
+assertThrowsStatus(
+  () =>
+    validateCloudWorkspaceStatePayload(
+      {
+        ...validWorkspaceState,
+        sessions: [
+          validCloudSession({
+            integrationImports: [
+              {
+                id: "clr_1234567890abcdef12345678",
+                integrationId: "googledocs",
+                providerLabel: "Google Docs",
+                sourceLabel: "Period 4 review",
+                selectedFields: ["notes"],
+                importedAt: "2026-07-29T20:00:00.000Z",
+                providerRecordId: "must-not-sync",
+              },
+            ],
+          }),
+        ],
+      },
+      { ownerEmail: authenticatedOwnerEmail },
+    ),
+  400,
+  /unsupported field/i,
 );
 assert.doesNotThrow(() =>
   validateCloudWorkspaceStatePayload(

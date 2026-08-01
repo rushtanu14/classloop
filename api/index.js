@@ -6,6 +6,10 @@ import cloudState from "../server/backend/api/cloud-state.js";
 import configHandler from "../server/backend/api/config.js";
 import emailRecaps from "../server/backend/api/email/send-recaps.js";
 import feedback from "../server/backend/api/feedback.js";
+import integrationsConnect from "../server/backend/api/integrations/connect.js";
+import integrationsConnections from "../server/backend/api/integrations/connections.js";
+import integrationsImportPreview from "../server/backend/api/integrations/import-preview.js";
+import integrationsRecords from "../server/backend/api/integrations/records.js";
 import integrationsStatus from "../server/backend/api/integrations/status.js";
 import profile from "../server/backend/api/profile.js";
 import supabaseKeepalive from "../server/backend/api/ops/supabase-keepalive.js";
@@ -26,6 +30,10 @@ const handlers = new Map([
   ["config", configHandler],
   ["email/send-recaps", emailRecaps],
   ["feedback", feedback],
+  ["integrations/connect", integrationsConnect],
+  ["integrations/connections", integrationsConnections],
+  ["integrations/import-preview", integrationsImportPreview],
+  ["integrations/records", integrationsRecords],
   ["integrations/status", integrationsStatus],
   ["ops/supabase-keepalive", supabaseKeepalive],
   ["profile", profile],

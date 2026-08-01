@@ -39,6 +39,10 @@ const hostedProxyPaths = new Set([
   "/api/billing/prepare-account",
   "/api/billing/checkout",
   "/api/billing/portal",
+  "/api/integrations/connections",
+  "/api/integrations/connect",
+  "/api/integrations/import-preview",
+  "/api/integrations/records",
 ]);
 
 const securityHeaders = {
@@ -397,7 +401,7 @@ function emailConfig() {
         secure: true,
         auth: {
           user: process.env.CLASSLOOP_GMAIL_USER,
-          pass: process.env.CLASSLOOP_GMAIL_APP_PASSWORD,
+          pass: process.env.CLASSLOOP_GMAIL_APP_PASSWORD.replace(/\s+/g, ""),
         },
       },
     };
@@ -691,7 +695,27 @@ async function handleIntegrationStatusApi(request, response) {
     return true;
   }
   const config = emailConfig();
+  let hostedStatus = {};
+  if (typeof fetch === "function") {
+    try {
+      const upstream = await fetch(new URL("/api/integrations/status", `${hostedApiBaseUrl}/`), {
+        headers: { Accept: "application/json" },
+        redirect: "manual",
+        signal:
+          typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+            ? AbortSignal.timeout(5_000)
+            : undefined,
+      });
+      if (upstream.ok) {
+        const candidate = await upstream.json();
+        if (isPlainObject(candidate)) hostedStatus = candidate;
+      }
+    } catch {
+      hostedStatus = {};
+    }
+  }
   sendJson(response, 200, {
+    ...hostedStatus,
     email: {
       configured: config.configured,
       provider: config.provider,

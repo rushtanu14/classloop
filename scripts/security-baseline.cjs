@@ -24,7 +24,9 @@ function isIgnored(filePath) {
 }
 
 function trackedFiles() {
-  return runGit(["ls-files", "-z"]).split("\0").filter(Boolean);
+  return runGit(["ls-files", "-z", "--cached", "--others", "--exclude-standard"])
+    .split("\0")
+    .filter(Boolean);
 }
 
 function readText(relPath) {
@@ -67,7 +69,7 @@ function verifyNoHighConfidenceSecrets(files) {
     {
       name: "non-empty server secret env assignment",
       pattern:
-        /^(?:SUPABASE_SERVICE_ROLE_KEY|SUPABASE_KEEPALIVE_PASSWORD|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|CLASSLOOP_GMAIL_APP_PASSWORD|CLASSLOOP_SMTP_PASS|CRON_SECRET)[^\S\r\n]*=[^\S\r\n]*(?!(?:replace-me|replace-me-with-a-long-random-password|your-16-character-app-password)?[^\S\r\n]*$)[^\r\n]+/im,
+        /^(?:SUPABASE_SERVICE_ROLE_KEY|SUPABASE_KEEPALIVE_PASSWORD|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|CLASSLOOP_GMAIL_APP_PASSWORD|CLASSLOOP_SMTP_PASS|COMPOSIO_API_KEY|CLASSLOOP_INTEGRATION_SELECTION_SECRET|CRON_SECRET)[^\S\r\n]*=[^\S\r\n]*(?!(?:replace-me|replace-me-with-a-long-random-password|your-16-character-app-password)?[^\S\r\n]*$)[^\r\n]+/im,
     },
   ];
 
@@ -144,6 +146,13 @@ function verifyDesktopAndHostedSecurity() {
   const cloudState = readText("server/backend/api/cloud-state.js");
   const emailRecaps = readText("server/backend/api/email/send-recaps.js");
   const feedback = readText("server/backend/api/feedback.js");
+  const composioRuntime = readText("server/backend/composio-runtime.js");
+  const composioConnections = readText("server/backend/api/integrations/connections.js");
+  const composioConnect = readText("server/backend/api/integrations/connect.js");
+  const composioImports = readText("server/backend/composio-imports.js");
+  const composioRecords = readText("server/backend/api/integrations/records.js");
+  const composioImportPreview = readText("server/backend/api/integrations/import-preview.js");
+  const gmailVerifier = readText("scripts/verify-gmail-delivery.mjs");
   const checkout = readText("server/backend/api/billing/checkout.js");
   const prepareAccount = readText("server/backend/api/billing/prepare-account.js");
   const portal = readText("server/backend/api/billing/portal.js");
@@ -176,6 +185,32 @@ function verifyDesktopAndHostedSecurity() {
     ["hosted APIs support user rate limiting", shared, /assertUserRateLimit/],
     ["hosted APIs require JSON content types for JSON bodies", shared, /Use application\/json for this request/],
     ["hosted APIs use schema validation", shared, /validateSchema/],
+    ["Composio users derive from an opaque authenticated-user hash", composioRuntime, /createHash\("sha256"\)[\s\S]*?safeUserIdSource\(user\)/],
+    ["Composio runtime requires a server-only API key", composioRuntime, /requiredEnv\("COMPOSIO_API_KEY"\)/],
+    ["Composio runtime rejects Gmail", composioRuntime, /integration\.id === "gmail" \|\| integration\.toolkit === "gmail"/],
+    [
+      "Composio connection URLs are allowlisted",
+      composioRuntime,
+      /url\.protocol === "https:"\s*&&\s*url\.hostname === "connect\.composio\.dev"\s*&&\s*url\.port === ""\s*&&\s*url\.username === ""\s*&&\s*url\.password === ""/,
+    ],
+    ["Composio runtime pins the fetched tool version", composioRuntime, /version: tool\.version/],
+    ["Composio runtime selects active owned accounts server-side", composioRuntime, /connectedAccountId: activeAccount\.id/],
+    ["Composio preview redacts provider credential fields", composioRuntime, /SECRET_KEY_PATTERN/],
+    ["Composio preview rejects mutating tools", composioRuntime, /CREATE\|UPDATE\|DELETE\|SEND\|POST\|PUBLISH\|SHARE/],
+    ["Composio connections require teacher auth", composioConnections, /requireTeacherIntegrationUser\(supabase, user\)/],
+    ["Composio connections have user rate limiting", composioConnections, /requireUser\(request, response, \{ rateLimit: CONNECTIONS_RATE_LIMIT \}/],
+    ["Composio connect validates a strict payload", composioConnect, /validateIntegrationConnectPayload/],
+    ["Composio connect has user rate limiting", composioConnect, /requireUser\(request, response, \{ rateLimit: CONNECT_RATE_LIMIT \}/],
+    ["Composio record selections use AES-GCM", composioImports, /createCipheriv\("aes-256-gcm"/],
+    ["Composio record selections require a dedicated secret", composioImports, /CLASSLOOP_INTEGRATION_SELECTION_SECRET/],
+    ["Composio record selections bind the active provider account", composioImports, /connectionBinding/],
+    ["Composio structured imports block prototype keys", composioImports, /__proto__[\s\S]*?constructor[\s\S]*?prototype/],
+    ["Composio records validate a strict payload", composioRecords, /validateIntegrationRecordsPayload/],
+    ["Composio records require teacher auth", composioRecords, /requireTeacherIntegrationUser\(supabase, user\)/],
+    ["Composio import preview validates a strict payload", composioImportPreview, /validateIntegrationImportPreviewPayload/],
+    ["Composio import preview requires teacher auth", composioImportPreview, /requireTeacherIntegrationUser\(supabase, user\)/],
+    ["Gmail verification sends only to the configured sender account", gmailVerifier, /to:\s*user/],
+    ["Gmail verification reports a one-way receipt instead of a message id", gmailVerifier, /createHash\("sha256"\)[\s\S]*?message\.messageId/],
     ["API validators reject unexpected fields", shared, /contains unsupported field/],
     ["cloud workspace state has strict schema", validators, /validateCloudWorkspaceStatePayload/],
     ["feedback has strict schema", validators, /validateFeedbackPayload/],
@@ -244,6 +279,9 @@ function verifyDesktopAndHostedSecurity() {
   if (/route === "transcribe"/.test(apiDispatcher)) {
     fail("Anonymous paid transcription must not be exposed by the hosted API dispatcher.");
   }
+  if (/integrations\/preview/.test(apiDispatcher)) {
+    fail("The legacy raw provider-preview route must not be exposed by the hosted API dispatcher.");
+  }
   if (/OPENAI_API_KEY|OPENAI_TRANSCRIBE_MODEL/.test(envExample)) {
     fail("The free-first app must not advertise paid OpenAI transcription credentials.");
   }
@@ -297,6 +335,13 @@ function verifyRuntimeLogging() {
     "server/backend/api/profile.js",
     "server/backend/api/feedback.js",
     "server/backend/api/ops/supabase-keepalive.js",
+    "server/backend/composio-runtime.js",
+    "server/backend/composio-imports.js",
+    "server/backend/composio-detail-imports.js",
+    "server/backend/api/integrations/connect.js",
+    "server/backend/api/integrations/connections.js",
+    "server/backend/api/integrations/import-preview.js",
+    "server/backend/api/integrations/records.js",
   ];
   const noisyLogs = [];
   files.forEach((relPath) => {

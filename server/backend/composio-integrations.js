@@ -9,12 +9,15 @@ export const classLoopComposioIntegrations = [
     category: "Classroom core",
     priority: "core",
     authConfigEnv: "COMPOSIO_GOOGLE_CLASSROOM_AUTH_CONFIG_ID",
+    authProvisioning: "custom_google_oauth",
     mode: "preview_first",
     purpose: "Read course rosters, announcements, coursework, and materials for teacher-reviewed imports.",
     allowedTools: [
-      "GOOGLE_CLASSROOM_LIST_COURSES",
-      "GOOGLE_CLASSROOM_LIST_STUDENTS",
-      "GOOGLE_CLASSROOM_LIST_ANNOUNCEMENTS",
+      "GOOGLE_CLASSROOM_COURSES_LIST",
+      "GOOGLE_CLASSROOM_COURSES_STUDENTS_LIST",
+      "GOOGLE_CLASSROOM_COURSES_ANNOUNCEMENTS_LIST",
+      "GOOGLE_CLASSROOM_COURSE_WORK_LIST",
+      "GOOGLE_CLASSROOM_COURSE_WORK_MATERIALS_LIST",
     ],
   },
   {
@@ -24,27 +27,17 @@ export const classLoopComposioIntegrations = [
     category: "Classroom core",
     priority: "core",
     authConfigEnv: "COMPOSIO_ZOOM_AUTH_CONFIG_ID",
+    authProvisioning: "composio_managed_oauth",
     mode: "preview_first",
     purpose: "Preview meetings, participants, recordings, summaries, and transcript availability before importing into ClassLoop.",
     allowedTools: [
       "ZOOM_LIST_MEETINGS",
-      "ZOOM_GET_MEETING",
+      "ZOOM_GET_A_MEETING",
       "ZOOM_GET_PAST_MEETING_PARTICIPANTS",
-      "ZOOM_LIST_RECORDINGS",
+      "ZOOM_LIST_ALL_RECORDINGS",
       "ZOOM_GET_MEETING_RECORDINGS",
-      "ZOOM_GET_MEETING_SUMMARY",
+      "ZOOM_GET_A_MEETING_SUMMARY",
     ],
-  },
-  {
-    id: "gmail",
-    toolkit: "gmail",
-    label: "Gmail",
-    category: "Classroom core",
-    priority: "core",
-    authConfigEnv: "COMPOSIO_GMAIL_AUTH_CONFIG_ID",
-    mode: "draft_only",
-    purpose: "Create teacher-reviewed draft recap emails and search a teacher-owned mailbox when explicitly requested.",
-    allowedTools: ["GMAIL_CREATE_EMAIL_DRAFT", "GMAIL_FETCH_EMAILS", "GMAIL_SEARCH_EMAILS"],
   },
   {
     id: "googlecalendar",
@@ -53,11 +46,13 @@ export const classLoopComposioIntegrations = [
     category: "Classroom core",
     priority: "core",
     authConfigEnv: "COMPOSIO_GOOGLE_CALENDAR_AUTH_CONFIG_ID",
+    authProvisioning: "composio_managed_oauth",
     mode: "preview_first",
     purpose: "Read calendars and events so teachers can review schedule context inside ClassLoop.",
     allowedTools: [
       "GOOGLECALENDAR_LIST_CALENDARS",
-      "GOOGLECALENDAR_LIST_EVENTS",
+      "GOOGLECALENDAR_EVENTS_LIST",
+      "GOOGLECALENDAR_EVENTS_LIST_ALL_CALENDARS",
     ],
   },
   {
@@ -67,15 +62,16 @@ export const classLoopComposioIntegrations = [
     category: "Meeting capture",
     priority: "high",
     authConfigEnv: "COMPOSIO_GOOGLE_MEET_AUTH_CONFIG_ID",
+    authProvisioning: "composio_managed_oauth",
     mode: "preview_first",
     purpose: "Preview Meet spaces, recordings, transcripts, and participant details for transcript-first imports.",
     allowedTools: [
-      "GOOGLEMEET_GET_MEET_DETAILS",
+      "GOOGLEMEET_LIST_CONFERENCE_RECORDS",
       "GOOGLEMEET_GET_CONFERENCE_RECORD_BY_NAME",
-      "GOOGLEMEET_GET_TRANSCRIPT",
-      "GOOGLEMEET_GET_TRANSCRIPT_ENTRY",
+      "GOOGLEMEET_LIST_PARTICIPANT_SESSIONS",
       "GOOGLEMEET_GET_RECORDINGS_BY_CONFERENCE_RECORD_ID",
-      "GOOGLEMEET_GET_PARTICIPANT_DETAILS",
+      "GOOGLEMEET_GET_TRANSCRIPTS_BY_CONFERENCE_RECORD_ID",
+      "GOOGLEMEET_LIST_TRANSCRIPT_ENTRIES",
     ],
   },
   {
@@ -85,10 +81,12 @@ export const classLoopComposioIntegrations = [
     category: "Class materials",
     priority: "high",
     authConfigEnv: "COMPOSIO_GOOGLE_DRIVE_AUTH_CONFIG_ID",
+    authProvisioning: "composio_managed_oauth",
     mode: "preview_first",
     purpose: "Search teacher-owned class materials for explicit, reviewed imports.",
     allowedTools: [
-      "GOOGLEDRIVE_SEARCH_FILES",
+      "GOOGLEDRIVE_FIND_FILE",
+      "GOOGLEDRIVE_GET_FILE_METADATA",
     ],
   },
   {
@@ -98,10 +96,11 @@ export const classLoopComposioIntegrations = [
     category: "Class materials",
     priority: "high",
     authConfigEnv: "COMPOSIO_GOOGLE_DOCS_AUTH_CONFIG_ID",
+    authProvisioning: "composio_managed_oauth",
     mode: "preview_first",
     purpose: "Read teacher-selected documents for explicit, reviewed imports.",
     allowedTools: [
-      "GOOGLEDOCS_GET_DOCUMENT",
+      "GOOGLEDOCS_GET_DOCUMENT_PLAINTEXT",
     ],
   },
   {
@@ -111,10 +110,13 @@ export const classLoopComposioIntegrations = [
     category: "Rosters and analytics",
     priority: "high",
     authConfigEnv: "COMPOSIO_GOOGLE_SHEETS_AUTH_CONFIG_ID",
+    authProvisioning: "composio_managed_oauth",
     mode: "preview_first",
     purpose: "Read teacher-selected roster and analytics spreadsheets for reviewed imports.",
     allowedTools: [
-      "GOOGLESHEETS_BATCH_GET_SPREADSHEET",
+      "GOOGLESHEETS_GET_SPREADSHEET_INFO",
+      "GOOGLESHEETS_BATCH_GET",
+      "GOOGLESHEETS_VALUES_GET",
     ],
   },
   {
@@ -124,6 +126,7 @@ export const classLoopComposioIntegrations = [
     category: "Follow-up tasks",
     priority: "optional",
     authConfigEnv: "COMPOSIO_GOOGLE_TASKS_AUTH_CONFIG_ID",
+    authProvisioning: "composio_managed_oauth",
     mode: "preview_first",
     purpose: "Read teacher task lists for follow-up and next-class context.",
     allowedTools: [
@@ -138,6 +141,7 @@ export const classLoopComposioIntegrations = [
     category: "Student check-ins",
     priority: "optional",
     authConfigEnv: "COMPOSIO_GOOGLE_FORMS_AUTH_CONFIG_ID",
+    authProvisioning: "custom_google_oauth",
     mode: "preview_first",
     purpose: "Read teacher-selected forms and responses for reviewed imports.",
     allowedTools: ["GOOGLEFORMS_GET_FORM", "GOOGLEFORMS_LIST_RESPONSES"],
@@ -149,11 +153,12 @@ export const classLoopComposioIntegrations = [
     category: "LMS",
     priority: "optional",
     authConfigEnv: "COMPOSIO_CANVAS_AUTH_CONFIG_ID",
+    authProvisioning: "custom_instance_credentials",
     mode: "preview_first",
     purpose: "Preview Canvas courses, assignments, announcements, and submission context for schools using Canvas.",
     allowedTools: [
       "CANVAS_LIST_COURSES",
-      "CANVAS_LIST_ASSIGNMENTS",
+      "CANVAS_GET_ALL_ASSIGNMENTS",
       "CANVAS_LIST_ANNOUNCEMENTS",
     ],
   },
@@ -164,12 +169,13 @@ export const classLoopComposioIntegrations = [
     category: "LMS",
     priority: "optional",
     authConfigEnv: "COMPOSIO_BLACKBOARD_AUTH_CONFIG_ID",
+    authProvisioning: "custom_institution_oauth",
     mode: "preview_first",
     purpose: "Preview Blackboard course announcements, engagement, and LMS context for schools using Blackboard.",
     allowedTools: [
-      "BLACKBOARD_LIST_COURSES",
-      "BLACKBOARD_LIST_ANNOUNCEMENTS",
-      "BLACKBOARD_GET_COURSE_DETAILS",
+      "BLACKBOARD_GET_COURSES",
+      "BLACKBOARD_GET_COURSE",
+      "BLACKBOARD_GET_ANNOUNCEMENTS",
     ],
   },
   {
@@ -179,9 +185,14 @@ export const classLoopComposioIntegrations = [
     category: "Microsoft schools",
     priority: "optional",
     authConfigEnv: "COMPOSIO_OUTLOOK_AUTH_CONFIG_ID",
-    mode: "draft_only",
-    purpose: "Read Microsoft-school email/calendar context and create email drafts for teacher review.",
-    allowedTools: ["OUTLOOK_LIST_MESSAGES", "OUTLOOK_CREATE_DRAFT", "OUTLOOK_LIST_EVENTS"],
+    authProvisioning: "composio_managed_oauth",
+    mode: "preview_first",
+    purpose: "Read Microsoft-school email and calendar context for teacher-reviewed imports.",
+    allowedTools: [
+      "OUTLOOK_QUERY_EMAILS",
+      "OUTLOOK_GET_CALENDAR_VIEW",
+      "OUTLOOK_LIST_EVENTS",
+    ],
   },
   {
     id: "microsoft_teams",
@@ -190,12 +201,14 @@ export const classLoopComposioIntegrations = [
     category: "Microsoft schools",
     priority: "optional",
     authConfigEnv: "COMPOSIO_MICROSOFT_TEAMS_AUTH_CONFIG_ID",
+    authProvisioning: "composio_managed_oauth",
     mode: "preview_first",
     purpose: "Preview Teams meetings, channels, and class communication context for Microsoft-school deployments.",
     allowedTools: [
-      "MICROSOFT_TEAMS_LIST_TEAMS",
-      "MICROSOFT_TEAMS_LIST_CHANNELS",
-      "MICROSOFT_TEAMS_LIST_CHATS",
+      "MICROSOFT_TEAMS_LIST_USER_JOINED_TEAMS",
+      "MICROSOFT_TEAMS_TEAMS_LIST_CHANNELS",
+      "MICROSOFT_TEAMS_CHATS_GET_ALL_CHATS",
+      "MICROSOFT_TEAMS_TEAMS_LIST_CHANNEL_MESSAGES",
     ],
   },
   {
@@ -205,9 +218,10 @@ export const classLoopComposioIntegrations = [
     category: "Team communication",
     priority: "optional",
     authConfigEnv: "COMPOSIO_SLACK_AUTH_CONFIG_ID",
+    authProvisioning: "composio_managed_oauth",
     mode: "preview_first",
     purpose: "Search staff/team context and prepare reviewed support or operations updates for school teams using Slack.",
-    allowedTools: ["SLACK_LIST_CHANNELS", "SLACK_SEARCH_MESSAGES", "SLACK_FETCH_CONVERSATION_HISTORY"],
+    allowedTools: ["SLACK_LIST_ALL_CHANNELS", "SLACK_SEARCH_MESSAGES", "SLACK_FETCH_CONVERSATION_HISTORY"],
   },
   {
     id: "notion",
@@ -216,9 +230,10 @@ export const classLoopComposioIntegrations = [
     category: "Knowledge base",
     priority: "optional",
     authConfigEnv: "COMPOSIO_NOTION_AUTH_CONFIG_ID",
+    authProvisioning: "composio_managed_oauth",
     mode: "preview_first",
     purpose: "Search teacher-selected Notion pages for reviewed context imports.",
-    allowedTools: ["NOTION_SEARCH_NOTION_PAGE"],
+    allowedTools: ["NOTION_SEARCH_NOTION_PAGE", "NOTION_GET_PAGE_MARKDOWN", "NOTION_QUERY_DATABASE"],
   },
 ];
 
@@ -261,10 +276,13 @@ export function selectedComposioIntegrations(env = process.env) {
 export function buildComposioCreatePayload(env = process.env) {
   const selected = selectedComposioIntegrations(env);
   return {
-    toolkits: selected.map((integration) => ({
-      toolkit: integration.toolkit,
-      authConfigId: env[integration.authConfigEnv],
-    })),
+    // @composio/core 0.14.0's legacy MCP wrapper processes `toolkit` and
+    // `authConfigId` with an else-if. Separate entries ensure the remote MCP
+    // config receives both the toolkit slugs and the exact auth config ids.
+    toolkits: selected.flatMap((integration) => [
+      { toolkit: integration.toolkit },
+      { authConfigId: env[integration.authConfigEnv] },
+    ]),
     allowedTools: Array.from(new Set(selected.flatMap((integration) => integration.allowedTools))).filter(Boolean),
     manuallyManageConnections: true,
   };

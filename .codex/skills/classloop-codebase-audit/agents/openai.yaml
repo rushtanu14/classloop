@@ -1,0 +1,4 @@
+interface:
+  display_name: "Audit ClassLoop"
+  short_description: "Map and validate the ClassLoop architecture safely"
+  default_prompt: "Audit the ClassLoop codebase, verify its workflows, and prioritize improvements using repository evidence."

@@ -281,6 +281,15 @@ assert.deepEqual(
   stripeBackedOwnerProfile,
   "A real Stripe subscription must take precedence over the included owner grant.",
 );
+const cancelingStripeBackedOwnerProfile = {
+  ...stripeBackedOwnerProfile,
+  subscription_status: "canceling",
+};
+assert.deepEqual(
+  applyManualProGrantToRow(cancelingStripeBackedOwnerProfile),
+  cancelingStripeBackedOwnerProfile,
+  "A scheduled real Stripe cancellation must remain visible instead of being replaced by the included owner grant.",
+);
 const ownedPublishedSession = {
   id: "session-1",
   ownerEmail: "teacher@classloop.test",
@@ -466,12 +475,16 @@ try {
     publicStatusResponse,
   );
   assert.equal(publicStatusResponse.statusCode, 200);
-  const publicEmailStatus = publicStatusResponse.json().email;
+  const publicStatus = publicStatusResponse.json();
+  const publicEmailStatus = publicStatus.email;
   assert.deepEqual(publicEmailStatus, {
     configured: true,
     provider: "Gmail SMTP",
   });
   assert.equal(JSON.stringify(publicEmailStatus).includes("private-"), false);
+  assert.equal("localMcp" in publicStatus, false, "Public status must not expose local MCP diagnostics.");
+  assert.equal("composio" in publicStatus, false, "Public status must not expose Composio setup diagnostics.");
+  assert.equal(JSON.stringify(publicStatus).includes("COMPOSIO_"), false, "Public status must not expose operator env names.");
 } finally {
   for (const [key, value] of Object.entries(preservedPublicStatusEmailEnv)) {
     if (value === undefined) delete process.env[key];

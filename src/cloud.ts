@@ -10,6 +10,7 @@ export type BillingProfile = {
   tier: PlanTier;
   status:
     | "active"
+    | "canceling"
     | "trialing"
     | "past_due"
     | "canceled"
@@ -213,7 +214,11 @@ export function planForTier(tier: PlanTier) {
 }
 
 export function isPaidPlan(profile?: BillingProfile | null) {
-  return Boolean(profile?.customerId && profile.tier === "pro" && profile.status === "active");
+  return Boolean(
+    profile?.customerId &&
+      profile.tier === "pro" &&
+      (profile.status === "active" || profile.status === "canceling"),
+  );
 }
 
 export function isManualProEmail(email = "") {

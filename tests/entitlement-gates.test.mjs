@@ -7,7 +7,12 @@ import {
 } from "../server/backend/api/billing/entitlements.js";
 import { stripeApiVersion } from "../server/backend/api/billing/stripe-client.js";
 import { checkoutReturnUrls, embeddedCheckoutReturnUrl } from "../server/backend/api/billing/checkout.js";
-import { checkoutSessionPaymentAccepted, checkoutSessionUserId, subscriptionIdFromInvoice } from "../server/backend/api/billing/webhook.js";
+import {
+  checkoutSessionPaymentAccepted,
+  checkoutSessionUserId,
+  subscriptionEntitlementStatus,
+  subscriptionIdFromInvoice,
+} from "../server/backend/api/billing/webhook.js";
 import {
   applyManualProGrantToRow,
   isManualProCustomerId,
@@ -65,6 +70,11 @@ assert.equal(isPaidPlan({ tier: "pro", status: "unpaid" }), false, "Unpaid Pro s
 assert.equal(isPaidPlan({ tier: "pro", status: "paused" }), false, "Paused Pro subscriptions should not unlock paid features");
 
 assert.equal(planTierForSubscriptionStatus("pro", "active"), "pro");
+assert.equal(
+  planTierForSubscriptionStatus("pro", "canceling"),
+  "pro",
+  "A scheduled cancellation should retain Pro through the paid-through date",
+);
 assert.equal(planTierForSubscriptionStatus("pro", "trialing"), "free");
 assert.equal(planTierForSubscriptionStatus("pro", "past_due"), "free");
 assert.equal(planTierForSubscriptionStatus("pro", "canceled"), "free");
@@ -79,6 +89,16 @@ assert.equal(
 assert.equal(currentPeriodEnd({}), null, "missing Stripe subscription period should stay null");
 assert.equal(stripeApiVersion, "2026-04-22.dahlia", "Stripe SDK should use the current pinned API version");
 assert.equal(subscriptionIdFromInvoice({ subscription: "sub_legacy" }), "sub_legacy", "legacy invoice subscription ids should be supported");
+assert.equal(
+  subscriptionEntitlementStatus({ status: "active", cancel_at_period_end: true }),
+  "canceling",
+  "Stripe scheduled cancellations should be preserved instead of flattened to active",
+);
+assert.equal(
+  subscriptionEntitlementStatus({ status: "canceled", cancel_at_period_end: false }),
+  "canceled",
+  "Ended subscriptions should revoke Pro",
+);
 assert.equal(
   subscriptionIdFromInvoice({ parent: { subscription_details: { subscription: "sub_parent" } } }),
   "sub_parent",

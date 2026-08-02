@@ -57,6 +57,33 @@ require_local_toolchain() {
   done
 }
 
+validate_package_manifest() {
+  local package_file="$ROOT_DIR/package.json"
+
+  if [ ! -f "$package_file" ]; then
+    echo "ClassLoop package.json is missing from $ROOT_DIR." >&2
+    exit 1
+  fi
+
+  if grep -Eq '^(<<<<<<<|=======|>>>>>>>)' "$package_file"; then
+    echo "ClassLoop package.json contains unresolved Git merge markers." >&2
+    echo "Resolve the conflict before running the launcher." >&2
+    exit 1
+  fi
+
+  if ! node -e '
+    const fs = require("node:fs");
+    try {
+      JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    } catch (error) {
+      console.error(`ClassLoop package.json is invalid JSON: ${error.message}`);
+      process.exit(1);
+    }
+  ' "$package_file"; then
+    exit 1
+  fi
+}
+
 load_env_file() {
   local env_file="$1"
   local line trimmed key value line_number=0
@@ -105,6 +132,8 @@ load_local_env() {
 }
 
 ensure_dependencies() {
+  validate_package_manifest
+
   if [ "$CLASSLOOP_SKIP_INSTALL" = "1" ]; then
     return
   fi
@@ -323,6 +352,7 @@ case "$mode" in
     ;;
   --check-env)
     require_local_toolchain
+    validate_package_manifest
     load_local_env
     echo "ClassLoop launcher environment loaded successfully."
     ;;

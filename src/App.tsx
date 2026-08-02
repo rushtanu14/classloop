@@ -78,6 +78,7 @@ import {
   reassignOwnerEmailInWorkspace,
   toOwnerCloudWorkspaceState,
 } from "./cloudWorkspace";
+
 import {
   buildStripePaymentLinkUrl,
   cloudRequest,
@@ -130,6 +131,11 @@ import type {
   TaskStatus,
   UnmatchedParticipant,
 } from "./types";
+
+// Unfinished provider tooling is available only to local developers running the
+// dedicated internal QA suite. Production builds fail closed and never render it.
+const internalIntegrationUiEnabled =
+  import.meta.env.DEV && import.meta.env.VITE_CLASSLOOP_INTERNAL_INTEGRATION_UI === "1";
 
 type RouteKey =
   | "dashboard"
@@ -278,6 +284,7 @@ type Account = {
   theme?: ThemeSettings;
   submittedProductFeedbackKeys?: string[];
   cloudVerificationPending?: boolean;
+  pendingCloudEmail?: string;
   demo?: boolean;
 };
 
@@ -956,7 +963,9 @@ const navItems: NavItem[] = [
   { route: "report", label: "Session report", icon: ClipboardCheck },
   { route: "student", label: "Student view", icon: GraduationCap },
   { route: "analytics", label: "Analytics", icon: BarChart3 },
-  { route: "integrations", label: "Integrations", icon: Link2 },
+  ...(internalIntegrationUiEnabled
+    ? [{ route: "integrations" as const, label: "Integrations", icon: Link2 }]
+    : []),
   { route: "billing", label: "Plan options", icon: RefreshCw },
   { route: "tutorial", label: "How it works", icon: BookOpen },
   { route: "appearance", label: "Appearance", icon: Palette },
@@ -1060,13 +1069,6 @@ const templateDetailFields: Record<SessionType, Array<{ id: string; label: strin
   ],
 };
 
-const loadingTips = [
-  "Tip: paste the roster once, then save it as a class so future sessions preload faster.",
-  "Tip: review the student preview before publishing so each learner sees the right follow-up.",
-  "Tip: platform transcripts are still the most reliable source after online meetings.",
-  "Tip: use aliases when a Zoom display name is different from a roster name.",
-];
-
 const localReadFailureNotice: WorkspaceNotice = {
   severity: "error",
   title: "Some browser data could not be read",
@@ -1164,6 +1166,7 @@ const defaultBillingProfile: BillingProfile = {
 };
 
 function billingProfileLabel(profile: BillingProfile) {
+  if (profile.status === "canceling") return "Pro · Cancellation scheduled";
   if (isPaidPlan(profile) || isManualProBillingProfile(profile)) return "Pro · Active";
   if (profile.tier === "pro") {
     if (profile.status === "trialing") return "Pro · Trial active";
@@ -1176,6 +1179,18 @@ function billingProfileLabel(profile: BillingProfile) {
     return "Free · Payment needs attention";
   }
   return "Free";
+}
+
+function billingPeriodEndLabel(value?: string) {
+  if (!value) return "the paid-through date shown by Stripe";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "the paid-through date shown by Stripe";
+  return date.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 function normalizeBillingProfile(profile?: Partial<BillingProfile> | null, options: { trusted?: boolean } = {}): BillingProfile {
@@ -3326,9 +3341,12 @@ function App() {
     account: Account,
     password: string,
     source: string,
-  ): Promise<boolean> => {
+  ): Promise<{ pending: boolean; pendingEmail?: string }> => {
     if (!shouldAutoProvisionCloudAccount(account)) {
-      return Boolean(account.cloudVerificationPending);
+      return {
+        pending: Boolean(account.cloudVerificationPending),
+        pendingEmail: account.pendingCloudEmail,
+      };
     }
     const actor: AuthSession = {
       accountId: account.id,
@@ -3343,25 +3361,36 @@ function App() {
       source,
     });
     if (result.code === "email_confirmation_required") {
+      const pendingEmail = normalizeEmail(result.email ?? account.email);
+      setAccounts((current) =>
+        current.map((item) =>
+          item.id === account.id
+            ? { ...item, cloudVerificationPending: true, pendingCloudEmail: pendingEmail }
+            : item,
+        ),
+      );
       appendAudit("cloud_account_pending", result.message, actor);
-      return true;
+      return { pending: true, pendingEmail };
     }
     if (result.ok) {
       setAccounts((current) =>
         current.map((item) =>
           item.id === account.id
-            ? { ...item, cloudVerificationPending: false }
+            ? { ...item, cloudVerificationPending: false, pendingCloudEmail: undefined }
             : item,
         ),
       );
       appendAudit("cloud_account_ready", "Cloud account prepared for this local login.", actor);
-      return false;
+      return { pending: false };
     }
     if (result.code !== "not_configured") {
       appendAudit("cloud_account_pending", result.message, actor);
-      return true;
+      return { pending: true };
     }
-    return Boolean(account.cloudVerificationPending);
+    return {
+      pending: Boolean(account.cloudVerificationPending),
+      pendingEmail: account.pendingCloudEmail,
+    };
   };
 
   const signInAccount = async (account: Account, password?: string): Promise<AuthResult> => {
@@ -3374,9 +3403,12 @@ function App() {
 
       if (account.demo) demoSessionRef.current = true;
       const demoSession = account.demo ? ensureDemoSession() : undefined;
-      const cloudConfirmationPending = password
+      const cloudPreparation = password
         ? await prepareCloudAccountForLocalLogin(account, password, "classloop_local_signin")
-        : Boolean(account.cloudVerificationPending);
+        : {
+            pending: Boolean(account.cloudVerificationPending),
+            pendingEmail: account.pendingCloudEmail,
+          };
 
       setAuthLoading(true);
       if (account.role === "teacher") {
@@ -3387,7 +3419,8 @@ function App() {
           email: normalizedEmail,
           name: account.name,
           demo: account.demo,
-          multiDevicePending: cloudConfirmationPending,
+          multiDevicePending: cloudPreparation.pending,
+          pendingCloudEmail: cloudPreparation.pendingEmail,
         };
         setAuth(nextAuth);
         appendAudit("login", "Teacher signed in.", {
@@ -3410,7 +3443,8 @@ function App() {
           email: normalizedEmail,
           name: account.name,
           demo: account.demo,
-          multiDevicePending: cloudConfirmationPending,
+          multiDevicePending: cloudPreparation.pending,
+          pendingCloudEmail: cloudPreparation.pendingEmail,
         };
         setAuth(nextAuth);
         appendAudit("login", "Individual signed in.", {
@@ -3436,7 +3470,8 @@ function App() {
         name: student?.name ?? account.name,
         studentId: student?.id,
         demo: account.demo,
-        multiDevicePending: cloudConfirmationPending,
+        multiDevicePending: cloudPreparation.pending,
+        pendingCloudEmail: cloudPreparation.pendingEmail,
       };
       setAuth(nextAuth);
       appendAudit("login", "Student signed in.", {
@@ -3474,7 +3509,7 @@ function App() {
     name: string,
     email: string,
     password: string,
-    options?: { startWalkthrough?: boolean; multiDevicePending?: boolean },
+    options?: { startWalkthrough?: boolean; multiDevicePending?: boolean; pendingCloudEmail?: string },
   ) => {
     const startWalkthroughAfterCreate = options?.startWalkthrough ?? role !== "individual";
     const account: Account = {
@@ -3486,6 +3521,7 @@ function App() {
       createdAt: new Date().toISOString(),
       theme: defaultTheme,
       cloudVerificationPending: Boolean(options?.multiDevicePending),
+      pendingCloudEmail: options?.pendingCloudEmail,
     };
     setAccounts((current) => mergeAccounts([...current, account]));
     localAuthSecretRef.current = {
@@ -3495,7 +3531,14 @@ function App() {
       password,
     };
     setTheme(defaultTheme);
-    setAuth({ accountId: account.id, role, email, name, multiDevicePending: options?.multiDevicePending });
+    setAuth({
+      accountId: account.id,
+      role,
+      email,
+      name,
+      multiDevicePending: options?.multiDevicePending,
+      pendingCloudEmail: options?.pendingCloudEmail,
+    });
     navigate(
       role === "teacher"
         ? route === "billing" || route === "checkout"
@@ -3520,7 +3563,7 @@ function App() {
     const name = existingAccount?.name ?? nameFromCloudSession(session, email);
     const passwordHash = await hashSecret(password);
     const account: Account = existingAccount
-      ? { ...existingAccount, role, name, passwordHash, cloudVerificationPending: false }
+      ? { ...existingAccount, role, name, passwordHash, cloudVerificationPending: false, pendingCloudEmail: undefined }
       : {
           id: makeAccountId(role),
           role,
@@ -3530,6 +3573,7 @@ function App() {
           createdAt: new Date().toISOString(),
           theme: defaultTheme,
           cloudVerificationPending: false,
+          pendingCloudEmail: undefined,
         };
     setAccounts((current) =>
       mergeAccounts([
@@ -3711,6 +3755,7 @@ function App() {
     return finishLocalAccountCreation(role, trimmedName, normalizedEmail, password, {
       startWalkthrough: false,
       multiDevicePending: true,
+      pendingCloudEmail: normalizedEmail,
     });
   };
 
@@ -3769,7 +3814,14 @@ function App() {
       }
     }
 
-    const nextAccount = { ...account, name: nextName, email: emailChanged && getBackendStatus().supabaseConfigured ? account.email : nextEmail, passwordHash };
+    const nextAccount = {
+      ...account,
+      name: nextName,
+      email: emailChanged && getBackendStatus().supabaseConfigured ? account.email : nextEmail,
+      passwordHash,
+      cloudVerificationPending: account.cloudVerificationPending || Boolean(pendingCloudEmail),
+      pendingCloudEmail: pendingCloudEmail || account.pendingCloudEmail,
+    };
     const appliedEmailChanged = normalizeEmail(nextAccount.email) !== normalizeEmail(account.email);
     if (appliedEmailChanged) {
       const migratedWorkspace = reassignOwnerEmailInWorkspace(
@@ -3804,7 +3856,14 @@ function App() {
           }
         : current,
     );
-    return { ok: true, message: emailChangeMessage || "Settings saved." };
+    return {
+      ok: true,
+      message:
+        emailChangeMessage ||
+        (settings.newPassword
+          ? "Password updated on this device. No email confirmation is needed."
+          : "Settings saved."),
+    };
   };
 
   const handleRequestPasswordReset = async (_role: AuthRole, email: string) => {
@@ -3906,7 +3965,7 @@ function App() {
           onStartWalkthrough={startWalkthrough}
         />
         {workspaceNotice && <WorkspaceRecoveryNotice notice={workspaceNotice} />}
-        {auth.multiDevicePending && (
+        {auth.multiDevicePending && auth.pendingCloudEmail && (
           <p className="settings-message warning" role="status">
             Check your email inbox for the ClassLoop confirmation link sent to {auth.pendingCloudEmail ?? auth.email}. Click it to connect cloud
             sync; you can keep using this local workspace now.
@@ -4063,7 +4122,7 @@ function App() {
           />
         )}
         {effectiveRoute === "analytics" && <TeacherAnalytics sessions={teacherSessions} />}
-        {effectiveRoute === "integrations" && auth.role === "teacher" && (
+        {internalIntegrationUiEnabled && effectiveRoute === "integrations" && auth.role === "teacher" && (
           <IntegrationsPage
             auth={auth}
             onPreparedImport={(prepared) => {
@@ -4751,7 +4810,7 @@ function LandingPage({
                 ["Draft review", "Editable recaps, essential questions, student-specific tasks, resources, and publish audit details.", ClipboardCheck],
                 ["Student portal", "Personalized recap, assignments, resources, due dates, and completion check-ins.", GraduationCap],
                 ["Analytics", "Quiet students, overdue work, attendance status, and class-level follow-through trends.", LineChart],
-                ["Classroom posting scope", "When Google Classroom is connected, post the reviewed class recap, resources, and class-wide tasks only.", Send],
+                ["Controlled sharing", "Teachers review class-wide recaps, resources, and tasks before copying or exporting them; personalized follow-ups stay inside ClassLoop.", Send],
               ] as Array<[string, string, typeof MessageSquare]>).map(([title, body, Icon]) => (
                 <article key={title}>
                   <Icon size={24} />
@@ -5172,7 +5231,7 @@ function LandingPage({
               {([
                 ["Zoom transcript first", "The launch flow starts from pasted or uploaded Zoom transcripts so teachers always have a reliable fallback.", FileText],
                 ["Teacher review stays central", "ClassLoop drafts the recap, resources, and class-wide tasks; the teacher approves before anything is shared.", ClipboardCheck],
-                ["Classroom posts stay classwide", "Google Classroom posting should send the recap, resources, and class tasks only. Personalized student follow-ups stay inside ClassLoop.", Send],
+                ["Manual sharing stays explicit", "Teachers copy or export only the reviewed class recap, resources, and shared tasks. Personalized student follow-ups stay inside ClassLoop.", Send],
               ] as Array<[string, string, typeof FileText]>).map(([title, body, Icon]) => (
                 <article key={title}>
                   <Icon size={22} />
@@ -6116,7 +6175,6 @@ function AppLoader({
   steps: BootStep[];
   notice?: WorkspaceNotice | null;
 }) {
-  const tip = loadingTips[Math.floor(Date.now() / 1000) % loadingTips.length];
   const currentStep =
     steps.find((step) => ["error", "warning", "active"].includes(step.status)) ??
     steps.find((step) => step.status === "pending") ??
@@ -6137,7 +6195,6 @@ function AppLoader({
         <div className="loader-track" aria-hidden="true">
           <i />
         </div>
-        <p className="loader-tip">{tip}</p>
       </section>
     </main>
   );
@@ -6545,20 +6602,27 @@ function Sidebar({
         ))}
       </nav>
       {showDemoCard && (
-        <section className="sidebar-panel">
-          <div className="mini-visual" aria-hidden="true">
-            <span />
-            <span />
-            <span />
+        <details className="sidebar-panel">
+          <summary>
+            <span>
+              <p>Demo scenario</p>
+              <strong>Geometry review</strong>
+            </span>
+            <ChevronDown size={16} aria-hidden="true" />
+          </summary>
+          <div className="sidebar-demo-detail">
+            <div className="mini-visual" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </div>
+            <small>Transcript to student follow-ups in one flow.</small>
           </div>
-          <p>Demo scenario</p>
-          <strong>Geometry review</strong>
-          <small>Transcript to student follow-ups in one flow.</small>
-        </section>
+        </details>
       )}
-      <button className="logout-button" onClick={onLogout}>
+      <button className="logout-button" onClick={onLogout} aria-label="Sign out">
         <LogOut size={17} />
-        Sign out
+        <span>Sign out</span>
       </button>
     </aside>
   );
@@ -6631,15 +6695,17 @@ function Topbar({
             >
               <Lightbulb size={18} />
             </button>
-            <button
-              className="primary-button"
-              data-tour="new-session-button"
-              onClick={() => navigate("new-session")}
-              aria-label={latestSession ? `Create a new session after ${latestSession.title}` : "Create a new session"}
-            >
-              <PlusCircle size={18} />
-              New session
-            </button>
+            {route !== "dashboard" && (
+              <button
+                className="primary-button"
+                data-tour="new-session-button"
+                onClick={() => navigate("new-session")}
+                aria-label={latestSession ? `Create a new session after ${latestSession.title}` : "Create a new session"}
+              >
+                <PlusCircle size={18} />
+                New session
+              </button>
+            )}
           </>
         )}
       </div>
@@ -6768,7 +6834,6 @@ function TeacherDashboard({
   const overdue = latest?.followUps.filter((followUp) => followUp.status === "overdue") ?? [];
   const absentStudents = latest ? Object.entries(latest.attendance).filter(([, status]) => status === "absent") : [];
   const quietStudents = latest?.participationEvents.filter((event) => event.approved && event.type === "quiet") ?? [];
-  const hasAttention = absentStudents.length > 0 || quietStudents.length > 0 || overdue.length > 0;
   const currentPlanTier: PlanTier = isPaidPlan(billingProfile) ? "pro" : "free";
   const reviewDraft = draft?.status === "draft" ? draft : null;
   const draftNeedsReview = Boolean(reviewDraft);
@@ -6914,17 +6979,26 @@ function TeacherDashboard({
 
   const visibleAssistantActions = assistantActions.slice(0, 3);
 
+  const pulseIcons = [ClipboardCheck, MessageSquare, CircleAlert, CheckCircle2];
+  const latestCompletion = latest ? completionRate([latest]) : 0;
+
   return (
-    <div className="page-stack">
-      <section className="dashboard-hero">
-        <div className="hero-copy">
-          <span className="eyebrow">Live class follow-up loop</span>
-          <h2>Turn class records into reviewed recaps, tasks, and check-ins.</h2>
+    <div className="page-stack teacher-dashboard">
+      <section className={`dashboard-home-hero ${hasSessions ? "populated" : "empty"}`}>
+        <div className="dashboard-home-copy">
+          <span className="dashboard-kicker">Classroom follow-through</span>
+          <h2>{hasSessions || draftNeedsReview ? assistantBrief.title : "Start with one class record."}</h2>
           <p>
-            Review what happened, who needs support, and what should happen next before students see it.
+            {hasSessions || draftNeedsReview
+              ? assistantBrief.detail
+              : "Paste a transcript or notes. ClassLoop will organize the recap, tasks, resources, and student follow-ups for your review."}
           </p>
           <div className="hero-actions" data-tour="dashboard-hero">
-            <button className="primary-button large" onClick={() => navigate("new-session")}>
+            <button
+              className="primary-button large"
+              data-tour="new-session-button"
+              onClick={() => navigate("new-session")}
+            >
               <Wand2 size={19} />
               Create a session
             </button>
@@ -6936,186 +7010,161 @@ function TeacherDashboard({
             )}
           </div>
         </div>
-        {hasSessions && <TranscriptTransformVisual />}
+        <figure className="dashboard-story-figure">
+          <img
+            className="dashboard-story-image"
+            src="/classloop-teacher-workflow.jpg"
+            alt="Class records becoming reviewed recaps, tasks, and resources"
+          />
+          <figcaption>
+            <FileText size={16} />
+            Class records become teacher-reviewed follow-ups.
+          </figcaption>
+        </figure>
       </section>
 
       {hasSessions && (
-        <section className="metric-grid">
-          <MetricCard
-            icon={ClipboardCheck}
-            label="Published sessions"
-            value={published.length.toString()}
-            detail="This month"
-            accent="green"
-          />
-          <MetricCard
-            icon={Target}
-            label="Follow-through"
-            value={`${publishedCompletionRate}%`}
-            detail="Completed student check-ins"
-            accent="blue"
-          />
-          <MetricCard
-            icon={CircleAlert}
-            label="Needs attention"
-            value={attentionCount(sessions).toString()}
-            detail="Quiet, absent, or overdue"
-            accent="amber"
-          />
-          <MetricCard
-            icon={MessageSquare}
-            label="Participation"
-            value={latest ? `${classParticipationRate(latest)}%` : "0%"}
-            detail="Present students with signals"
-            accent="rose"
-          />
+        <section className="dashboard-pulse" aria-label="Classroom pulse">
+          {assistantBrief.facts.map((fact, index) => {
+            const Icon = pulseIcons[index] ?? CheckCircle2;
+            return (
+              <div className="dashboard-pulse-stat" key={fact.label}>
+                <span className="dashboard-pulse-icon" aria-hidden="true">
+                  <Icon size={17} />
+                </span>
+                <span>
+                  <small>{fact.label}</small>
+                  <strong>{fact.value}</strong>
+                </span>
+                <em>{fact.detail}</em>
+              </div>
+            );
+          })}
         </section>
       )}
 
-      <Panel title="Assistant next steps" icon={BrainCircuit}>
-        <section className={`assistant-brief ${assistantBrief.tone}`} aria-label="Teacher assistant brief">
-          <div className="assistant-brief-main">
-            <span className="eyebrow">Teacher assistant brief</span>
-            <strong>{assistantBrief.title}</strong>
-            <p>{assistantBrief.detail}</p>
-          </div>
-          <div className="assistant-brief-facts">
-            {assistantBrief.facts.map((fact) => (
-              <div className="assistant-brief-fact" key={fact.label}>
-                <span>{fact.label}</span>
-                <strong>{fact.value}</strong>
-                <small>{fact.detail}</small>
-              </div>
+      <section className={`dashboard-home-grid ${hasSessions ? "populated" : "empty"}`}>
+        <section className="dashboard-focus" aria-labelledby="dashboard-next-up">
+          <header className="dashboard-section-header">
+            <div>
+              <span>Priority queue</span>
+              <h3 id="dashboard-next-up">Next up</h3>
+            </div>
+            <span className="dashboard-count">{visibleAssistantActions.length}</span>
+          </header>
+          <div className="assistant-action-list">
+            {visibleAssistantActions.map((action) => (
+              <AssistantActionItem key={action.id} action={action} />
             ))}
           </div>
+          {assistantDrafts.length > 0 && hasSessions && (
+            <details className="dashboard-disclosure">
+              <summary>
+                <span>
+                  <MessageSquare size={17} />
+                  Copy-ready messages
+                </span>
+                <ChevronDown size={17} aria-hidden="true" />
+              </summary>
+              <section className="assistant-draft-list" aria-label="Copy-ready assistant drafts">
+                {assistantDrafts.map((assistantDraft) => (
+                  <AssistantDraftCard
+                    key={assistantDraft.id}
+                    assistantDraft={assistantDraft}
+                    onCopy={() => void copyAssistantDraft(assistantDraft)}
+                  />
+                ))}
+              </section>
+              {draftCopyMessage && (
+                <p className="settings-message success" role="status">
+                  {draftCopyMessage}
+                </p>
+              )}
+            </details>
+          )}
         </section>
-        <div className="assistant-action-list">
-          {visibleAssistantActions.map((action) => (
-            <AssistantActionItem key={action.id} action={action} />
-          ))}
-        </div>
-      </Panel>
 
-      <Panel title="Assistant drafts" icon={ClipboardCheck}>
-        <section className="assistant-draft-list" aria-label="Copy-ready assistant drafts">
-          {assistantDrafts.map((assistantDraft) => (
-            <AssistantDraftCard
-              key={assistantDraft.id}
-              assistantDraft={assistantDraft}
-              onCopy={() => void copyAssistantDraft(assistantDraft)}
-            />
-          ))}
-        </section>
-        {draftCopyMessage && (
-          <p className="settings-message success" role="status">
-            {draftCopyMessage}
-          </p>
-        )}
-      </Panel>
-
-      <section className="content-grid two-columns">
-        <Panel title="Recent sessions" icon={CalendarDays} action="View report" onAction={() => navigate("report")}>
-          {hasSessions ? (
-            <div className="session-list">
-              {sessions.slice(0, 4).map((session) => (
-                <button
-                  key={session.id}
-                  className="session-row"
-                  onClick={() => navigate("report", { session: session.id })}
-                >
-                  <span className="session-icon">
-                    <BookOpen size={18} />
-                  </span>
+        {hasSessions && latest ? (
+          <section className="dashboard-latest" aria-labelledby="dashboard-latest-class">
+            <header className="dashboard-section-header">
+              <div>
+                <span>Latest class</span>
+                <h3 id="dashboard-latest-class">{latest.title}</h3>
+              </div>
+              <button className="text-button" onClick={() => navigate("report", { session: latest.id })}>
+                Open report
+                <ChevronRight size={16} />
+              </button>
+            </header>
+            <div className="dashboard-latest-visual">
+              <div
+                className="dashboard-completion-ring"
+                style={{ "--completion": `${latestCompletion * 3.6}deg` } as CSSProperties}
+                role="img"
+                aria-label={`${latestCompletion}% student follow-through complete`}
+              >
+                <span>
+                  <strong>{latestCompletion}%</strong>
+                  <small>complete</small>
+                </span>
+              </div>
+              <div className="dashboard-latest-facts">
+                <span>
+                  <strong>{latest.students.length}</strong>
+                  <small>students</small>
+                </span>
+                <span>
+                  <strong>{latest.resources.length}</strong>
+                  <small>resources</small>
+                </span>
+                <span>
+                  <strong>{attentionCount([latest])}</strong>
+                  <small>support signals</small>
+                </span>
+              </div>
+            </div>
+            <div className="dashboard-recent-list" aria-label="Recent sessions">
+              {sessions.slice(0, 3).map((session) => (
+                <button key={session.id} onClick={() => navigate("report", { session: session.id })}>
                   <span>
                     <strong>{session.title}</strong>
-                    <small>
-                      {formatDate(session.date)} · {session.type}
-                    </small>
+                    <small>{formatDate(session.date)}</small>
                   </span>
                   <StatusPill status={session.status === "published" ? "complete" : "in_progress"} />
                 </button>
               ))}
             </div>
-          ) : (
-            <InlineEmpty
-              icon={BookOpen}
-              title="No sessions yet"
-              detail="Create a session or load the geometry sample to populate this dashboard."
-              action="New session"
-              onAction={() => navigate("new-session")}
-            />
-          )}
-        </Panel>
-
-        <Panel title="Attention queue" icon={AlertTriangle} action="Open analytics" onAction={() => navigate("analytics")}>
-          {hasSessions ? (
-            <div className="attention-list">
-              {hasAttention ? (
-                <>
-                  {absentStudents.map(([studentId]) => (
-                    <AttentionItem
-                      key={studentId}
-                      icon={UserX}
-                      title={`${studentById(studentId, latestRoster).name} missed the latest session`}
-                      detail="Catch-up recap and review video assigned."
-                    />
-                  ))}
-                  {quietStudents.map((event) => (
-                    <AttentionItem
-                      key={event.id}
-                      icon={Mic2}
-                      title={`${studentById(event.studentId, latestRoster).name} was quiet`}
-                      detail="Confidence check-in and practice pair recommended."
-                    />
-                  ))}
-                  {overdue.slice(0, 2).map((followUp) => (
-                    <AttentionItem
-                      key={`${followUp.studentId}-${followUp.dueDate}`}
-                      icon={Clock3}
-                      title={`${studentById(followUp.studentId, latestRoster).name} has an overdue check-in`}
-                      detail={followUp.reminder}
-                    />
-                  ))}
-                </>
-              ) : (
-                <SupportSnapshotChart session={latest} />
-              )}
+          </section>
+        ) : (
+          <section className="dashboard-onboarding" aria-label="How ClassLoop works">
+            <header className="dashboard-section-header">
+              <div>
+                <span>Your first loop</span>
+                <h3>Three clear steps</h3>
+              </div>
+            </header>
+            <div className="dashboard-onboarding-flow">
+              {[
+                { icon: FileText, title: "Bring the record", detail: "Paste a transcript, notes, roster, and links." },
+                { icon: Eye, title: "Review the draft", detail: "Check every recap, task, and student preview." },
+                { icon: Send, title: "Publish the follow-up", detail: "Students see only what you approve." },
+              ].map((step) => {
+                const Icon = step.icon;
+                return (
+                  <article className="dashboard-onboarding-step" key={step.title}>
+                    <span aria-hidden="true">
+                      <Icon size={20} />
+                    </span>
+                    <div>
+                      <strong>{step.title}</strong>
+                      <p>{step.detail}</p>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
-          ) : (
-            <InlineEmpty
-              icon={AlertTriangle}
-              title="No student signals yet"
-              detail="Attendance, quiet flags, and overdue follow-ups appear after a session is published."
-            />
-          )}
-        </Panel>
-      </section>
-
-      <section className="content-grid two-columns">
-        <Panel title="Completion trend" icon={LineChart}>
-          {hasSessions ? (
-            <TrendChart sessions={published} />
-          ) : (
-            <InlineEmpty
-              icon={LineChart}
-              title="No trend data yet"
-              detail="Completion trends start once students receive follow-ups."
-            />
-          )}
-        </Panel>
-        <Panel title="Current plan" icon={ShieldCheck} action="View options" onAction={() => navigate("billing")}>
-          <div className="plan-stack">
-            {planCatalog.map((plan) => (
-              <PlanRow
-                key={plan.tier}
-                tier={plan.name}
-                detail={plan.detail}
-                price={plan.price}
-                current={currentPlanTier === plan.tier}
-              />
-            ))}
-          </div>
-        </Panel>
+          </section>
+        )}
       </section>
     </div>
   );
@@ -7385,15 +7434,22 @@ function PersonalDashboard({ meetings }: { meetings: PersonalMeeting[] }) {
   const completedTasks = meetings.flatMap((meeting) => meeting.tasks).filter((task) => task.status === "complete");
   const latest = meetings[0];
   const hasMeetings = meetings.length > 0;
+  const nextDue = openTasks.find((task) => task.dueDateText.trim())?.dueDateText || "None";
+  const personalPulse = [
+    { icon: FileText, label: "Meetings", value: meetings.length.toString(), detail: "Personal records" },
+    { icon: ListChecks, label: "Open tasks", value: openTasks.length.toString(), detail: "Still active" },
+    { icon: CheckCircle2, label: "Completed", value: completedTasks.length.toString(), detail: "Closed loops" },
+    { icon: CalendarDays, label: "Next due", value: nextDue, detail: "From your minutes" },
+  ];
 
   return (
-    <div className="page-stack personal-page">
+    <div className="page-stack personal-page personal-dashboard">
       <section className="dashboard-hero personal-hero">
         <div className="hero-copy">
           <span className="eyebrow">Personal meetings</span>
-          <h2>Paste meeting minutes and turn them into your own recap and tasks.</h2>
+          <h2>{hasMeetings ? "Keep every meeting moving." : "Start with one meeting record."}</h2>
           <p>
-            Individual accounts stay free and focused: one paste box, one recap, and follow-through tasks only for you.
+            Paste meeting minutes once. ClassLoop will organize your recap, questions, resources, and next steps.
           </p>
           <div className="hero-actions">
             <button className="primary-button large" onClick={() => navigate("new-personal-meeting")}>
@@ -7415,51 +7471,65 @@ function PersonalDashboard({ meetings }: { meetings: PersonalMeeting[] }) {
             <p>{latest.recap}</p>
           </div>
         )}
+        {!hasMeetings && (
+          <div className="personal-workflow-visual" role="img" aria-label="Meeting minutes becoming a recap and task list">
+            <span>
+              <FileText size={22} />
+              <strong>Minutes</strong>
+            </span>
+            <ChevronRight size={22} aria-hidden="true" />
+            <div>
+              <span>
+                <ClipboardCheck size={18} />
+                Recap
+              </span>
+              <span>
+                <ListChecks size={18} />
+                Tasks
+              </span>
+            </div>
+          </div>
+        )}
       </section>
 
-      <section className="metric-grid">
-        <MetricCard
-          icon={FileText}
-          label="Meetings"
-          value={meetings.length.toString()}
-          detail="Personal records"
-          accent="green"
-        />
-        <MetricCard
-          icon={ListChecks}
-          label="Open tasks"
-          value={openTasks.length.toString()}
-          detail="Still active"
-          accent="amber"
-        />
-        <MetricCard
-          icon={CheckCircle2}
-          label="Completed"
-          value={completedTasks.length.toString()}
-          detail="Closed loops"
-          accent="blue"
-        />
-        <MetricCard
-          icon={CalendarDays}
-          label="Next due"
-          value={openTasks.find((task) => task.dueDateText.trim())?.dueDateText || "None"}
-          detail="From pasted minutes"
-          accent="rose"
-        />
-      </section>
+      {hasMeetings && (
+        <section className="dashboard-pulse personal-pulse" aria-label="Personal meeting pulse">
+          {personalPulse.map((fact) => {
+            const Icon = fact.icon;
+            return (
+              <div className="dashboard-pulse-stat" key={fact.label}>
+                <span className="dashboard-pulse-icon" aria-hidden="true">
+                  <Icon size={17} />
+                </span>
+                <span>
+                  <small>{fact.label}</small>
+                  <strong>{fact.value}</strong>
+                </span>
+                <em>{fact.detail}</em>
+              </div>
+            );
+          })}
+        </section>
+      )}
 
-      <Panel title="Recent personal meetings" icon={CalendarDays} action="Open history" onAction={() => navigate("personal-meetings")}>
-        {hasMeetings ? (
-          <div className="session-list">
+      {hasMeetings && (
+        <section className="dashboard-latest personal-recent" aria-labelledby="personal-recent-title">
+          <header className="dashboard-section-header">
+            <div>
+              <span>History</span>
+              <h3 id="personal-recent-title">Recent personal meetings</h3>
+            </div>
+            <button className="text-button" onClick={() => navigate("personal-meetings")}>
+              Open history
+              <ChevronRight size={16} />
+            </button>
+          </header>
+          <div className="dashboard-recent-list">
             {meetings.slice(0, 5).map((meeting) => (
               <button
                 key={meeting.id}
-                className="session-row"
                 onClick={() => navigate("personal-meetings", { meeting: meeting.id })}
               >
-                <span className="session-icon">
-                  <FileText size={18} />
-                </span>
                 <span>
                   <strong>{meeting.title}</strong>
                   <small>
@@ -7470,16 +7540,8 @@ function PersonalDashboard({ meetings }: { meetings: PersonalMeeting[] }) {
               </button>
             ))}
           </div>
-        ) : (
-          <InlineEmpty
-            icon={FileText}
-            title="No personal meetings yet"
-            detail="Paste meeting minutes to generate a recap, questions, resources, and tasks for yourself."
-            action="New personal meeting"
-            onAction={() => navigate("new-personal-meeting")}
-          />
-        )}
-      </Panel>
+        </section>
+      )}
     </div>
   );
 }
@@ -8930,8 +8992,8 @@ function SyncBillingPage({
   const [billingMessage, setBillingMessage] = useState("");
   const [connectedEmail, setConnectedEmail] = useState("");
   const [cloudConfirmation, setCloudConfirmation] = useState<CloudConfirmationPrompt | null>(null);
-  const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
-  const [integrationStatusMessage, setIntegrationStatusMessage] = useState("");
+  const [showCancellationSafety, setShowCancellationSafety] = useState(false);
+  const [cancellationOpening, setCancellationOpening] = useState(false);
   const isDemoAccount = Boolean(auth.demo);
   const billingReturnStatus = getParam("billing");
   const demoBillingMessage =
@@ -8966,31 +9028,54 @@ function SyncBillingPage({
   }, [auth.email, isDemoAccount, setBillingProfile]);
 
   useEffect(() => {
-    let active = true;
-    apiJson<IntegrationStatus>("/api/integrations/status")
-      .then((status) => {
-        if (!active) return;
-        setIntegrationStatus(status);
-        setIntegrationStatusMessage("");
-      })
-      .catch((error) => {
-        if (!active) return;
-        setIntegrationStatusMessage(error instanceof Error ? error.message : "Unable to load connector status.");
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
     if (isDemoAccount) return;
     if (billingReturnStatus === "canceled") {
       setBillingMessage("Checkout was canceled. Your plan was not changed.");
       return;
     }
     if (billingReturnStatus === "subscription-updated") {
-      setBillingMessage("Stripe received the subscription update. ClassLoop will refresh after Stripe confirms it.");
-      return;
+      let active = true;
+      let retryTimer: number | null = null;
+      const verifyCancellation = async (attempt = 1) => {
+        if (!active) return;
+        setBillingMessage("Stripe received the cancellation. Checking the server-owned subscription status...");
+        try {
+          const profile = await getCloudProfile(auth.email);
+          const verifiedProfile = normalizeTrustedBillingProfile(profile.billingProfile);
+          if (!active) return;
+          setBillingProfile(verifiedProfile);
+          if (verifiedProfile.status === "canceling") {
+            setBillingMessage(
+              `Cancellation confirmed. Pro stays active through ${billingPeriodEndLabel(verifiedProfile.currentPeriodEnd)}, then this account automatically returns to Free.`,
+            );
+            return;
+          }
+          if (!isPaidPlan(verifiedProfile)) {
+            setBillingMessage("Cancellation confirmed. Pro access has ended. The Free plan is active.");
+            return;
+          }
+          if (attempt < 5) {
+            setBillingMessage("Cancellation submitted. Waiting for Stripe to confirm the subscription status...");
+            retryTimer = window.setTimeout(() => void verifyCancellation(attempt + 1), 1500);
+            return;
+          }
+          setBillingMessage(
+            "Stripe is still processing the cancellation. Pro remains unchanged until the verified subscription status updates.",
+          );
+        } catch (error) {
+          if (!active) return;
+          if (attempt < 5) {
+            retryTimer = window.setTimeout(() => void verifyCancellation(attempt + 1), 1500);
+            return;
+          }
+          setBillingMessage(error instanceof Error ? error.message : "Unable to verify the cancellation yet.");
+        }
+      };
+      void verifyCancellation();
+      return () => {
+        active = false;
+        if (retryTimer) window.clearTimeout(retryTimer);
+      };
     }
     if (billingReturnStatus !== "success") return;
 
@@ -9119,6 +9204,7 @@ function SyncBillingPage({
 
   const openCancellationPortal = async () => {
     try {
+      setCancellationOpening(true);
       setBillingMessage("Opening Stripe subscription cancellation...");
       const response = await cloudRequest<{ url?: unknown }>(
         "/api/billing/portal",
@@ -9130,6 +9216,7 @@ function SyncBillingPage({
       }
       window.location.href = response.url;
     } catch (error) {
+      setCancellationOpening(false);
       setBillingMessage(error instanceof Error ? error.message : "Unable to open Stripe subscription cancellation.");
     }
   };
@@ -9152,18 +9239,7 @@ function SyncBillingPage({
 
   const hasStripeSubscription = isPaidPlan(billingProfile) && !isManualProBillingProfile(billingProfile);
   const hasIncludedProAccess = isPaidPlan(billingProfile) && isManualProBillingProfile(billingProfile);
-
-  const composioToolkits = integrationStatus?.composio?.toolkits ?? [];
-  const configuredComposioToolkits = composioToolkits.filter(
-    (toolkit) => toolkit.authConfigured && toolkitHasReadCapability(toolkit),
-  ).length;
-  const configuredCoreComposioToolkits = composioToolkits.filter(
-    (toolkit) =>
-      toolkit.priority === "core" &&
-      toolkit.authConfigured &&
-      toolkitHasReadCapability(toolkit),
-  ).length;
-  const localMcpToolCount = integrationStatus?.localMcp?.tools.length ?? 0;
+  const cancellationScheduled = hasStripeSubscription && billingProfile.status === "canceling";
 
   return (
     <div className="page-stack">
@@ -9243,9 +9319,19 @@ function SyncBillingPage({
                 <small>{demoBillingMessage}</small>
               </span>
             </div>
+          ) : cancellationScheduled ? (
+            <div className="settings-stack">
+              <button className="ghost-button full" type="button" disabled>
+                <ShieldCheck size={17} />
+                Cancellation scheduled
+              </button>
+              <small>
+                Pro stays active through {billingPeriodEndLabel(billingProfile.currentPeriodEnd)}, then ClassLoop returns this account to Free.
+              </small>
+            </div>
           ) : hasStripeSubscription ? (
             <div className="settings-stack">
-              <button className="ghost-button full" type="button" onClick={() => void openCancellationPortal()}>
+              <button className="ghost-button full" type="button" onClick={() => setShowCancellationSafety(true)}>
                 <LogOut size={17} />
                 Unsubscribe
               </button>
@@ -9275,63 +9361,72 @@ function SyncBillingPage({
               </small>
             </span>
           </div>
-          {billingMessage && <p className="settings-message">{billingMessage}</p>}
+          {billingMessage && <p className="settings-message" role="status">{billingMessage}</p>}
         </Panel>
       </section>
 
-      <Panel title="MCP and Composio connectors" icon={Link2}>
-        <div className="settings-stack">
-          <div className={`integration-card ${integrationStatus?.localMcp?.available ? "active" : ""}`}>
-            <span>
-              <strong>Local MCP server</strong>
-              <small>
-                {integrationStatus?.localMcp?.available
-                  ? `${localMcpToolCount} preview tools over ${integrationStatus.localMcp.transport}; raw transcripts stay redacted by default.`
-                  : "Build the local MCP server before connecting it to a desktop MCP client."}
-              </small>
-            </span>
-          </div>
-          <div className={`integration-card ${integrationStatus?.composio?.configured ? "active" : ""}`}>
-            <span>
-              <strong>Composio MCP config</strong>
-              <small>
-                {integrationStatus?.composio?.configured
-                  ? `${configuredComposioToolkits} of ${composioToolkits.length} connectors have auth plus allowlisted read tools for ${integrationStatus.composio.serverName}.`
-                  : "Set COMPOSIO_API_KEY and connector auth config ids to enable reviewed imports."}
-              </small>
-              {integrationStatus?.composio?.coreToolkitCount ? (
-                <small>
-                  Core: {configuredCoreComposioToolkits} of {integrationStatus.composio.coreToolkitCount} have allowed tools.
-                </small>
-              ) : null}
-            </span>
-          </div>
-          {composioToolkits.map((toolkit) => {
-            const capabilityReady =
-              toolkit.authConfigured &&
-              toolkitHasReadCapability(toolkit);
-            return (
-              <div className={`integration-card ${capabilityReady ? "active" : ""}`} key={toolkit.id}>
+      {showCancellationSafety && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="subscription-cancellation-title"
+        >
+          <section className="password-reset-modal">
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">Subscription safety check</span>
+                <h2 id="subscription-cancellation-title">Review subscription cancellation.</h2>
+                <p>No subscription change happens until you review and confirm it on Stripe.</p>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setShowCancellationSafety(false)}
+                aria-label="Keep Pro and close cancellation review"
+                disabled={cancellationOpening}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="settings-stack">
+              <div className="integration-card">
                 <span>
-                  <strong>{toolkit.label}</strong>
-                  <small>
-                    {toolkit.authConfigured
-                      ? `${toolkitCapabilityLabel(toolkit)} · ${integrationModeLabel(toolkit.mode)}.`
-                      : `Missing ${toolkit.authConfigEnv}.`}
-                  </small>
-                  <small>
-                    {toolkit.category ?? "Connector"} · {toolkit.allowedTools.length} allowed tools
-                    {toolkit.priority === "core" ? " · core" : ""}
-                  </small>
-                  {toolkit.purpose && <small>{toolkit.purpose}</small>}
+                  <strong>Paid-through access is protected</strong>
+                  <small>Pro stays active until Stripe's cancellation date. ClassLoop does not remove paid access early.</small>
                 </span>
               </div>
-            );
-          })}
-          {!integrationStatus && !integrationStatusMessage && <p className="settings-message">Loading connector status...</p>}
-          {integrationStatusMessage && <p className="settings-message">{integrationStatusMessage}</p>}
+              <div className="integration-card">
+                <span>
+                  <strong>Your ClassLoop workspace stays intact</strong>
+                  <small>When paid access ends, ClassLoop returns this account to Free. Sessions and local records are not deleted.</small>
+                </span>
+              </div>
+              <p className="settings-message">
+                Stripe will show the cancellation date, terms, and a final confirmation screen. You can leave Stripe without confirming to keep Pro unchanged.
+              </p>
+            </div>
+            <div className="modal-actions">
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => setShowCancellationSafety(false)}
+                disabled={cancellationOpening}
+              >
+                Keep Pro
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => void openCancellationPortal()}
+                disabled={cancellationOpening}
+              >
+                {cancellationOpening ? "Opening Stripe..." : "Continue to Stripe"}
+              </button>
+            </div>
+          </section>
         </div>
-      </Panel>
+      )}
 
       {cloudConfirmation && (
         <CloudEmailConfirmationOverlay
@@ -9562,6 +9657,12 @@ function ImportSession({
     : "";
 
   useEffect(() => {
+    if (!internalIntegrationUiEnabled) {
+      setIntegrationStatus(null);
+      setIntegrationConnectionsById({});
+      setIntegrationStatusMessage("");
+      return;
+    }
     let active = true;
     setIntegrationConnectionsById({});
     apiJson<IntegrationStatus>("/api/integrations/status")
@@ -10450,7 +10551,8 @@ function ImportSession({
                     placeholder="Paste the raw transcript here..."
                   />
                 </label>
-                <div className="capture-panel wide import-integration-panel" aria-label="Connect imports and follow-up integrations">
+                {internalIntegrationUiEnabled && (
+                  <div className="capture-panel wide import-integration-panel" aria-label="Connect imports and follow-up integrations">
                   <div>
                     <span className="eyebrow">Connected imports</span>
                     <h3>Connect sources when you want provider previews.</h3>
@@ -10554,7 +10656,8 @@ function ImportSession({
                       {integrationActionMessage && <p className="settings-message">{integrationActionMessage}</p>}
                     </div>
                   )}
-                </div>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -12214,7 +12317,8 @@ function PublishPreview({
             </button>
           </div>
         </Panel>
-        <Panel title="Google Classroom post" icon={GraduationCap}>
+        {internalIntegrationUiEnabled && (
+          <Panel title="Google Classroom post" icon={GraduationCap}>
           <div className="delivery-card">
             <div>
               <strong>Teacher-approved class-wide post</strong>
@@ -12268,7 +12372,8 @@ function PublishPreview({
             </button>
             {classroomPostMessage && <small>{classroomPostMessage}</small>}
           </div>
-        </Panel>
+          </Panel>
+        )}
       </section>
 
       {(draft.deliveryLogs ?? []).length > 0 && (
@@ -12784,6 +12889,8 @@ function StudentDashboard({
         }
         action={auth.role === "teacher" ? "Create a session" : undefined}
         onAction={auth.role === "teacher" ? () => navigate("new-session") : undefined}
+        visualSrc="/classroom-background.svg"
+        visualAlt="A quiet classroom waiting for a published class follow-up"
       />
     );
   }
@@ -12799,6 +12906,8 @@ function StudentDashboard({
         detail="Add a roster when creating the session to publish personalized student dashboards."
         action="Create a session"
         onAction={() => navigate("new-session")}
+        visualSrc="/classroom-background.svg"
+        visualAlt="A quiet classroom waiting for a student roster"
       />
     );
   }
@@ -12820,6 +12929,35 @@ function StudentDashboard({
     return (Number.isNaN(aTime) ? Number.POSITIVE_INFINITY : aTime) - (Number.isNaN(bTime) ? Number.POSITIVE_INFINITY : bTime);
   });
   const dueSoonTasks = sortedStudentTasks.slice(0, 3);
+  const completedStudentTasks = sortedStudentTasks.filter(({ followUp }) =>
+    ["submitted", "reviewed", "complete"].includes(followUp.status),
+  ).length;
+  const studentPulse = [
+    {
+      icon: ListChecks,
+      label: "Open tasks",
+      value: (sortedStudentTasks.length - completedStudentTasks).toString(),
+      detail: "Across your classes",
+    },
+    {
+      icon: CheckCircle2,
+      label: "Completed",
+      value: completedStudentTasks.toString(),
+      detail: "Submitted or reviewed",
+    },
+    {
+      icon: CalendarDays,
+      label: "Next due",
+      value: dueSoonTasks[0] ? formatDate(dueSoonTasks[0].followUp.dueDate) : "None",
+      detail: dueSoonTasks[0]?.session.title ?? "Nothing waiting",
+    },
+    {
+      icon: BookOpen,
+      label: "Resources",
+      value: (latest?.resources.length ?? 0).toString(),
+      detail: "Teacher approved",
+    },
+  ];
 
   return (
     <div className="page-stack student-page">
@@ -12853,33 +12991,66 @@ function StudentDashboard({
       </section>
 
       {auth.role === "student" && (
-        <Panel title="Tasks due soon" icon={Clock3}>
+        <section className="dashboard-pulse student-progress-pulse" aria-label="Student progress snapshot">
+          {studentPulse.map((fact) => {
+            const Icon = fact.icon;
+            return (
+              <div className="dashboard-pulse-stat" key={fact.label}>
+                <span className="dashboard-pulse-icon" aria-hidden="true">
+                  <Icon size={17} />
+                </span>
+                <span>
+                  <small>{fact.label}</small>
+                  <strong>{fact.value}</strong>
+                </span>
+                <em>{fact.detail}</em>
+              </div>
+            );
+          })}
+        </section>
+      )}
+
+      <section className="content-grid two-columns align-start student-primary-grid">
+        <Panel title="My tasks" icon={ListChecks}>
           <div className="task-list">
-            {dueSoonTasks.length ? (
-              dueSoonTasks.map(({ session, followUp }) => (
-                <button
-                  key={`due-${session.id}-${followUp.studentId}`}
-                  className="task-row"
-                  onClick={() => navigate("student-session", { session: session.id })}
-                >
-                  <span className="task-check">
-                    {["submitted", "reviewed", "complete"].includes(followUp.status) ? <CheckCircle2 size={18} /> : <Clock3 size={18} />}
-                  </span>
-                  <span>
-                    <strong>{followUp.tasks[0]}</strong>
-                    <small>
-                      {session.title} · due {formatDate(followUp.dueDate)}
-                    </small>
-                  </span>
-                  <StatusPill status={followUp.status} />
-                </button>
-              ))
-            ) : (
-              <p className="readable">No open ClassLoop tasks yet.</p>
-            )}
+            {sortedStudentTasks.map(({ session, followUp }) => (
+              <button
+                key={`${session.id}-${followUp.studentId}`}
+                className="task-row"
+                onClick={() => navigate("student-session", { session: session.id })}
+              >
+                <span className="task-check">
+                  {["submitted", "reviewed", "complete"].includes(followUp.status) ? <CheckCircle2 size={18} /> : <Clock3 size={18} />}
+                </span>
+                <span>
+                  <strong>{followUp.tasks[0]}</strong>
+                  <small>
+                    {session.title} · due {formatDate(followUp.dueDate)}
+                  </small>
+                </span>
+                <StatusPill status={followUp.status} />
+              </button>
+            ))}
           </div>
         </Panel>
-      )}
+
+        <Panel title="Resources for me" icon={BookOpen}>
+          <div className="resource-list">
+            {(latest?.resources ?? []).map((resource) => (
+              <a key={resource.id} className="resource-row" href={resource.url} target="_blank" rel="noreferrer">
+                <span>
+                  <BookOpen size={17} />
+                </span>
+                <div>
+                  <strong>{resource.title}</strong>
+                  <small>{resource.relatedTopic}</small>
+                </div>
+                <ArrowUpRight size={16} />
+              </a>
+            ))}
+          </div>
+        </Panel>
+      </section>
 
       {latest && latestFollowUp && (
         <section className="today-card">
@@ -12927,48 +13098,6 @@ function StudentDashboard({
       {auth.role === "teacher" && latest && latestFollowUp && updateSession && (
         <StudentVisibleEditor session={latest} studentId={activeStudentId} updateSession={updateSession} compact />
       )}
-
-      <section className="content-grid two-columns align-start">
-        <Panel title="My tasks" icon={ListChecks}>
-          <div className="task-list">
-            {sortedStudentTasks.map(({ session, followUp }) => (
-              <button
-                key={`${session.id}-${followUp.studentId}`}
-                className="task-row"
-                onClick={() => navigate("student-session", { session: session.id })}
-              >
-                <span className="task-check">
-                  {["submitted", "reviewed", "complete"].includes(followUp.status) ? <CheckCircle2 size={18} /> : <Clock3 size={18} />}
-                </span>
-                <span>
-                  <strong>{followUp.tasks[0]}</strong>
-                  <small>
-                    {session.title} · due {formatDate(followUp.dueDate)}
-                  </small>
-                </span>
-                <StatusPill status={followUp.status} />
-              </button>
-            ))}
-          </div>
-        </Panel>
-
-        <Panel title="Resources for me" icon={BookOpen}>
-          <div className="resource-list">
-            {(latest?.resources ?? []).map((resource) => (
-              <a key={resource.id} className="resource-row" href={resource.url} target="_blank" rel="noreferrer">
-                <span>
-                  <BookOpen size={17} />
-                </span>
-                <div>
-                  <strong>{resource.title}</strong>
-                  <small>{resource.relatedTopic}</small>
-                </div>
-                <ArrowUpRight size={16} />
-              </a>
-            ))}
-          </div>
-        </Panel>
-      </section>
 
       {auth.role === "student" && latest && latestFollowUpCompleted && submitProductFeedback && (
         <ProductFeedbackPrompt
@@ -13302,8 +13431,17 @@ function StudentVisibleEditor({
           </div>
           {followUp.tasks.map((task, index) => (
             <div key={`${task}-${index}`} className="editable-line">
-              <input value={task} onChange={(event) => updateTask(index, event.target.value)} />
-              <button className="icon-button danger" type="button" onClick={() => removeTask(index)} aria-label="Remove task">
+              <input
+                aria-label={`Task ${index + 1} for ${student.name}`}
+                value={task}
+                onChange={(event) => updateTask(index, event.target.value)}
+              />
+              <button
+                className="icon-button danger"
+                type="button"
+                onClick={() => removeTask(index)}
+                aria-label={`Remove task ${index + 1}`}
+              >
                 <Trash2 size={16} />
               </button>
             </div>
@@ -13320,9 +13458,18 @@ function StudentVisibleEditor({
             </div>
             {session.resources.map((resource) => (
               <div key={resource.id} className="resource-edit-row">
-                <input value={resource.title} onChange={(event) => updateResource(resource.id, { title: event.target.value })} />
-                <input value={resource.url} onChange={(event) => updateResource(resource.id, { url: event.target.value })} />
                 <input
+                  aria-label={`Resource title for ${resource.title}`}
+                  value={resource.title}
+                  onChange={(event) => updateResource(resource.id, { title: event.target.value })}
+                />
+                <input
+                  aria-label={`Resource URL for ${resource.title}`}
+                  value={resource.url}
+                  onChange={(event) => updateResource(resource.id, { url: event.target.value })}
+                />
+                <input
+                  aria-label={`Related topic for ${resource.title}`}
                   value={resource.relatedTopic}
                   onChange={(event) => updateResource(resource.id, { relatedTopic: event.target.value })}
                 />
@@ -14048,25 +14195,32 @@ function EmptyState({
   detail,
   action,
   onAction,
+  visualSrc,
+  visualAlt,
 }: {
   icon: typeof Sparkles;
   title: string;
   detail: string;
   action?: string;
   onAction?: () => void;
+  visualSrc?: string;
+  visualAlt?: string;
 }) {
   return (
-    <section className="empty-state">
-      <span>
-        <Icon size={30} />
-      </span>
-      <h2>{title}</h2>
-      <p>{detail}</p>
-      {action && onAction && (
-        <button className="primary-button" onClick={onAction}>
-          {action}
-        </button>
-      )}
+    <section className={visualSrc ? "empty-state has-visual" : "empty-state"}>
+      {visualSrc && <img src={visualSrc} alt={visualAlt ?? ""} />}
+      <div className="empty-state-content">
+        <span>
+          <Icon size={30} />
+        </span>
+        <h2>{title}</h2>
+        <p>{detail}</p>
+        {action && onAction && (
+          <button className="primary-button" onClick={onAction}>
+            {action}
+          </button>
+        )}
+      </div>
     </section>
   );
 }

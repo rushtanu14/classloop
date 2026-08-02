@@ -128,10 +128,12 @@ Manual Stripe test-mode walkthrough:
 7. Refresh plan.
 8. Verify the app shows `PRO / active`.
 9. Verify online meeting capture and other Pro-only surfaces unlock.
-10. Confirm Plan options changes `Upgrade to Pro` to `Unsubscribe`, then click it and verify Stripe opens directly on the subscription cancellation flow for that authenticated subscription.
-11. Confirm included/manual Pro accounts show `Pro access included` instead of a broken Stripe cancellation action, then cancel or mark a real test subscription past due in Stripe test mode.
-12. Confirm the webhook updates `/api/profile` and the app removes or changes Pro access appropriately.
-13. Confirm demo teacher/student accounts cannot enter a paid upgrade.
+10. Confirm Plan options changes `Upgrade to Pro` to `Unsubscribe`, then click it and verify the ClassLoop safety review explains paid-through access, Free-plan fallback, and workspace preservation without opening Stripe yet.
+11. Choose `Keep Pro` and confirm no portal request occurs. Reopen the review, choose `Continue to Stripe`, and verify Stripe opens its final subscription-cancellation confirmation for that authenticated subscription.
+12. Confirm a scheduled cancellation stores `subscription_status = canceling`, shows `Cancellation scheduled`, and keeps Pro through the server-reported paid-through date.
+13. Complete or immediately end the test subscription and confirm `customer.subscription.deleted` changes `/api/profile` to Free, removes Pro access, and restores `Upgrade to Pro` without deleting workspace records.
+14. Confirm included/manual Pro accounts show `Pro access included` instead of a broken Stripe cancellation action.
+15. Confirm demo teacher/student accounts cannot enter a paid upgrade.
 
 Evidence to save before live promotion:
 

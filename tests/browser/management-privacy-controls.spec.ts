@@ -262,7 +262,7 @@ async function readSecureJson<T>(page: Page, storageKey: string): Promise<T | nu
 }
 
 function sessionRow(page: Page, title: string) {
-  return page.locator(".session-row").filter({ hasText: title });
+  return page.locator(".dashboard-recent-list button").filter({ hasText: title });
 }
 
 test.describe("class, roster, and privacy management controls", () => {

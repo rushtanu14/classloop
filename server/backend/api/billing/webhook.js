@@ -25,12 +25,17 @@ export function checkoutSessionUserId(session) {
   return session?.metadata?.supabaseUserId || session?.client_reference_id || "";
 }
 
+export function subscriptionEntitlementStatus(subscription, fallbackStatus = "active") {
+  const status = subscription?.status || fallbackStatus;
+  return status === "active" && subscription?.cancel_at_period_end ? "canceling" : status;
+}
+
 async function applySubscriptionUpdate(supabase, subscription, fallbackStatus = "active", fallbackUserId = "") {
   await applySubscriptionProfileUpdate(supabase, {
     customerId: String(subscription.customer || ""),
     userId: subscription.metadata?.supabaseUserId || fallbackUserId,
     tier: "pro",
-    status: subscription.status || fallbackStatus,
+    status: subscriptionEntitlementStatus(subscription, fallbackStatus),
     subscriptionId: subscription.id,
     currentPeriodEndIso: currentPeriodEnd(subscription),
   });

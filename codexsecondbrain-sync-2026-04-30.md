@@ -322,14 +322,16 @@ Feature checks:
 17h. Exercise transcript file upload, unmatched-speaker add/link controls, publish, recipient selection, authenticated recap delivery, cloud upload/download, and visible post-action state.
 17i. Backend cloud snapshots validate every nested owner/actor email, reject local `accounts` and `billingProfile` fields, require no-training and bounded retention values, and preserve an explicitly revoked blank student-account link instead of falling back to the roster email.
 17j. Composio never exposes a Gmail toolkit or accepts `COMPOSIO_GMAIL_*` overrides. Email-reminder readiness comes only from the server-side email status, app-password variables never enter browser configuration, and spaced Gmail app passwords are normalized in both hosted and desktop delivery.
-18. Responsive layout has no horizontal overflow at a phone-sized viewport.
+18. Responsive layout has no horizontal overflow at a phone-sized viewport, and the mobile app header stays under 130px tall with sign-out reduced to an accessible icon action.
 19. WCAG-targeted checks pass for keyboard navigation, focus order, visible focus indicators, accessible control names, live status announcements, contrast on key text/buttons, and mobile PWA/add-to-home-screen readability.
 20. Error-state recovery checks pass for boot loading/data-outline delay, bad transcript format, malformed URLs, sync API outage/local fallback, non-JSON sync responses, browser storage read/write failures, download-manifest outages/malformed/Vercel Blob URLs, package init failures, desktop storage corruption, and privacy-safe actionable logging.
 21. Public signup legal gate remains set: durable hosted signups stay sample-only until reviewed public Terms of Use, Privacy Policy, desktop EULA, hosted retention/deletion SLAs, support contact, and child-safety expectations are published.
 22. Individual meetings can paste minutes or upload text/audio/video, then show a cleaned Transcript panel with speaker labels or unknown-speaker segments.
 23. Individual follow-through automations generate a next Google Calendar draft, a Docs-ready summary for Drive, and an email draft that remains disabled until the user checks the explicit approval box.
 24. Class transcription mode preserves a cleaned Transcript review tab for pasted/uploaded/Zoom/Whisper transcripts without claiming biometric speaker identification.
-22. Frontend formatting pass: no unreadable low-contrast text, overlapping form labels, clipped buttons, blank teacher-only panels, or unnecessary implementation details exposed to users.
+25. Frontend formatting pass: no unreadable low-contrast text, overlapping form labels, clipped buttons, blank teacher-only panels, or unnecessary implementation details exposed to users. Teacher home uses one visual workflow hero, one compact pulse strip, one Next up queue, and collapsed copy-ready messages. Empty teacher, student, and individual dashboards teach one clear first action without zero-value card walls.
+26. Native desktop commands work in both the primary Swift macOS app and Electron fallback: Command-W closes the active window without conflating close with quit, Command-Q quits, Command-H hides, Command-M minimizes, Control-Command-F toggles full screen, and standard undo/redo/cut/copy/paste/select-all shortcuts remain available. Reopening from the Dock restores a closed Swift window.
+27. Run the permanent control-surface audits: `npm run test:ui-controls` must prove every native button has an action contract and every link has a real destination; `tests/browser/control-surface.spec.ts` must open every public, teacher, student, and individual navigation state and reject unnamed, undersized, keyboard-inaccessible, pointer-disabled, or invalid-link controls.
 
 Import regression checks:
 - Compressed CS4All roster parses 18 students.
@@ -503,7 +505,7 @@ All three validate with `quick_validate.py`.
   - magic link/email-code sign-in should use Supabase/Auth email delivery when configured;
   - teachers can toggle recap email recipients on/off before sending.
 - Student launch scope:
-  - student dashboard should lead with tasks due soon;
+  - student dashboard should lead with a compact task/due-date snapshot and one My tasks section before the latest-class details; do not repeat the same tasks in a separate due-soon panel;
   - student profile editing covers name, email, avatar, and accessibility settings;
   - high contrast follows device/browser settings while background themes are already implemented;
   - student completion supports submitted note/file link, then teacher review/approval.
@@ -554,4 +556,5 @@ All three validate with `quick_validate.py`.
 - Cloud email/password entry now stays on the main ClassLoop sign-in/create-account page. Plan options shows cloud connection status and upload/download/disconnect controls without a second login form.
 - Verified Stripe-backed Pro accounts see `Unsubscribe`; the action posts through the authenticated billing portal endpoint and opens Stripe's direct subscription-cancellation flow.
 - Included/manual founder Pro access shows `Pro access included` because no Stripe subscription exists to cancel. A real active Stripe subscription now takes precedence over the founder grant if one is attached later.
-- QA must cover disconnected and connected sync states, removal of Plan-page credentials, authenticated Stripe portal authorization, strict `billing.stripe.com` redirect validation, and the separate Stripe-backed versus included-Pro button states.
+- Cancellation now requires an in-app safety review before Stripe's own confirmation screen. Scheduled cancellation keeps Pro through the server-reported paid-through date, then the signed Stripe webhook returns the account to Free without deleting local sessions or workspace records.
+- QA must cover canceling the in-app review with no portal request, continuing to Stripe, strict `billing.stripe.com` redirect validation, `canceling` paid-through access, final `canceled` entitlement removal, and the separate Stripe-backed versus included-Pro button states.

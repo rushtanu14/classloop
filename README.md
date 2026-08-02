@@ -70,7 +70,7 @@ This keeps the first impression accessible to everyone while still making the st
 - Cloud snapshots exclude local account password hashes and server-owned billing entitlements.
 - Hosted recap email is disabled by default and requires a confirmed teacher account plus an administrator grant.
 - Stripe Checkout/Payment Link-based Pro subscription scaffold.
-- Google Classroom and Zoom workflow surfaces for roster/course and transcript-first classroom follow-up.
+- External provider integration scaffolding is developer-only and excluded from normal product UI until each exact workflow passes authenticated end-to-end release verification.
 ## Demo Accounts
 
 Teacher:
@@ -297,7 +297,6 @@ Keep server-only secrets in Vercel or local environment files. Do not commit rea
 - Real teacher pilot sessions with redacted classroom data.
 - Live Stripe checkout and webhook entitlement proof.
 - Clean-host installer verification for public desktop downloads.
-- Google Classroom OAuth and posting flow.
-- Zoom transcript import integration.
+- Authenticated end-to-end verification for provider connection, preview, import, reconnect, and failure recovery before any integration becomes public.
 - More onboarding polish for teachers and students.
 - More accessibility testing with real assistive-tech usage.

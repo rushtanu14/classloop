@@ -4,6 +4,91 @@ import Darwin
 import Security
 import WebKit
 
+private func applicationMenuItem(
+  title: String,
+  action: Selector?,
+  keyEquivalent: String = "",
+  modifiers: NSEvent.ModifierFlags = [.command]
+) -> NSMenuItem {
+  let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
+  item.keyEquivalentModifierMask = modifiers
+  return item
+}
+
+private func makeApplicationMenu() -> NSMenu {
+  let mainMenu = NSMenu(title: "ClassLoop")
+
+  let appMenuRootItem = NSMenuItem(title: "ClassLoop", action: nil, keyEquivalent: "")
+  let applicationMenu = NSMenu(title: "ClassLoop")
+  applicationMenu.addItem(
+    applicationMenuItem(title: "About ClassLoop", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)))
+  )
+  applicationMenu.addItem(.separator())
+  applicationMenu.addItem(
+    applicationMenuItem(title: "Hide ClassLoop", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+  )
+  applicationMenu.addItem(
+    applicationMenuItem(
+      title: "Hide Others",
+      action: #selector(NSApplication.hideOtherApplications(_:)),
+      keyEquivalent: "h",
+      modifiers: [.command, .option]
+    )
+  )
+  applicationMenu.addItem(
+    applicationMenuItem(title: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)))
+  )
+  applicationMenu.addItem(.separator())
+  applicationMenu.addItem(
+    applicationMenuItem(title: "Quit ClassLoop", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+  )
+  appMenuRootItem.submenu = applicationMenu
+  mainMenu.addItem(appMenuRootItem)
+
+  let fileMenuItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+  let fileMenu = NSMenu(title: "File")
+  fileMenu.addItem(
+    applicationMenuItem(title: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+  )
+  fileMenuItem.submenu = fileMenu
+  mainMenu.addItem(fileMenuItem)
+
+  let editMenuItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+  let editMenu = NSMenu(title: "Edit")
+  editMenu.addItem(applicationMenuItem(title: "Undo", action: Selector(("undo:")), keyEquivalent: "z"))
+  editMenu.addItem(
+    applicationMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z", modifiers: [.command, .shift])
+  )
+  editMenu.addItem(.separator())
+  editMenu.addItem(applicationMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+  editMenu.addItem(applicationMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+  editMenu.addItem(applicationMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+  editMenu.addItem(applicationMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+  editMenuItem.submenu = editMenu
+  mainMenu.addItem(editMenuItem)
+
+  let windowMenuItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
+  let windowMenu = NSMenu(title: "Window")
+  windowMenu.addItem(
+    applicationMenuItem(title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+  )
+  windowMenu.addItem(applicationMenuItem(title: "Zoom", action: #selector(NSWindow.performZoom(_:))))
+  windowMenu.addItem(.separator())
+  windowMenu.addItem(
+    applicationMenuItem(
+      title: "Enter Full Screen",
+      action: #selector(NSWindow.toggleFullScreen(_:)),
+      keyEquivalent: "f",
+      modifiers: [.command, .control]
+    )
+  )
+  windowMenuItem.submenu = windowMenu
+  mainMenu.addItem(windowMenuItem)
+  NSApplication.shared.windowsMenu = windowMenu
+
+  return mainMenu
+}
+
 @main
 final class ClassLoopSwiftApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate {
   private static var retainedDelegate: ClassLoopSwiftApp?
@@ -20,6 +105,7 @@ final class ClassLoopSwiftApp: NSObject, NSApplicationDelegate, NSWindowDelegate
     retainedDelegate = delegate
     app.delegate = delegate
     app.setActivationPolicy(.regular)
+    app.mainMenu = makeApplicationMenu()
     app.run()
   }
 
@@ -43,7 +129,19 @@ final class ClassLoopSwiftApp: NSObject, NSApplicationDelegate, NSWindowDelegate
   }
 
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-    true
+    false
+  }
+
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    if !flag {
+      if let window {
+        window.makeKeyAndOrderFront(nil)
+      } else {
+        launchSource = ClassLoopLaunchSource.resolve()
+        createWindow()
+      }
+    }
+    return true
   }
 
   private func createWindow() {

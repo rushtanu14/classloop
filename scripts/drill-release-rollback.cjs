@@ -8,16 +8,21 @@ const releaseDir = path.join(rootDir, "release");
 const packageJson = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf8"));
 const version = packageJson.version;
 const productName = packageJson.build?.productName || "ClassLoop";
-const rollbackTarget = process.argv[2] || process.env.CLASSLOOP_ROLLBACK_TARGET_VERSION || "last-known-good";
+const cliArgs = process.argv.slice(2);
+const currentHostOnly = cliArgs.includes("--current-host");
+const rollbackTarget =
+  cliArgs.find((argument) => argument !== "--current-host") ||
+  process.env.CLASSLOOP_ROLLBACK_TARGET_VERSION ||
+  "last-known-good";
 
 const requiredArtifacts = [
-  { rel: `${productName}-Swift-${version}-arm64.dmg`, label: "Swift macOS arm64 DMG", minBytes: 250 * 1024 },
-  { rel: `${productName}-Swift-${version}-arm64-mac.zip`, label: "Swift macOS arm64 ZIP", minBytes: 250 * 1024 },
-  { rel: `${productName} Setup ${version}.exe`, label: "Windows x64 NSIS installer", minBytes: 10 * 1024 * 1024 },
-  { rel: `${productName}-${version}-win.zip`, label: "Windows x64 ZIP", minBytes: 10 * 1024 * 1024 },
-  { rel: `${productName}-${version}-arm64-win.zip`, label: "Windows arm64 ZIP", minBytes: 10 * 1024 * 1024 },
-  { rel: `${productName}-${version}.AppImage`, label: "Linux x64 AppImage", minBytes: 10 * 1024 * 1024 },
-  { rel: `${productName}-${version}-arm64.AppImage`, label: "Linux arm64 AppImage", minBytes: 10 * 1024 * 1024 },
+  { platform: "darwin", rel: `${productName}-Swift-${version}-arm64.dmg`, label: "Swift macOS arm64 DMG", minBytes: 250 * 1024 },
+  { platform: "darwin", rel: `${productName}-Swift-${version}-arm64-mac.zip`, label: "Swift macOS arm64 ZIP", minBytes: 250 * 1024 },
+  { platform: "win32", rel: `${productName} Setup ${version}.exe`, label: "Windows x64 NSIS installer", minBytes: 10 * 1024 * 1024 },
+  { platform: "win32", rel: `${productName}-${version}-win.zip`, label: "Windows x64 ZIP", minBytes: 10 * 1024 * 1024 },
+  { platform: "win32", rel: `${productName}-${version}-arm64-win.zip`, label: "Windows arm64 ZIP", minBytes: 10 * 1024 * 1024 },
+  { platform: "linux", rel: `${productName}-${version}.AppImage`, label: "Linux x64 AppImage", minBytes: 10 * 1024 * 1024 },
+  { platform: "linux", rel: `${productName}-${version}-arm64.AppImage`, label: "Linux arm64 AppImage", minBytes: 10 * 1024 * 1024 },
 ];
 
 const optionalArtifacts = [
@@ -27,26 +32,31 @@ const optionalArtifacts = [
 
 const platformTargets = [
   {
+    platform: "darwin",
     id: "macOS arm64",
     executable: path.join("release", "swift-mac-arm64", `${productName}.app`, "Contents", "MacOS", productName),
     bundledDist: path.join("release", "swift-mac-arm64", `${productName}.app`, "Contents", "Resources", "dist", "index.html"),
   },
   {
+    platform: "win32",
     id: "Windows x64",
     executable: path.join("release", "win-unpacked", `${productName}.exe`),
     appAsar: path.join("release", "win-unpacked", "resources", "app.asar"),
   },
   {
+    platform: "win32",
     id: "Windows arm64",
     executable: path.join("release", "win-arm64-unpacked", `${productName}.exe`),
     appAsar: path.join("release", "win-arm64-unpacked", "resources", "app.asar"),
   },
   {
+    platform: "linux",
     id: "Linux x64",
     executable: path.join("release", "linux-unpacked", productName.toLowerCase()),
     appAsar: path.join("release", "linux-unpacked", "resources", "app.asar"),
   },
   {
+    platform: "linux",
     id: "Linux arm64",
     executable: path.join("release", "linux-arm64-unpacked", productName.toLowerCase()),
     appAsar: path.join("release", "linux-arm64-unpacked", "resources", "app.asar"),
@@ -151,7 +161,20 @@ function run() {
     fail("Missing release/. Run npm run package:mac, npm run package:win, and npm run package:linux before this rollback drill.");
   }
 
-  for (const artifact of requiredArtifacts) {
+  const artifactsToVerify = currentHostOnly
+    ? requiredArtifacts.filter((artifact) => artifact.platform === process.platform)
+    : requiredArtifacts;
+  const targetsToVerify = currentHostOnly
+    ? platformTargets.filter((target) => target.platform === process.platform)
+    : platformTargets;
+  if (!artifactsToVerify.length || !targetsToVerify.length) {
+    fail(`Rollback drill does not define release targets for host platform ${process.platform}.`);
+  }
+  console.log(
+    `Rollback artifact scope: ${currentHostOnly ? `current host (${process.platform})` : "all supported platforms"}.`,
+  );
+
+  for (const artifact of artifactsToVerify) {
     requireFile(path.join("release", artifact.rel), artifact.label, artifact.minBytes);
   }
   for (const artifact of optionalArtifacts) {
@@ -169,7 +192,7 @@ function run() {
       console.warn(`WARN optional ${metadata} release metadata is absent. Public downloads use direct installer/AppImage URLs.`);
     }
   }
-  for (const target of platformTargets) {
+  for (const target of targetsToVerify) {
     verifyPackagedApp(target);
   }
   writeRollbackSimulation();

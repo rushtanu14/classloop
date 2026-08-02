@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, Menu, shell } = require("electron");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -835,6 +835,52 @@ function shouldOpenExternally(url) {
   return false;
 }
 
+function installApplicationMenu() {
+  const template = [
+    ...(process.platform === "darwin"
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit", accelerator: "CommandOrControl+Q" },
+            ],
+          },
+        ]
+      : []),
+    {
+      label: "File",
+      submenu: [{ role: "close", accelerator: "CommandOrControl+W" }],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [{ role: "reload" }, { role: "togglefullscreen" }],
+    },
+    {
+      label: "Window",
+      submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "front" }],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 async function createWindow() {
   if (!fs.existsSync(path.join(distDir, "index.html"))) {
     throw new Error("Missing dist/index.html. ClassLoop needs the checked-in app build to run.");
@@ -894,7 +940,10 @@ process.on("unhandledRejection", (error) => {
   app.exit(1);
 });
 
-app.whenReady().then(createWindow).catch((error) => {
+app.whenReady().then(() => {
+  installApplicationMenu();
+  return createWindow();
+}).catch((error) => {
   logStartupError(error);
   app.exit(1);
 });

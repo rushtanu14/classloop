@@ -186,9 +186,10 @@ async function seedLocalAccount(
   name: string,
   email: string,
   password: string,
+  options: { cloudVerificationPending?: boolean; pendingCloudEmail?: string } = {},
 ) {
   await page.evaluate(
-    async ({ role, name, email, password }) => {
+    async ({ role, name, email, password, options }) => {
       const bytes = new TextEncoder().encode(password);
       const digest = await crypto.subtle.digest("SHA-256", bytes);
       const passwordHash = Array.from(new Uint8Array(digest))
@@ -205,11 +206,13 @@ async function seedLocalAccount(
             passwordHash,
             createdAt: new Date().toISOString(),
             theme: "classroom",
+            cloudVerificationPending: options.cloudVerificationPending,
+            pendingCloudEmail: options.pendingCloudEmail,
           },
         ]),
       );
     },
-    { role, name, email, password },
+    { role, name, email, password, options },
   );
 }
 
@@ -738,15 +741,8 @@ async function importReviewAndPublishScenario(page: Page, scenario: EndToEndScen
   await expect(page.getByText(/review the student view/i)).toBeVisible();
   await expect(page.getByText(/student portal preview/i)).toBeVisible();
   await expect(page.getByText(/publish audit/i)).toBeVisible();
-  await expect(page.getByText(/google classroom post/i)).toBeVisible();
+  await expect(page.getByText(/google classroom post/i)).toHaveCount(0);
   await expect(page.locator('[aria-label="Email recap recipients"]')).toContainText(scenario.student.email);
-  await page.getByLabel(/post type/i).selectOption("assignment");
-  await expect(page.getByLabel(/assignment due date/i)).toHaveValue(/\d{4}-\d{2}-\d{2}/);
-  await page
-    .getByLabel(/classroom body/i)
-    .fill(`Class-wide recap for ${scenario.title}\n\nResources and shared tasks only.`);
-  await page.getByRole("button", { name: /prepare classroom post/i }).click();
-  await expect(page.getByText(/Edited assignment is ready/i)).toBeVisible();
   await expect(page.locator(".preview-diff-row")).toHaveCount(2);
   await expect(page.getByLabel(new RegExp(`Preview for ${escapeRegExp(scenario.student.name)}`, "i"))).toBeVisible();
   await page.getByRole("button", { name: /publish to students/i }).click();
@@ -766,7 +762,8 @@ function submissionLinkForScenario(scenario: EndToEndScenario) {
 async function completeScenarioAsStudent(page: Page, scenario: EndToEndScenario, allTitles: string[]) {
   await createAccount(page, "student", scenario.student.name, scenario.student.email, scenario.student.password);
   await expect(page.getByText(`${scenario.student.name}'s follow-up dashboard`)).toBeVisible();
-  await expect(page.getByText(/tasks due soon/i)).toBeVisible();
+  await expect(page.getByLabel("Student progress snapshot")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^My tasks$/i })).toBeVisible();
   await expect(page.locator(".today-card").getByRole("heading", { name: scenario.title })).toBeVisible();
   for (const otherTitle of allTitles.filter((title) => title !== scenario.title)) {
     await expect(page.locator(".student-page").getByText(otherTitle)).toHaveCount(0);
@@ -794,7 +791,7 @@ async function completeScenarioAsStudent(page: Page, scenario: EndToEndScenario,
 
 async function openTeacherReport(page: Page, title: string) {
   await page.getByRole("button", { name: /^dashboard$/i }).click();
-  await page.locator(".session-row").filter({ hasText: title }).click();
+  await page.locator(".dashboard-recent-list button").filter({ hasText: title }).click();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
 }
 
@@ -871,7 +868,7 @@ test("public root shows landing page and can enter the app demo", async ({ page 
   }
   await expect(page.locator(".landing-mobile-band").getByRole("button", { name: /add .*to phone/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /use the pwa for fast after-class cleanup/i })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /classroom posts stay classwide/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /manual sharing stays explicit/i })).toBeVisible();
   const manifest = await page.request.get("/manifest.webmanifest");
   expect(manifest.ok()).toBeTruthy();
   const manifestJson = await manifest.json();
@@ -976,15 +973,37 @@ test("opening the public demo preserves an existing local workspace", async ({ p
   await expect(page.getByRole("button", { name: new RegExp(`Preserved Teacher ${runId}`, "i") })).toBeVisible();
 });
 
-test("teacher dashboard shows an assistant brief and next-step queue", async ({ page }) => {
+test("teacher dashboard prioritizes one visual focus and keeps secondary tools collapsed", async ({ page }) => {
   await signIn(page, "teacher");
-  await expect(page.getByLabel("Teacher assistant brief")).toBeVisible();
-  await expect(page.getByText("Teacher assistant brief")).toBeVisible();
-  await expect(page.locator(".assistant-brief-fact")).toHaveCount(4);
-  await expect(page.locator(".assistant-action").first()).toBeVisible();
-  await expect(page.getByLabel("Copy-ready assistant drafts")).toBeVisible();
-  await expect(page.getByText("Next-class opener")).toBeVisible();
-  await expect(page.getByRole("button", { name: /copy next-class opener/i })).toBeVisible();
+  await expect(page.getByRole("img", { name: /class records becoming reviewed recaps, tasks, and resources/i })).toBeVisible();
+  await expect(page.getByLabel("Classroom pulse")).toBeVisible();
+  await expect(page.locator(".dashboard-pulse-stat")).toHaveCount(4);
+  await expect(page.getByRole("heading", { name: /^Next up$/i })).toBeVisible();
+  await expect(page.locator(".dashboard-focus .assistant-action").first()).toBeVisible();
+  await expect(page.locator(".topbar").getByRole("button", { name: /new session/i })).toHaveCount(0);
+
+  const secondaryTools = page.getByText(/copy-ready messages/i).locator("xpath=ancestor::details[1]");
+  await expect(secondaryTools).not.toHaveAttribute("open", "");
+  await expect(page.getByLabel("Copy-ready assistant drafts")).toBeHidden();
+
+  const demoContext = page.getByText(/^Demo scenario$/i).locator("xpath=ancestor::details[1]");
+  await expect(demoContext).not.toHaveAttribute("open", "");
+
+  expect(await page.locator(".teacher-dashboard > .panel").count()).toBe(0);
+});
+
+test("empty teacher dashboard teaches the first step without a wall of zero metrics", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The empty-state structure only needs one browser project.");
+  const runId = Date.now().toString(36);
+  await resetBrowser(page);
+  await createAccount(page, "teacher", `Empty Dashboard ${runId}`, `empty-dashboard-${runId}@classloop.test`, `empty-pass-${runId}`);
+
+  await expect(page.getByRole("heading", { name: /start with one class record/i })).toBeVisible();
+  await expect(page.getByRole("img", { name: /class records becoming reviewed recaps, tasks, and resources/i })).toBeVisible();
+  await expect(page.getByLabel("How ClassLoop works")).toBeVisible();
+  await expect(page.locator(".dashboard-onboarding-step")).toHaveCount(3);
+  await expect(page.locator(".metric-card")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /create a session/i })).toBeVisible();
 });
 
 async function publishGeometrySample(page: Page) {
@@ -1036,7 +1055,7 @@ async function publishGeometrySample(page: Page) {
     .locator(".publish-preview-page .review-actions > button")
     .evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height));
   expect(Math.max(...publishActionHeights) - Math.min(...publishActionHeights)).toBeLessThan(8);
-  await expect(page.getByText(/teacher-approved class-wide post/i)).toBeVisible();
+  await expect(page.getByText(/teacher-approved class-wide post/i)).toHaveCount(0);
   await expect(page.locator('[aria-label="Email recap recipients"]')).toContainText("Maya Chen");
   await page.getByLabel(/include student sign-in instructions/i).check();
   await expect(page.getByLabel(/student access instruction preview/i)).toContainText(/Access instructions will be added/i);
@@ -1055,8 +1074,8 @@ async function publishGeometrySample(page: Page) {
   await expect(page.getByText(/Follow-through tracker/i)).toBeVisible();
 }
 
-test("teacher sees connector-gated imports and can paste transcript manually", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "chromium", "The integration scaffold smoke runs once; responsive coverage comes from the main app smoke.");
+test("unfinished integration setup stays hidden while manual transcript import remains available", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The public integration boundary smoke runs once; responsive coverage comes from the main app smoke.");
   const runId = Date.now().toString(36);
   const pastedTranscript = `[00:00:44] Ms. Rivera: Great. Who can tell me what an algorithm is?
 [00:00:57] Student (Priya Mehta): Is it like a set of steps to solve a problem?
@@ -1067,20 +1086,17 @@ test("teacher sees connector-gated imports and can paste transcript manually", a
   await resetBrowser(page);
   await createAccount(page, "teacher", `Integration Teacher ${runId}`, `integrations-${runId}@classloop.test`, `teacher-pass-${runId}`);
 
-  await page.locator(".nav-list").getByRole("button", { name: /^Integrations$/i }).click();
-  await expect(page.getByRole("heading", { name: /connect classloop to the places teachers already work/i })).toBeVisible();
-  await expect(page.getByLabel(/integration setup summary/i)).toContainText(/core teacher connections/i);
-  await expect(page.getByText(/Google Classroom/i).first()).toBeVisible();
-  await expect(page.getByText(/Zoom/i).first()).toBeVisible();
-  await expect(page.getByText(/Google Calendar/i).first()).toBeVisible();
-  await expect(page.getByText(/read calendar and event context/i)).toBeVisible();
-  await expect(page.getByText(/does not create or change calendar events/i)).toBeVisible();
-  await expect(page.getByText(/COMPOSIO_GOOGLE_CLASSROOM_AUTH_CONFIG_ID/i).first()).toBeVisible();
-  await expect(page.getByText(/COMPOSIO_GMAIL_AUTH_CONFIG_ID/i)).toHaveCount(0);
-  await expect(page.locator(".connector-chip").filter({ hasText: /^Gmail$/i })).toHaveCount(0);
-  await expect(page.locator(".integration-workflow-card").filter({ hasText: /^Gmail$/i })).toHaveCount(0);
-  await expect(page.getByTestId("email-delivery-status")).toContainText(/Gmail SMTP is configured server-side/i);
-  await expect(page.getByTestId("email-delivery-status")).toContainText(/sender address stays private/i);
+  await expect(page.locator(".nav-list").getByRole("button", { name: /^Integrations$/i })).toHaveCount(0);
+  await page.locator(".nav-list").getByRole("button", { name: /^Plan options$/i }).click();
+  await expect(page.getByText(/MCP and Composio connectors/i)).toHaveCount(0);
+  await expect(page.getByText(/Local MCP server/i)).toHaveCount(0);
+  await expect(page.getByText(/COMPOSIO_API_KEY|auth config ids|auth configuration/i)).toHaveCount(0);
+
+  await page.evaluate(() => {
+    window.location.hash = "#/integrations";
+  });
+  await expect(page.getByRole("heading", { name: /Today in ClassLoop/i })).toBeVisible();
+  await expect(page.getByTestId("integration-page")).toHaveCount(0);
 
   await page.getByRole("button", { name: /new session/i }).first().click();
   await page.getByLabel(/session title/i).fill(`Connector gated import ${runId}`);
@@ -1093,25 +1109,10 @@ test("teacher sees connector-gated imports and can paste transcript manually", a
   await expect(page.getByText(/zoom cloud import/i)).toHaveCount(0);
   await expect(page.getByText(/CS4All Intro to Computational Thinking/i)).toHaveCount(0);
   await expect(page.getByText(/Geometry Review: Similar Triangles/i)).toHaveCount(0);
-  await expect(page.getByLabel(/connect imports and follow-up integrations/i)).toContainText(/Zoom transcripts/i);
-  await expect(page.getByLabel(/connect imports and follow-up integrations/i)).toContainText(/Google Meet transcripts/i);
-  await expect(page.getByLabel(/connect imports and follow-up integrations/i)).toContainText(/Classroom roster\/resources/i);
-  await expect(page.getByLabel(/connect imports and follow-up integrations/i)).toContainText(/Drive, Docs, or Sheets/i);
+  await expect(page.getByLabel(/connect imports and follow-up integrations/i)).toHaveCount(0);
   await expect(page.getByLabel(/post-transcript integrations/i)).toHaveCount(0);
   await page.getByLabel(/paste transcript text/i).fill(pastedTranscript);
-  await expect(page.getByLabel(/post-transcript integrations/i)).toBeVisible();
-  await expect(page.getByRole("button", { name: /calendar context/i })).toBeVisible();
-  const emailReminder = page.getByRole("button", { name: /email reminder/i });
-  await expect(emailReminder).toBeVisible();
-  await expect(emailReminder).toHaveClass(/active/);
-  await expect(emailReminder).toContainText(/Ready through (?:the )?configured (?:SMTP|email) sender/i);
-  await expect(emailReminder).not.toContainText(/Connect Gmail|Gmail draft/i);
-  await expect(page.getByLabel(/post-transcript integrations/i)).not.toContainText(/Gmail draft/i);
-  await expect(page.getByRole("button", { name: /classroom context/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /docs context/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /sheets context/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /tasks context/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /forms context/i })).toBeVisible();
+  await expect(page.getByLabel(/post-transcript integrations/i)).toHaveCount(0);
   await page
     .locator(".summary-input-card")
     .getByLabel(/^Roster$/i)
@@ -1140,7 +1141,7 @@ test("teacher sees connector-gated imports and can paste transcript manually", a
     .toBe(true);
 
   await page.getByRole("button", { name: /preview and publish/i }).click();
-  await expect(page.getByText(/google classroom post/i)).toBeVisible();
+  await expect(page.getByText(/google classroom post/i)).toHaveCount(0);
   await page.getByRole("button", { name: /publish to students/i }).click();
   await handleRosterPrompt(page);
   const exported = await downloadCurrentReportJson(page);
@@ -1388,6 +1389,36 @@ test("cloud email changes require password and wait for new-email confirmation",
   await expect(page.getByRole("button", { name: new RegExp(escapeRegExp(newEmail), "i") })).toHaveCount(0);
 });
 
+test("local password changes do not claim that a cloud confirmation email was sent", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The local password-change regression only needs one browser project.");
+  const runId = Date.now().toString(36);
+  const email = `local-password-${runId}@classloop.test`;
+  const currentPassword = `local-current-${runId}`;
+  const newPassword = `local-updated-${runId}`;
+  const name = `Local Password Teacher ${runId}`;
+
+  await resetBrowser(page);
+  await seedLocalAccount(page, "teacher", name, email, currentPassword, {
+    cloudVerificationPending: true,
+  });
+  await page.reload();
+  await page.goto("/#/dashboard");
+  await signInAccount(page, "teacher", email, currentPassword);
+  await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+
+  await page.getByRole("button", { name }).click();
+  const profile = page.locator(".profile-menu");
+  await profile.getByPlaceholder(/Required to change email or password/i).fill(currentPassword);
+  await profile.getByLabel(/^New password$/i).fill(newPassword);
+  await profile.getByLabel(/^Confirm new password$/i).fill(newPassword);
+  await profile.getByRole("button", { name: /save settings/i }).click();
+
+  await expect(profile).toContainText(/Password updated on this device\. No email confirmation is needed/i);
+  await expect(
+    page.getByRole("status").filter({ hasText: /check your email inbox.*cloud/i }),
+  ).toHaveCount(0);
+});
+
 test("individual account can paste personal meeting minutes and track due-date status", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "The individual workflow smoke runs once; responsive coverage comes from the main app smoke.");
   const runId = Date.now().toString(36);
@@ -1397,6 +1428,8 @@ test("individual account can paste personal meeting minutes and track due-date s
   await createAccount(page, "individual", `Individual ${runId}`, email, password);
 
   await expect(page.getByText(/Personal meetings/).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: /start with one meeting record/i })).toBeVisible();
+  await expect(page.locator(".personal-dashboard .metric-card")).toHaveCount(0);
   await page.getByRole("button", { name: /new personal meeting/i }).first().click();
   await expect(page.getByText(/Session template/i)).toHaveCount(0);
   await expect(page.getByLabel(/google docs personal template/i)).toBeVisible();
@@ -1582,7 +1615,7 @@ Leo Martinez, leo-club-${runId}@classloop.test`,
   await page.getByRole("button", { name: /^dashboard$/i }).click();
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
   for (const title of allTitles) {
-    await expect(page.locator(".session-row").filter({ hasText: title })).toBeVisible();
+    await expect(page.locator(".dashboard-recent-list button").filter({ hasText: title })).toBeVisible();
   }
 
   await expect(page.locator(".nav-list").getByRole("button", { name: /low feedback item/i })).toHaveCount(0);
@@ -1654,7 +1687,7 @@ Leo Martinez, leo-club-${runId}@classloop.test`,
 
   await createAccount(page, "teacher", teacherB.name, teacherB.email, teacherB.password);
   await expect(page.getByText("Today in ClassLoop")).toBeVisible();
-  await expect(page.getByText(/no sessions yet/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /start with one class record/i })).toBeVisible();
   for (const title of allTitles) {
     await expect(page.getByText(title)).toHaveCount(0);
   }
@@ -2369,7 +2402,7 @@ test("Stripe payment link starts checkout without unlocking Pro first", async ({
   await expect(page.getByText(/PRO · active/i)).toHaveCount(0);
 });
 
-test("Stripe-backed Pro shows Unsubscribe and opens the authenticated cancellation portal", async ({ page }, testInfo) => {
+test("Stripe-backed Pro requires a safety confirmation before opening Stripe cancellation", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "chromium", "The Stripe cancellation smoke only needs one browser project.");
   const runId = Date.now().toString(36);
   const email = `stripe-pro-${runId}@classloop.test`;
@@ -2432,6 +2465,17 @@ test("Stripe-backed Pro shows Unsubscribe and opens the authenticated cancellati
   await expect(page.getByRole("button", { name: /^upgrade to pro$/i })).toHaveCount(0);
   await page.getByRole("button", { name: /^unsubscribe$/i }).click();
 
+  const cancellationDialog = page.getByRole("dialog", { name: /review subscription cancellation/i });
+  await expect(cancellationDialog).toBeVisible();
+  await expect(cancellationDialog).toContainText(/Pro stays active until Stripe's cancellation date/i);
+  await expect(cancellationDialog).toContainText(/ClassLoop returns this account to Free/i);
+  expect(portalRequests).toHaveLength(0);
+  await cancellationDialog.getByRole("button", { name: /^keep pro$/i }).click();
+  await expect(cancellationDialog).toBeHidden();
+  expect(portalRequests).toHaveLength(0);
+
+  await page.getByRole("button", { name: /^unsubscribe$/i }).click();
+  await cancellationDialog.getByRole("button", { name: /continue to stripe/i }).click();
   await expect.poll(() => portalRequests.length).toBe(1);
   expect(portalRequests[0]).toEqual({
     method: "POST",
@@ -2439,6 +2483,104 @@ test("Stripe-backed Pro shows Unsubscribe and opens the authenticated cancellati
   });
   await expect(page).toHaveURL(/billing\.stripe\.com\/p\/session\/playwright-cancel/);
   await expect(page.getByRole("heading", { name: /Stripe subscription cancellation/i })).toBeVisible();
+});
+
+test("Stripe cancellation return refreshes the server profile and removes Pro after cancellation ends", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The Stripe cancellation receipt only needs one browser project.");
+  const runId = Date.now().toString(36);
+  const email = `stripe-canceled-${runId}@classloop.test`;
+  const password = `teacher-pass-${runId}`;
+  let cancellationProfileRequests = 0;
+  let cancellationReturnStarted = false;
+
+  await page.addInitScript(() => {
+    (window as Window & { __CLASSLOOP_TEST_AUTO_CLOUD__?: boolean }).__CLASSLOOP_TEST_AUTO_CLOUD__ = true;
+  });
+  await mockCloudAuthForStripeCheckout(page, email, {
+    role: "teacher",
+    name: `Canceled Stripe Teacher ${runId}`,
+  });
+  await page.route("**/api/profile", async (route) => {
+    if (cancellationReturnStarted) cancellationProfileRequests += 1;
+    const canceled = cancellationReturnStarted && cancellationProfileRequests > 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        email,
+        role: "teacher",
+        billingProfile: canceled
+          ? { tier: "free", status: "canceled", customerId: "cus_playwright_canceled" }
+          : {
+              tier: "pro",
+              status: "active",
+              customerId: "cus_playwright_canceled",
+              currentPeriodEnd: "2026-08-31T00:00:00.000Z",
+            },
+        noTrainingOnStudentData: true,
+      }),
+    });
+  });
+
+  await resetBrowser(page);
+  await seedLocalAccount(page, "teacher", `Canceled Stripe Teacher ${runId}`, email, password);
+  await page.reload();
+  await page.goto("/#/dashboard");
+  await signInAccount(page, "teacher", email, password);
+  cancellationReturnStarted = true;
+  await page.evaluate(() => {
+    window.location.hash = "#/billing?billing=subscription-updated";
+  });
+
+  await expect.poll(() => cancellationProfileRequests).toBeGreaterThan(1);
+  await expect(page.getByRole("button", { name: /^upgrade to pro$/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^unsubscribe$/i })).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText(/cancellation confirmed.*Pro access has ended.*Free plan is active/i);
+});
+
+test("scheduled Stripe cancellation keeps paid-through Pro and shows the end date", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The scheduled cancellation state only needs one browser project.");
+  const runId = Date.now().toString(36);
+  const email = `stripe-canceling-${runId}@classloop.test`;
+  const password = `teacher-pass-${runId}`;
+
+  await page.addInitScript(() => {
+    (window as Window & { __CLASSLOOP_TEST_AUTO_CLOUD__?: boolean }).__CLASSLOOP_TEST_AUTO_CLOUD__ = true;
+  });
+  await mockCloudAuthForStripeCheckout(page, email, {
+    role: "teacher",
+    name: `Canceling Stripe Teacher ${runId}`,
+  });
+  await page.route("**/api/profile", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        email,
+        role: "teacher",
+        billingProfile: {
+          tier: "pro",
+          status: "canceling",
+          customerId: "cus_playwright_canceling",
+          currentPeriodEnd: "2026-08-31T00:00:00.000Z",
+        },
+        noTrainingOnStudentData: true,
+      }),
+    });
+  });
+
+  await resetBrowser(page);
+  await seedLocalAccount(page, "teacher", `Canceling Stripe Teacher ${runId}`, email, password);
+  await page.reload();
+  await page.goto("/#/dashboard");
+  await signInAccount(page, "teacher", email, password);
+  await page.evaluate(() => {
+    window.location.hash = "#/billing?billing=subscription-updated";
+  });
+
+  await expect(page.getByRole("button", { name: /cancellation scheduled/i })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /^unsubscribe$/i })).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText(/Pro stays active through August 31, 2026.*returns to Free/i);
 });
 
 test("included manual Pro access does not pretend there is a Stripe subscription to cancel", async ({ page }, testInfo) => {
@@ -2567,6 +2709,14 @@ test("unconfirmed cloud email shows instructions overlay instead of a red billin
 test("students cannot access analytics but can save appearance while logged in, with default theme restored on logout", async ({ page }) => {
   await signIn(page, "student");
   await expect(page.getByRole("button", { name: /analytics/i })).toHaveCount(0);
+  await expect(page.getByLabel("Student progress snapshot")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /tasks due soon/i })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /^My tasks$/i })).toBeVisible();
+  const taskPanelBox = await page.getByRole("heading", { name: /^My tasks$/i }).locator("xpath=ancestor::section[1]").boundingBox();
+  const latestClassBox = await page.locator(".today-card").boundingBox();
+  expect(taskPanelBox).not.toBeNull();
+  expect(latestClassBox).not.toBeNull();
+  expect(taskPanelBox!.y).toBeLessThan(latestClassBox!.y);
 
   const restrictedRoutes = ["analytics", "classes", "rosters", "report", "billing", "checkout", "privacy", "new-session", "review"];
   for (const restrictedRoute of restrictedRoutes) {
@@ -2602,6 +2752,17 @@ test("students cannot access analytics but can save appearance while logged in, 
   await page.locator("form.login-form button[type='submit']").click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "classroom");
   await expect(page.getByText(/You are on a demo account/i)).toBeVisible();
+});
+
+test("empty student dashboard uses a contextual classroom visual", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The student empty-state visual only needs one browser project.");
+  const runId = Date.now().toString(36);
+  await resetBrowser(page);
+  await createAccount(page, "student", `Empty Student ${runId}`, `empty-student-${runId}@classloop.test`, `student-pass-${runId}`);
+
+  await expect(page.getByRole("heading", { name: /no student dashboard yet/i })).toBeVisible();
+  await expect(page.getByRole("img", { name: /quiet classroom waiting for a published class follow-up/i })).toBeVisible();
+  await expect(page.getByText(/teacher has not published any sessions/i)).toBeVisible();
 });
 
 test("accessibility and error-recovery smoke covers keyboard focus, labels, and bad transcript recovery", async ({ page }) => {
@@ -2704,4 +2865,7 @@ test("core controls remain usable on a phone-sized viewport", async ({ page }) =
 
   const hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 4);
   expect(hasHorizontalOverflow).toBe(false);
+  const mobileHeader = await page.locator(".sidebar").boundingBox();
+  expect(mobileHeader).not.toBeNull();
+  expect(mobileHeader!.height).toBeLessThan(130);
 });

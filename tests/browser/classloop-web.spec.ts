@@ -74,8 +74,8 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   await expect(page.getByRole("region", { name: /hosted pwa launch checklist/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /zoom transcript first/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /teacher review stays central/i })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /classroom posts stay classwide/i })).toBeVisible();
-  await expect(page.getByText(/recap, resources, and class tasks only/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /manual sharing stays explicit/i })).toBeVisible();
+  await expect(page.getByText(/copy or export only the reviewed class recap/i)).toBeVisible();
   const addToPhoneButton = page.locator(".landing-mobile-band").getByRole("button", { name: /^add to phone$/i });
   await expect(addToPhoneButton).toBeVisible();
   await addToPhoneButton.click();
@@ -176,6 +176,13 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   await expect(page.locator(".stripe-pricing-table-shell")).toHaveCount(0);
   await expect(page.getByRole("status").filter({ hasText: /Demo account upgrades are disabled/i })).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: /^plan options\.$/i })).toBeVisible();
+  await expect(page.locator(".nav-list").getByRole("button", { name: /^Integrations$/i })).toHaveCount(0);
+  await expect(page.getByText(/MCP and Composio connectors|Setup status|Composio API|MCP config id/i)).toHaveCount(0);
+  await page.evaluate(() => {
+    window.location.hash = "#/integrations";
+  });
+  await expect(page.getByText("Today in ClassLoop")).toBeVisible();
+  await expect(page.getByTestId("integration-page")).toHaveCount(0);
 });
 
 test("hosted public screenshots and privacy routes expose compliance boundaries", async ({ page }) => {

@@ -1,4 +1,4 @@
-export const paidSubscriptionStatuses = new Set(["active"]);
+export const paidSubscriptionStatuses = new Set(["active", "canceling"]);
 
 export function planTierForSubscriptionStatus(tier = "pro", status = "not_configured") {
   return paidSubscriptionStatuses.has(status) ? tier : "free";

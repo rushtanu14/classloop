@@ -129,6 +129,11 @@ function assertNoForbiddenAppStrings() {
       fail(`Swift packaged executable still contains wrapper-only chrome text: ${forbidden}`);
     }
   }
+  for (const requiredCommand of ["Close Window", "Quit ClassLoop", "Copy", "Paste", "Select All"]) {
+    if (!labels.includes(requiredCommand)) {
+      fail(`Swift packaged executable is missing the standard app command: ${requiredCommand}`);
+    }
+  }
 }
 
 async function assertSwiftStateApi(page, appURL, userDataDir) {
@@ -225,7 +230,7 @@ async function assertPackagedDashboardChrome(page) {
   const topbar = page.locator(".topbar");
   const account = topbar.locator(".account-pill");
   const walkthrough = topbar.locator(".tutorial-button");
-  const newSession = topbar.locator(".primary-button", { hasText: "New session" });
+  const newSession = page.locator('.dashboard-home-hero [data-tour="new-session-button"]');
 
   for (const locator of [topbar, account, walkthrough, newSession]) {
     await locator.waitFor({ state: "visible", timeout: 10_000 });
@@ -236,18 +241,21 @@ async function assertPackagedDashboardChrome(page) {
   const walkthroughBox = await walkthrough.boundingBox();
   const newSessionBox = await newSession.boundingBox();
   if (!topbarBox || !accountBox || !walkthroughBox || !newSessionBox) {
-    fail("Packaged ClassLoop dashboard topbar controls did not render with measurable boxes.");
+    fail("Packaged ClassLoop dashboard controls did not render with measurable boxes.");
   }
 
   const withinTopbar = (box) =>
     box.y >= topbarBox.y - 2 &&
     box.y + box.height <= topbarBox.y + topbarBox.height + 2;
 
-  if (!withinTopbar(accountBox) || !withinTopbar(walkthroughBox) || !withinTopbar(newSessionBox)) {
-    fail("Packaged ClassLoop dashboard controls are not aligned inside the web topbar.");
+  if (!withinTopbar(accountBox) || !withinTopbar(walkthroughBox)) {
+    fail("Packaged ClassLoop account and walkthrough controls are not aligned inside the web topbar.");
   }
-  if (!(accountBox.x < walkthroughBox.x && walkthroughBox.x < newSessionBox.x)) {
-    fail("Packaged ClassLoop dashboard top-right controls are not ordered as account, walkthrough, New session.");
+  if (!(accountBox.x < walkthroughBox.x)) {
+    fail("Packaged ClassLoop dashboard top-right controls are not ordered as account then walkthrough.");
+  }
+  if ((await topbar.getByRole("button", { name: /new session/i }).count()) !== 0) {
+    fail("Packaged ClassLoop dashboard duplicated the primary New session action in the topbar.");
   }
 }
 

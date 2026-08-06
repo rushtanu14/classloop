@@ -108,6 +108,11 @@ const complianceMetadataLabelPattern =
   /^(privacy|support|data retention|terms|eula|child appropriate safety|recording consent|consent|legal|security)\b.*\b(note|reminder|contact|notice|policy|guidance)\b/i;
 const staffOrBotSpeakerPattern =
   /\b(ai|bot|notetaker|note taker|recorder|transcriber|host|cohost|co-host|moderator|admin|organizer|staff|faculty|admissions|panelist|presenter|teacher|instructor|professor)\b/i;
+const botSpeakerPattern = /\b(ai|bot|notetaker|note taker|recorder|transcriber)\b/i;
+const zoomChatHeaderPattern =
+  /^\s*\|?\s*(\d{1,2}:\d{2}:\d{2})\s+From\s+(.+?)\s+To\s+(.+?):\s*(.*)$/i;
+const pronounSuffixPattern =
+  /\s*\(((?:she|her|hers|he|him|his|they|them|theirs|ze|zir|zie|hir|xe|xem)(?:\s*[/,]\s*(?:she|her|hers|he|him|his|they|them|theirs|ze|zir|zie|hir|xe|xem))+?)\)\s*$/i;
 
 function stripGenericSpeakerLabel(value: string) {
   return value
@@ -121,6 +126,7 @@ function cleanSpeakerLabel(value: string) {
   return value
     .replace(/\s+/g, " ")
     .replace(/^\[(?:chat|private chat|direct message)\]\s*/i, "")
+    .replace(pronounSuffixPattern, "")
     .trim();
 }
 
@@ -129,11 +135,19 @@ function isClassLoopLiveCaptureSpeakerLabel(value: string) {
 }
 
 function isPrivateMessageLine(line: string) {
-  return /^\s*(?:\[[^\]]+\]\s*)?\[(?:private chat|direct message|dm)\]/i.test(line);
+  const zoomChat = line.match(zoomChatHeaderPattern);
+  return (
+    /^\s*(?:\[[^\]]+\]\s*)?\[(?:private chat|direct message|dm)\]/i.test(line) ||
+    Boolean(zoomChat && !/^everyone(?:\s+in\s+(?:the\s+)?meeting)?$/i.test(zoomChat[3].trim()))
+  );
 }
 
 function isStaffOrBotSpeaker(speaker: string) {
   return staffOrBotSpeakerPattern.test(speaker);
+}
+
+function isBotSpeaker(speaker: string) {
+  return botSpeakerPattern.test(speaker);
 }
 
 function isAmbiguousGenericSpeaker(speaker: string) {
@@ -164,7 +178,10 @@ function hasNameLikeToken(value: string) {
 }
 
 function isChatLine(line: string) {
-  return /^\s*(?:\[[^\]]+\]\s*)?\[(?:chat|private chat|direct message|dm)\]/i.test(line);
+  return (
+    /^\s*(?:\[[^\]]+\]\s*)?\[(?:chat|private chat|direct message|dm)\]/i.test(line) ||
+    zoomChatHeaderPattern.test(line)
+  );
 }
 
 function isNonInstructionalChatText(text: string, sourceLine = "") {
@@ -176,12 +193,27 @@ function isNonInstructionalChatText(text: string, sourceLine = "") {
     .toLowerCase();
   if (isPrivateMessageLine(sourceLine)) return true;
   if (!normalized) return true;
-  if (/^(hi|hello|hey|thanks|thank you|yes|yeah|yep|no|nope|ok|okay|cool|great|same|agreed|bye)$/i.test(normalized)) {
+  if (
+    /^(hi|hello|hey)(?:\s+again)?$|^(thanks|thank you|yes|yeah|yep|no|nope|ok|okay|cool|great|same|agreed|bye|brb|l(?:ol)+|lmao|rofl|ha(?:ha)+|no idea)$/i.test(
+      normalized,
+    )
+  ) {
     return true;
   }
+  if (/^(?:yes|yeah|yep|ok|okay|same)\s+(?:lol+|ha(?:ha)+)$/i.test(normalized)) return true;
+  if (/^(?:wait\s+)?what\s+page$/i.test(normalized) || /^\d{1,4}$/.test(normalized)) return true;
   if (/\b(wifi|wi fi|internet|audio|microphone|mic|camera|hear me|can't hear|cannot hear|screen share|screenshare|zoom link|logged out|connection)\b/i.test(normalized)) {
     return true;
   }
+  if (
+    /\b(subscribe|my channel|meme|rickroll|lunch early|what game|playing today|already finished old homework)\b/i.test(normalized) ||
+    /\b(inaudible|unintelligible|garbled|audio unclear|transcript unclear)\b/i.test(normalized)
+  ) {
+    return true;
+  }
+  const words = normalized.split(" ").filter(Boolean);
+  const fillerCount = words.filter((word) => /^(um|uh|erm|hmm|yeah|okay|ok|like|so)$/.test(word)).length;
+  if (words.length <= 10 && fillerCount / Math.max(1, words.length) >= 0.45) return true;
   return false;
 }
 
@@ -297,26 +329,83 @@ function isLikelySpeakerNameLine(line: string) {
 }
 
 export function extractTranscriptSpeakers(text: string) {
-  const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const lines = text.split(/\r?\n/).map((line) => line.trim());
   const parsedLines: SpeakerLine[] = [];
 
-  lines.forEach((line, index) => {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line) continue;
+
+    if (isTimestampLine(line)) {
+      const cueLines: string[] = [];
+      let cursor = index + 1;
+      while (cursor < lines.length && lines[cursor] && !isTimestampLine(lines[cursor])) {
+        cueLines.push(lines[cursor]);
+        cursor += 1;
+      }
+      if (cueLines.length > 0) {
+        const parsedCue = parseSpeakerLine(cueLines[0]);
+        if (parsedCue) {
+          const continuation = cueLines.slice(1).join(" ").replace(/<\/v>$/i, "").trim();
+          const cueText = [parsedCue.text, continuation].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+          parsedLines.push({
+            speaker: parsedCue.speaker,
+            text: cueText,
+            line: `${parsedCue.speaker}: ${cueText}`,
+          });
+        }
+        index = cursor - 1;
+        continue;
+      }
+    }
+
+    const zoomChat = line.match(zoomChatHeaderPattern);
+    if (zoomChat) {
+      const speaker = cleanSpeakerLabel(zoomChat[2]);
+      const target = zoomChat[3].trim();
+      const messageLines = [zoomChat[4]].filter(Boolean);
+      let cursor = index + 1;
+      while (cursor < lines.length && lines[cursor] && !zoomChatHeaderPattern.test(lines[cursor])) {
+        messageLines.push(lines[cursor]);
+        cursor += 1;
+      }
+      const message = messageLines.join(" ").replace(/\s+/g, " ").trim();
+      if (
+        /^everyone(?:\s+in\s+(?:the\s+)?meeting)?$/i.test(target) &&
+        speaker &&
+        message &&
+        !isTranscriptMetadataSpeaker(speaker) &&
+        !isTeacherLikeSpeaker(speaker) &&
+        !isStaffOrBotSpeaker(speaker) &&
+        isPlausibleTranscriptSpeakerLabel(speaker)
+      ) {
+        parsedLines.push({ speaker, text: message, line: `[Chat] ${speaker}: ${message}` });
+      }
+      index = cursor - 1;
+      continue;
+    }
+
     const parsed = parseSpeakerLine(line);
     if (parsed) {
       parsedLines.push(parsed);
-      return;
+      continue;
     }
 
-    const next = lines[index + 1] ?? "";
-    const afterNext = lines[index + 2] ?? "";
+    let nextIndex = index + 1;
+    while (nextIndex < lines.length && !lines[nextIndex]) nextIndex += 1;
+    let afterNextIndex = nextIndex + 1;
+    while (afterNextIndex < lines.length && !lines[afterNextIndex]) afterNextIndex += 1;
+    const next = lines[nextIndex] ?? "";
+    const afterNext = lines[afterNextIndex] ?? "";
     if (isLikelySpeakerNameLine(line) && isTimestampLine(next) && afterNext && !isTimestampLine(afterNext)) {
       parsedLines.push({
         speaker: stripGenericSpeakerLabel(line),
         text: afterNext,
         line: `${line}: ${afterNext}`,
       });
+      index = afterNextIndex;
     }
-  });
+  }
 
   return parsedLines.filter((line) => !isTranscriptMetadataSpeaker(line.speaker));
 }
@@ -325,7 +414,8 @@ function transcriptLineStats(text: string) {
   const lines = text.split(/\n+/).map((line) => line.trim()).filter(Boolean);
   const parsed = extractTranscriptSpeakers(text);
   const rawSpeakerLines = lines.filter((line) => /:\s*\S+/.test(line));
-  const chatLines = lines.filter(isChatLine);
+  const chatLines = parsed.filter((line) => isChatLine(line.line));
+  const nonInstructionalLines = parsed.filter((line) => isNonInstructionalChatText(line.text, line.line));
   const rawGenericSpeakerLines = rawSpeakerLines.filter((line) => {
     const speaker = line.match(/^(?:\[[^\]]+\]\s*)?([^:\n]{2,80}):\s*(.+)$/i)?.[1] ?? "";
     return speaker && isAmbiguousGenericSpeaker(speaker);
@@ -336,7 +426,7 @@ function transcriptLineStats(text: string) {
     return speaker && isStaffOrBotSpeaker(speaker);
   });
   const privateLines = lines.filter(isPrivateMessageLine);
-  return { lines, parsed, rawSpeakerLines, chatLines, genericSpeakerLines, staffOrBotLines, privateLines };
+  return { lines, parsed, rawSpeakerLines, chatLines, nonInstructionalLines, genericSpeakerLines, staffOrBotLines, privateLines };
 }
 
 function duplicateRosterNames(students: Student[]) {
@@ -352,14 +442,34 @@ function duplicateRosterNames(students: Student[]) {
 }
 
 function isLikelyNoisyAsr(text: string) {
-  const words = text.toLowerCase().match(/[a-z']+/g) ?? [];
-  if (words.length < 35) return false;
-  const fillerWords = words.filter((word) => /^(um|uh|erm|hmm|yeah|okay|ok|like|so)$/.test(word)).length;
-  const unclearMarkers = (text.match(/\b(inaudible|unintelligible|garbled|audio unclear|transcript unclear|unknown speaker)\b/gi) ?? [])
-    .length;
-  const shortWords = words.filter((word) => word.length <= 2).length;
-  const punctuationCount = (text.match(/[.?!]/g) ?? []).length;
-  return unclearMarkers > 0 || fillerWords / words.length > 0.16 || (shortWords / words.length > 0.38 && punctuationCount < 3);
+  const parsed = extractTranscriptSpeakers(text);
+  const unclearParsedCount = parsed.filter((line) =>
+    /\b(inaudible|unintelligible|garbled|audio unclear|transcript unclear|unknown speaker)\b/i.test(line.text),
+  ).length;
+  if (unclearParsedCount >= 2 && unclearParsedCount / Math.max(1, parsed.length) >= 0.25) return true;
+  const substantive = parsed.filter((line) => !isNonInstructionalChatText(line.text, line.line));
+  if (!substantive.length) {
+    const words = text.toLowerCase().match(/[a-z']+/g) ?? [];
+    if (words.length < 20) return false;
+    const fillerWords = words.filter((word) => /^(um|uh|erm|hmm|yeah|okay|ok|like|so)$/.test(word)).length;
+    const unclearMarkers = (
+      text.match(/\b(inaudible|unintelligible|garbled|audio unclear|transcript unclear|unknown speaker)\b/gi) ?? []
+    ).length;
+    return unclearMarkers >= 2 || fillerWords / words.length > 0.16;
+  }
+  const samples = substantive.length ? substantive.map((line) => line.text) : [text];
+  const noisySamples = samples.filter((sample) => {
+    const words = sample.toLowerCase().match(/[a-z']+/g) ?? [];
+    if (!words.length) return true;
+    const fillerWords = words.filter((word) => /^(um|uh|erm|hmm|yeah|okay|ok|like|so)$/.test(word)).length;
+    const unclearMarkers = (
+      sample.match(/\b(inaudible|unintelligible|garbled|audio unclear|transcript unclear|unknown speaker)\b/gi) ?? []
+    ).length;
+    const shortWords = words.filter((word) => word.length <= 2).length;
+    const punctuationCount = (sample.match(/[.?!]/g) ?? []).length;
+    return unclearMarkers > 0 || fillerWords / words.length > 0.3 || (words.length >= 12 && shortWords / words.length > 0.45 && punctuationCount < 2);
+  }).length;
+  return noisySamples >= Math.max(2, Math.ceil(samples.length * 0.5));
 }
 
 function importQualityWarnings(sessionText: string, roster: Student[], hasExplicitRoster: boolean): ImportQualityWarning[] {
@@ -431,6 +541,17 @@ function importQualityWarnings(sessionText: string, roster: Student[], hasExplic
       message:
         "Most detected lines came from chat. ClassLoop will keep participation signals unapproved until you confirm they represent meaningful student participation.",
       source: `${stats.chatLines.length} chat line${stats.chatLines.length === 1 ? "" : "s"} detected`,
+    });
+  }
+
+  if (stats.nonInstructionalLines.length > 0) {
+    warnings.push({
+      id: "non-instructional-noise",
+      severity: "info",
+      title: "Non-instructional transcript noise ignored",
+      message:
+        "Greetings, reactions, social chatter, connection problems, and unclear fragments were kept out of student participation.",
+      source: `${stats.nonInstructionalLines.length} low-value line${stats.nonInstructionalLines.length === 1 ? "" : "s"} filtered`,
     });
   }
 
@@ -1057,18 +1178,23 @@ function actionTitleFromAssignment(assignment: string) {
 
 function stripCaptureMetadata(text: string) {
   return text
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter((line) => {
-      const normalized = cleanLine(line);
-      return (
-        normalized &&
-        !/^(capture method|captured duration|audio capture consent|student voice identification|online meeting capture|live transcript|no live transcript)/i.test(
+    .split(/\r?\n/)
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || zoomChatHeaderPattern.test(trimmed)) return trimmed;
+      const normalized = cleanLine(trimmed);
+      if (
+        !normalized ||
+        /^(capture method|captured duration|audio capture consent|student voice identification|online meeting capture|live transcript|no live transcript)/i.test(
           normalized,
         )
-      );
+      ) {
+        return "";
+      }
+      return trimmed;
     })
     .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
@@ -1198,15 +1324,66 @@ function studentReadinessScore({
   return Math.max(18, Math.min(88, score));
 }
 
+function urlsInText(value: string) {
+  return (value.match(/https?:\/\/[^\s)]+/g) ?? []).map((url) => url.replace(/[.,;]+$/, ""));
+}
+
+function transcriptResourceContext(sessionText: string, url: string) {
+  const lines = sessionText.split(/\r?\n/).map((line) => line.trim());
+  const index = lines.findIndex((line) => line.includes(url));
+  if (index < 0) return { sourceLine: "", context: "" };
+  let previousIndex = index - 1;
+  while (previousIndex >= 0 && !lines[previousIndex]) previousIndex -= 1;
+  const sourceLine = lines[index];
+  const previousLine = previousIndex >= 0 ? lines[previousIndex] : "";
+  return { sourceLine, context: [previousLine, sourceLine].filter(Boolean).join(" ") };
+}
+
+function isUsefulTranscriptResource(url: string, sourceLine: string, context: string) {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsedUrl.hostname === "example.invalid" || parsedUrl.hostname.endsWith(".invalid")) return false;
+  if (/^zoom\.us$/i.test(parsedUrl.hostname) && /^\/test\/?$/i.test(parsedUrl.pathname)) return false;
+  if (isPrivateMessageLine(sourceLine) || isPrivateMessageLine(context)) return false;
+
+  const zoomHeader = context.match(zoomChatHeaderPattern);
+  if (zoomHeader && isBotSpeaker(zoomHeader[2])) return false;
+  const parsedSpeaker = parseSpeakerLine(sourceLine) ?? parseSpeakerLine(context);
+  if (parsedSpeaker && isBotSpeaker(parsedSpeaker.speaker)) return false;
+
+  const contextWithoutUrl = context.replace(url, " ").replace(/\s+/g, " ").trim();
+  if (/\b(meme|gif|rickroll|subscribe|my channel|random link|bot summary|meeting summary available)\b/i.test(contextWithoutUrl)) {
+    return false;
+  }
+  const positiveContext =
+    /\b(resource|worksheet|slides?|animation|article|video|guide|practice|document|docs?|reference|tutorial|example|explains?|shows?)\b/i.test(
+      contextWithoutUrl,
+    );
+  if (!positiveContext && isChatLine(context) && isNonInstructionalChatText(contextWithoutUrl, context)) return false;
+  return true;
+}
+
 function parseResources(resourcesText: string, sessionText: string, relatedTopic: string): Resource[] {
-  const combined = `${resourcesText}\n${sessionText}`;
-  const urls = unique((combined.match(/https?:\/\/[^\s)]+/g) ?? []).map((url) => url.replace(/[.,;]+$/, "")));
+  const explicitUrls = urlsInText(resourcesText);
+  const transcriptUrls = urlsInText(sessionText).filter((url) => {
+    const { sourceLine, context } = transcriptResourceContext(sessionText, url);
+    return isUsefulTranscriptResource(url, sourceLine, context);
+  });
+  const urls = unique([...explicitUrls, ...transcriptUrls]);
   return urls.map((url, index) => {
-    const sourceLine = combined.split(/\n+/).find((line) => line.includes(url)) ?? "";
-    const label = sourceLine
+    const explicitLine = resourcesText.split(/\n+/).find((line) => line.includes(url));
+    const transcriptContext = transcriptResourceContext(sessionText, url);
+    const sourceLine = explicitLine ?? transcriptContext.sourceLine;
+    const labelSource = sourceLine.trim() === url ? transcriptContext.context : sourceLine;
+    const label = cleanLine(labelSource)
       .replace(url, "")
       .replace(/resource link:?/i, "")
       .replace(/resources?:?/i, "")
+      .replace(zoomChatHeaderPattern, "$4")
       .trim();
     let fallbackTitle = `Resource ${index + 1}`;
     try {
@@ -1325,7 +1502,9 @@ export function createGeneratedSession(input: ImportDraftInput): Session {
     const parsedSpoken = speakerLines
       .filter((line) => speakerMatchesStudent(line.speaker, student))
       .map((line) => line.line);
-    const spoken = unique([...parsedSpoken, ...lineForStudent(lines, student)]).filter((line) => !shouldIgnoreParticipationLine(line));
+    const spoken = unique(parsedSpoken.length ? parsedSpoken : lineForStudent(lines, student)).filter(
+      (line) => !shouldIgnoreParticipationLine(line),
+    );
     const events: ParticipationEvent[] = spoken.slice(0, 2).map((line, index) => {
       const clean = cleanLine(line);
       const type = eventTypeFromText(clean);

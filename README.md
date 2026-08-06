@@ -212,6 +212,9 @@ npm run test:web
 Useful focused checks:
 
 ```bash
+npm run validate:parser
+npm run validate:parser:online
+npm run validate:parser:ai
 npm run test:web:local
 npm run test:stripe
 npm run test:swift:mac
@@ -220,6 +223,8 @@ npm run test:desktop:first-run
 npm run test:release:distribution
 npm run drill:incidents
 ```
+
+Parser validation uses a synthetic Zoom VTT/chat stress fixture with greetings, reactions, technical interruptions, private chat, bot messages, misleading task chatter, and non-instructional links. `validate:parser:online` additionally checks the parser against a fetched public Zoom `chat.txt` export without committing that third-party content. `validate:parser:ai` uses the free local Ollama model `qwen3:1.7b` as an advisory structured-output judge; install that model locally or override it with `CLASSLOOP_PARSER_AI_MODEL`. No transcript is sent to a hosted model, and deterministic expectations remain the release gate.
 
 The test suite covers import parsing, noisy transcripts and rosters, teacher/student workflows, individual meeting minutes, workspace isolation, hosted sync states, Free/Pro boundaries, Stripe-owned entitlement updates, desktop encrypted state, mobile/PWA readability, accessibility, user-visible errors, Swift macOS packaging, and release checks.
 

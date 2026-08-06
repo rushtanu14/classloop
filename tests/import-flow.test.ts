@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import { createGeneratedSession, createPersonalMeetingDraft, readTranscriptFileText } from "../src/data.js";
+import { evaluateParserOutput } from "../src/parser-quality.js";
 import { createStructuredTranscriptFromText } from "../src/transcript.js";
 
 function assert(condition: boolean, message: string) {
@@ -258,6 +260,12 @@ const publicProxyChatOnlyTranscript = `[Chat] Maya Chen: hello
 [Chat] AI Notetaker: joined the meeting.
 [Direct Message] Maya Chen to Staff Host: private follow-up`;
 
+const noisyZoomClassTranscript = readFileSync("tests/fixtures/noisy-zoom-class.vtt", "utf8");
+const zoomSavedChatWithPronouns = `16:10:08 From Maya Chen (she/her) To Everyone:
+Would a larger concentration difference make diffusion happen faster?
+16:10:26 From Jordan Lee (he/him) To Everyone:
+I think it would increase the net movement.`;
+
 const expectedStudents = [
   ["Aaliyah Carter", "acarter@cs4all.nyc"],
   ["Danny Reyes", "dreyes@cs4all.nyc"],
@@ -488,6 +496,109 @@ assert(
   !publicProxyChatSession.participationEvents.some((event) => /hello|wifi|can you hear/i.test(event.text)),
   "greetings and technical-access chat lines should not become participation events",
 );
+
+const noisyZoomClassSession = createGeneratedSession({
+  title: "Biology: Cell transport lab",
+  template: "General classroom",
+  transcript: noisyZoomClassTranscript,
+  notes: "Students compared diffusion and osmosis. The Cell Transport Lab is due Friday.",
+  roster: `Maya Chen, maya@classloop.test
+Jordan Lee, jordan@classloop.test
+Priya Shah, priya@classloop.test
+Luis Gomez, luis@classloop.test
+Emma Davis, emma@classloop.test`,
+  resources: "",
+});
+const noisyZoomParticipationText = noisyZoomClassSession.participationEvents.map((event) => event.text).join("\n");
+const noisyZoomResourceUrls = noisyZoomClassSession.resources.map((resource) => resource.url);
+assertEqual(noisyZoomClassSession.students.length, 5, "noisy Zoom stress import should preserve the five-student roster");
+assertEqual(
+  noisyZoomClassSession.unmatchedParticipants?.length ?? 0,
+  0,
+  "Zoom VTT and saved-chat wrappers should not become unmatched participants",
+);
+assert(
+  /osmosis only the movement of water.*dissolved particles move through the membrane/i.test(noisyZoomParticipationText),
+  "multiline Zoom VTT questions should remain one meaningful participation event",
+);
+assert(
+  /diffusion moves particles from high concentration to low concentration.*more balanced/i.test(noisyZoomParticipationText),
+  "multiline Zoom VTT answers should preserve continuation text",
+);
+assert(
+  /hypotonic sample gained water/i.test(noisyZoomParticipationText),
+  "saved Zoom chat blocks should become participation only when the message is instructional",
+);
+assert(
+  !/hello|hear me|camera is frozen|brb|subscribe|random meme|lunch early|what game|lololol|audio is gone/i.test(
+    noisyZoomParticipationText,
+  ),
+  "buffer, social chatter, reactions, and technical noise should not become participation",
+);
+assert(
+  noisyZoomClassSession.actionItems.some((item) =>
+    /Cell Transport Lab.*questions 1 through 8.*Friday/i.test(`${item.title} ${item.description}`),
+  ),
+  "the real teacher assignment should outrank misleading homework and submit chatter",
+);
+assert(
+  noisyZoomResourceUrls.includes("https://example.org/cell-membrane-animation"),
+  "instructional links should survive noisy transcript filtering",
+);
+[
+  "https://example.invalid/meme.gif",
+  "https://zoom.us/test",
+  "https://example.invalid/another-meme",
+  "https://example.org/private-accommodation",
+  "https://example.org/bot-summary",
+].forEach((url) => {
+  assert(!noisyZoomResourceUrls.includes(url), `${url} should not become a student resource`);
+});
+assert(
+  !(noisyZoomClassSession.importWarnings ?? []).some((warning) => warning.id === "noisy-asr" && warning.severity === "blocking"),
+  "isolated inaudible or filler-heavy cues should not block an otherwise substantive transcript",
+);
+assert(
+  noisyZoomClassSession.importWarnings?.some((warning) => warning.id === "non-instructional-noise") ?? false,
+  "the parser should report how much non-instructional transcript noise it ignored",
+);
+const noisyZoomQuality = evaluateParserOutput(noisyZoomClassSession, {
+  expectedStudents: ["Maya Chen", "Jordan Lee", "Priya Shah", "Luis Gomez", "Emma Davis"],
+  requiredOutputPhrases: [
+    "osmosis only the movement of water",
+    "Diffusion moves particles from high concentration to low concentration",
+    "hypotonic sample gained water",
+    "Cell Transport Lab",
+    "Friday",
+  ],
+  requiredResourceUrls: ["https://example.org/cell-membrane-animation"],
+  forbiddenOutputPhrases: [
+    "camera is frozen",
+    "subscribe to my channel",
+    "random meme",
+    "private accommodation detail",
+    "bot summary",
+  ],
+  maxUnmatchedParticipants: 0,
+});
+assert(noisyZoomQuality.passed, `noisy Zoom parser quality checks should pass: ${noisyZoomQuality.failures.join("; ")}`);
+assertEqual(noisyZoomQuality.score, 100, "the known synthetic fixture should meet every deterministic output expectation");
+
+const zoomPronounChatSession = createGeneratedSession({
+  title: "Zoom saved-chat display names",
+  template: "General classroom",
+  transcript: zoomSavedChatWithPronouns,
+  notes: "",
+  roster: `Maya Chen, maya@classloop.test
+Jordan Lee, jordan@classloop.test`,
+  resources: "",
+});
+assertEqual(
+  zoomPronounChatSession.unmatchedParticipants?.length ?? 0,
+  0,
+  "Zoom display-name pronouns should not prevent roster matching",
+);
+assertEqual(zoomPronounChatSession.participationEvents.length, 2, "public Zoom saved-chat messages should match both roster students");
 
 const malformedRosterSession = createGeneratedSession({
   title: "Malformed roster and alias handling",

@@ -1,0 +1,153 @@
+WEBVTT
+
+NOTE
+Synthetic ClassLoop parser stress fixture. Names, links, and class content are fictional.
+It combines Zoom-style VTT cues with saved-chat blocks to test noisy real-world imports.
+
+00:00:00.000 --> 00:00:02.000
+Ms. Rivera: Recording has started. Please use the chat if your audio drops.
+
+00:00:02.000 --> 00:00:04.000
+Maya Chen: hi
+
+00:00:04.000 --> 00:00:06.000
+Jordan Lee: can you hear me
+
+00:00:06.000 --> 00:00:08.000
+Priya Shah: yes lol
+
+00:00:08.000 --> 00:00:10.000
+Luis Gomez: my camera is frozen
+
+00:00:10.000 --> 00:00:12.000
+Emma Davis: brb
+
+00:00:12.000 --> 00:00:14.000
+AI Notetaker: joined the meeting
+
+00:00:14.000 --> 00:00:17.000
+Ms. Rivera: Today we are comparing diffusion and osmosis across a cell membrane.
+
+00:00:17.000 --> 00:00:21.000
+Maya Chen: Is osmosis only the movement of water,
+or can dissolved particles move through the membrane too?
+
+00:00:21.000 --> 00:00:26.000
+Ms. Rivera: Osmosis specifically describes water moving across a selectively permeable membrane.
+
+00:00:26.000 --> 00:00:31.000
+Jordan Lee: Diffusion moves particles from high concentration to low concentration
+until the concentrations become more balanced.
+
+00:00:31.000 --> 00:00:33.000
+Priya Shah: wait what page
+
+00:00:33.000 --> 00:00:35.000
+Luis Gomez: 42
+
+00:00:35.000 --> 00:00:37.000
+Emma Davis: same
+
+00:00:37.000 --> 00:00:39.000
+Maya Chen: 😂😂😂
+
+00:00:39.000 --> 00:00:41.000
+Jordan Lee: subscribe to my channel
+
+00:00:41.000 --> 00:00:43.000
+Priya Shah: random meme https://example.invalid/meme.gif
+
+00:00:43.000 --> 00:00:45.000
+Luis Gomez: https://zoom.us/test
+
+00:00:45.000 --> 00:00:47.000
+Emma Davis: [inaudible]
+
+00:00:47.000 --> 00:00:50.000
+Ms. Rivera: Ignore the connection interruption. The key evidence is the change in mass of the potato sample.
+
+00:00:50.000 --> 00:00:55.000
+Emma Davis: The potato gained mass because water moved into its cells
+through osmosis.
+
+00:00:55.000 --> 00:00:58.000
+Maya Chen: okay yeah um like that makes sense
+
+00:00:58.000 --> 00:01:00.000
+Jordan Lee: cool
+
+00:01:00.000 --> 00:01:02.000
+Priya Shah: hello again
+
+00:01:02.000 --> 00:01:04.000
+Luis Gomez: wifi bad
+
+00:01:04.000 --> 00:01:06.000
+Emma Davis: yep
+
+00:01:06.000 --> 00:01:10.000
+Priya Shah: This animation shows selective permeability clearly:
+https://example.org/cell-membrane-animation
+
+00:01:10.000 --> 00:01:13.000
+Maya Chen: wait is lunch early today
+
+00:01:13.000 --> 00:01:15.000
+Jordan Lee: no idea
+
+00:01:15.000 --> 00:01:17.000
+Luis Gomez: what game are you playing
+
+00:01:17.000 --> 00:01:19.000
+Emma Davis: hahaha
+
+00:01:19.000 --> 00:01:22.000
+Ms. Rivera: Complete the Cell Transport Lab worksheet, questions 1 through 8, by Friday.
+
+00:01:22.000 --> 00:01:25.000
+Luis Gomez: Is question 8 the graph comparing both solutions?
+
+00:01:25.000 --> 00:01:28.000
+Ms. Rivera: Yes. Label both axes and explain the direction of water movement.
+
+00:01:28.000 --> 00:01:30.000
+Maya Chen: I already finished old homework
+
+00:01:30.000 --> 00:01:32.000
+Jordan Lee: submit the meme lol
+
+00:01:32.000 --> 00:01:34.000
+Priya Shah: bye
+
+00:01:34.000 --> 00:01:36.000
+Luis Gomez: thanks
+
+00:01:36.000 --> 00:01:38.000
+Emma Davis: 👋
+
+16:01:28 From Maya Chen To Everyone:
+hello
+
+16:01:32 From Jordan Lee To Everyone:
+audio is gone again
+
+16:01:36 From Priya Shah To Everyone:
+The cell membrane animation is the useful resource https://example.org/cell-membrane-animation
+
+16:01:40 From Luis Gomez To Everyone:
+Is the Cell Transport Lab due Friday?
+
+16:01:44 From Emma Davis To Everyone:
+The hypotonic sample gained water.
+
+16:01:48 From Maya Chen To Everyone:
+lololol
+
+16:01:52 From Jordan Lee To Everyone:
+https://example.invalid/another-meme
+
+16:01:56 From Priya Shah To Staff Host:
+Private accommodation detail https://example.org/private-accommodation
+
+16:02:00 From AI Notetaker To Everyone:
+Meeting summary available at https://example.org/bot-summary

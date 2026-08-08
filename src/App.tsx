@@ -68,6 +68,8 @@ import {
   IntegrationImportWizard,
   type PreparedIntegrationImport,
 } from "./components/IntegrationImportWizard";
+import { FreeResourceSearch, type FreeLearningResource } from "./components/FreeResourceSearch";
+import { FilestackResourceUpload } from "./components/FilestackResourceUpload";
 import {
   applyIntegrationDraftPatch,
   type IntegrationImportFormState,
@@ -131,6 +133,10 @@ import type {
   TaskStatus,
   UnmatchedParticipant,
 } from "./types";
+
+const filestackResourceUploadsEnabled = ["1", "true"].includes(
+  String(import.meta.env.VITE_CLASSLOOP_FILESTACK_UPLOAD_ENABLED || "").toLowerCase(),
+);
 
 // Unfinished provider tooling is available only to local developers running the
 // dedicated internal QA suite. Production builds fail closed and never render it.
@@ -4072,6 +4078,7 @@ function App() {
           <ReviewDraft
             draft={visibleDraft}
             setDraft={setDraft}
+            ownerEmail={auth.email}
             studentAccountEmails={accounts
               .filter((account) => account.role === "student")
               .map((account) => normalizeEmail(account.email))}
@@ -10809,10 +10816,12 @@ function Processing({ draft }: { draft: Session | null }) {
 function ReviewDraft({
   draft,
   setDraft,
+  ownerEmail,
   studentAccountEmails,
 }: {
   draft: Session | null;
   setDraft: (session: Session | null) => void;
+  ownerEmail: string;
   studentAccountEmails: string[];
 }) {
   const [saveMessage, setSaveMessage] = useState("");
@@ -10838,6 +10847,35 @@ function ReviewDraft({
 
   const updateResource = (id: string, changes: Partial<Resource>) => {
     update({ resources: draft.resources.map((resource) => (resource.id === id ? { ...resource, ...changes } : resource)) });
+  };
+
+  const addFreeResource = (resource: FreeLearningResource) => {
+    if (draft.resources.some((existing) => existing.url === resource.url)) return;
+    update({
+      resources: [
+        ...draft.resources,
+        {
+          id: `res-free-${Date.now().toString(36)}-${resource.id.replace(/[^a-z0-9]+/gi, "-").slice(0, 32)}`,
+          title: resource.title,
+          url: resource.url,
+          type: "link",
+          relatedTopic: resource.topic,
+        },
+      ],
+    });
+  };
+
+  const addUploadedResource = (resource: Omit<Resource, "id">) => {
+    if (draft.resources.some((existing) => existing.url === resource.url)) return;
+    update({
+      resources: [
+        ...draft.resources,
+        {
+          ...resource,
+          id: `res-upload-${Date.now().toString(36)}`,
+        },
+      ],
+    });
   };
 
   const updateFollowUp = (studentId: string, changes: Partial<StudentFollowUp>) => {
@@ -11027,6 +11065,13 @@ function ReviewDraft({
           </Panel>
 
           <Panel title="Resources" icon={LinkIcon}>
+            {filestackResourceUploadsEnabled && (
+              <FilestackResourceUpload ownerEmail={ownerEmail} onAdd={addUploadedResource} />
+            )}
+            <FreeResourceSearch
+              existingUrls={draft.resources.map((resource) => resource.url)}
+              onAdd={addFreeResource}
+            />
             <div className="editable-stack">
               {draft.resources.map((resource) => (
                 <div key={resource.id} className="editable-item">

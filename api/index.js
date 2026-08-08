@@ -6,6 +6,8 @@ import cloudState from "../server/backend/api/cloud-state.js";
 import configHandler from "../server/backend/api/config.js";
 import emailRecaps from "../server/backend/api/email/send-recaps.js";
 import feedback from "../server/backend/api/feedback.js";
+import { filestackFinalizeHandler, filestackUploadSessionHandler } from "../server/backend/api/file-uploads.js";
+import freeResources from "../server/backend/api/free-resources.js";
 import integrationsConnect from "../server/backend/api/integrations/connect.js";
 import integrationsConnections from "../server/backend/api/integrations/connections.js";
 import integrationsImportPreview from "../server/backend/api/integrations/import-preview.js";
@@ -30,6 +32,9 @@ const handlers = new Map([
   ["config", configHandler],
   ["email/send-recaps", emailRecaps],
   ["feedback", feedback],
+  ["file-uploads/finalize", filestackFinalizeHandler],
+  ["file-uploads/session", filestackUploadSessionHandler],
+  ["free-resources", freeResources],
   ["integrations/connect", integrationsConnect],
   ["integrations/connections", integrationsConnections],
   ["integrations/import-preview", integrationsImportPreview],

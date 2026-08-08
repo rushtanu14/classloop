@@ -40,6 +40,8 @@ This keeps the first impression accessible to everyone while still making the st
 - Import transcripts, pasted notes, rosters, and resource links.
 - Use CSV roster import/export and saved roster templates.
 - Review matched speakers, unmatched participants, action items, resources, and follow-ups.
+- Upload an explicitly approved, already-shareable PDF/TXT/Markdown resource through Filestack only after secure hosted credentials, teacher cloud sign-in, and the private ClamAV gate are configured and live-verified. Malware, stale definitions, and scanner outages block sharing; the release flag remains off meanwhile.
+- Search Wikipedia and Open Library by a teacher-entered topic, review the results, and explicitly add useful free resources without sending transcripts, rosters, notes, or student details.
 - Edit the class recap before anything is published.
 - Preview what each student will see.
 - Publish approved follow-ups.
@@ -276,6 +278,8 @@ npm run release:checksums
 Use `.env.example` as the checklist for optional hosted services.
 
 For the full Stripe, Supabase, and Vercel payment setup checklist, use [docs/classloop-payment-launch-runbook.md](docs/classloop-payment-launch-runbook.md). Paid Pro promotion should stay on hold until the runbook's live checkout, webhook entitlement, cancellation, and demo-account-blocking proof is current.
+
+For the optional teacher-only Filestack resource uploader, use [docs/filestack-resource-uploads.md](docs/filestack-resource-uploads.md) and the self-hosted [ClamAV gateway](services/clamav-scanner/README.md). Keep it disabled until clean-file, EICAR, outage, and final-read probes pass against the exact deployment. VirusTotal's free Public API remains ineligible and would disclose files into a shared threat corpus. Mailboxlayer also remains disabled because its free plan lacks HTTPS; ClassLoop keeps local syntax validation and Supabase ownership confirmation instead.
 Common hosted variables:
 
 ```bash
@@ -293,6 +297,13 @@ STRIPE_WEBHOOK_SECRET=
 
 CLASSLOOP_PUBLIC_URL=
 CLASSLOOP_FEEDBACK_NOTIFY_EMAIL=
+
+FILESTACK_API_KEY=
+FILESTACK_APP_SECRET=
+FILESTACK_SECURITY_ENABLED=true
+CLASSLOOP_MALWARE_SCANNER_URL=https://scanner.example.com/scan
+CLASSLOOP_MALWARE_SCANNER_TOKEN=
+VITE_CLASSLOOP_FILESTACK_UPLOAD_ENABLED=false
 ```
 
 Keep server-only secrets in Vercel or local environment files. Do not commit real credentials.

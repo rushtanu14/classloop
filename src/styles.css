@@ -3706,6 +3706,137 @@ button:disabled:hover {
   gap: 10px;
 }
 
+.free-resource-search {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--soft);
+}
+
+.filestack-resource-upload {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 16px;
+  border: 1px solid rgba(16, 185, 129, 0.24);
+  border-radius: 16px;
+  background: var(--primary-soft);
+}
+
+.filestack-resource-upload-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.filestack-resource-upload-heading > div {
+  display: grid;
+  gap: 4px;
+}
+
+.filestack-resource-upload-heading small,
+.filestack-resource-upload > p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.filestack-resource-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.filestack-resource-consent input {
+  margin-top: 3px;
+}
+
+.filestack-resource-upload .ghost-button {
+  width: fit-content;
+}
+
+.free-resource-search-heading,
+.free-resource-search-heading > div,
+.free-resource-result > div {
+  display: grid;
+  gap: 5px;
+}
+
+.free-resource-search-heading small,
+.free-resource-privacy,
+.free-resource-result p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.free-resource-privacy {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--primary-soft);
+  font-size: 0.84rem;
+}
+
+.free-resource-search-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.free-resource-search-form .field {
+  min-width: 0;
+}
+
+.free-resource-results {
+  display: grid;
+  gap: 10px;
+}
+
+.free-resource-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.free-resource-result h4,
+.free-resource-result p {
+  margin: 0;
+}
+
+.free-resource-result a {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  width: fit-content;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .free-resource-search-form,
+  .free-resource-result {
+    grid-template-columns: 1fr;
+  }
+
+  .free-resource-search-form .ghost-button,
+  .free-resource-result .ghost-button,
+  .filestack-resource-upload .ghost-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 .assistant-brief {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.95fr);

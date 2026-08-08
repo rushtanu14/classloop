@@ -7,6 +7,7 @@ const reuseExistingServer = process.env.CLASSLOOP_REUSE_PLAYWRIGHT_SERVER === "1
 const browserTestEnv =
   "VITE_SUPABASE_URL=https://classloop-playwright.supabase.co " +
   "VITE_SUPABASE_ANON_KEY=classloop-playwright-anon-key " +
+  "VITE_CLASSLOOP_FILESTACK_UPLOAD_ENABLED=1 " +
   "VITE_STRIPE_PAYMENT_LINK_URL=https://buy.stripe.com/7sY28qeT16Mh5wi0ZbeME00";
 
 export default defineConfig({

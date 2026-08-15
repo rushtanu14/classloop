@@ -48,6 +48,12 @@ Run `supabase/schema.sql` in the SQL editor after every schema update. The scrip
 - reserves the reviewed submission state and review timestamp for the class teacher;
 - leaves hosted recap email disabled for every profile by default.
 
+### IPv4-safe migration path
+
+Do not point an IPv4-only runner at the direct `db.<project-ref>.supabase.co:5432` endpoint. Supabase serves that direct endpoint over IPv6 unless the project has the IPv4 add-on, so a command such as `supabase db push` can time out before authentication.
+
+Use the Supabase SQL Editor or managed migration API for this repository's schema. If a CLI-only workflow is required, copy the **Session pooler** connection string from the project's **Connect** panel instead: it uses the shared `aws-<region>.pooler.supabase.com:5432` host, the `postgres.<project-ref>` user, and TLS. Keep that URL and its password out of the repository, shell history, and `VITE_*` variables.
+
 Local account password hashes and billing entitlements must never be copied into `classloop_workspace_state`.
 Authenticated clients cannot directly create profile rows and may update only
 the `no_training_on_student_data` privacy preference on their own existing

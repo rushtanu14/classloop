@@ -21,15 +21,24 @@ const gotoHostedRoute = async (page: Page, route: string) => {
   await page.locator("#root").waitFor({ state: "attached" });
 };
 
+test("public root opens the download landing page instead of the upgrade screen", async ({ page }) => {
+  await gotoHostedRoute(page, "/");
+
+  await expect(page.locator(".landing-page-download")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^download classloop\.?$/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^desktop installers$/i })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: /^classloop on mobile$/i }).getByRole("button", { name: /^add to phone$/i }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /^open demo$/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^upgrade to pro$/i })).toHaveCount(0);
+  expect(new URL(page.url()).hash).toBe("");
+});
+
 test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   await gotoHostedRoute(page, "/?demoOnly=1");
-  await expect(page.getByRole("heading", { name: /^ClassLoop$/i })).toBeVisible();
-  const homeHero = page.locator(".landing-home-upgrade");
-  await expect(page.locator(".landing-page-home button")).toHaveCount(1);
-  await expect(homeHero.getByRole("button")).toHaveCount(1);
-  await expect(homeHero.getByRole("button", { name: /^upgrade to pro$/i })).toBeVisible();
-  await expect(page.locator(".landing-hero .landing-platform-list")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /^open demo$/i })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /download classloop/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^open demo$/i })).toBeVisible();
   await expect(page.getByText("Class, club, and personal notes")).toHaveCount(0);
   await expect(page.getByText("Teacher review built in")).toHaveCount(0);
   await expect(page.getByText("Student-specific next steps")).toHaveCount(0);
@@ -63,13 +72,8 @@ test("hosted web landing and sample-only demo are usable", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /launch gates/i })).toBeVisible();
 
   await gotoHostedRoute(page, "/?demoOnly=1");
-  if (!(await page.locator(".landing-platform-list").count())) {
-    await gotoHostedRoute(page, "/?demoOnly=1#/download");
-  }
   const downloadRouteHeading = page.getByRole("heading", { name: /download classloop/i });
-  if (await downloadRouteHeading.isVisible().catch(() => false)) {
-    await expect(downloadRouteHeading).toBeVisible();
-  }
+  await expect(downloadRouteHeading).toBeVisible();
   await expect(page.getByRole("heading", { name: /use the pwa for fast after-class cleanup/i })).toBeVisible();
   await expect(page.getByRole("region", { name: /hosted pwa launch checklist/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /zoom transcript first/i })).toBeVisible();

@@ -832,17 +832,6 @@ test("public root shows landing page and can enter the app demo", async ({ page 
   await expect(page.getByRole("img", { name: /student dashboard/i })).toBeVisible();
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: /^ClassLoop$/i })).toBeVisible();
-  const homeHero = page.locator(".landing-home-upgrade");
-  await expect(page.locator(".landing-page-home button")).toHaveCount(1);
-  await expect(homeHero.getByRole("button")).toHaveCount(1);
-  await expect(homeHero.getByRole("button", { name: /^upgrade to pro$/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^open demo$/i })).toHaveCount(0);
-  await expect(page.getByText("Class, club, and personal notes")).toHaveCount(0);
-  await expect(page.getByText("Teacher review built in")).toHaveCount(0);
-  await expect(page.getByText("Student-specific next steps")).toHaveCount(0);
-  await expect(page.locator(".landing-hero .landing-platform-list")).toHaveCount(0);
-  await page.goto("/#/download");
   await expect(page.getByRole("heading", { name: /download classloop/i })).toBeVisible();
   const revealInstallers = page.getByRole("button", { name: /not your system|view desktop installers/i }).first();
   if (await revealInstallers.isVisible().catch(() => false)) {
@@ -895,7 +884,7 @@ test("public Upgrade to Pro requires a real account and resumes at Billing", asy
     anonymousStripeRequests += 1;
     await route.abort();
   });
-  await page.goto("/");
+  await page.goto("/#/home");
   await page.locator(".landing-home-upgrade").getByRole("button", { name: /^upgrade to pro$/i }).click();
 
   await expect(page).toHaveURL(/#\/billing$/);

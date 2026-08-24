@@ -1318,7 +1318,9 @@ function getRoute(): RouteKey {
 function getLandingPage(): LandingPageKey {
   const hash = window.location.hash.trim().replace(/^#\/?/, "");
   const route = hash.split("?")[0].replace(/^landing\/?/, "");
+  if (!route) return "download";
   if (
+    route === "home" ||
     route === "features" ||
     route === "screenshots" ||
     route === "docs" ||
@@ -4759,7 +4761,7 @@ function LandingPage({
       {showPublicNav && (
         <nav className="landing-nav" aria-label="ClassLoop public navigation">
           <div className="landing-brand-block">
-            <button className="landing-brand" type="button" onClick={() => goToPage("home")}>
+            <button className="landing-brand" type="button" onClick={() => goToPage("download")}>
               <span className="brand-mark">
                 <BrainCircuit size={24} />
               </span>
